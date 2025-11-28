@@ -12,6 +12,8 @@ import argparse
 from pathlib import Path
 import cv2
 
+import httpx
+
 from groundingdino.util.inference import load_model, load_image, predict, annotate
 import torch
 import openai
@@ -33,7 +35,8 @@ def init_vllm_client():
         print(f"[LLM] 连接vLLM服务: {_vllm_base_url}")
         _vllm_client = openai.Client(
             base_url=_vllm_base_url,
-            api_key="EMPTY"
+            api_key="EMPTY",
+            http_client=httpx.Client(trust_env=False)
         )
         try:
             _ = _vllm_client.chat.completions.create(

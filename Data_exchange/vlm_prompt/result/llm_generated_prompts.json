@@ -1,12 +1,13 @@
 {
   "prompt_A": "yellow yellow mobile robot",
   "prompt_B": [
-    "desk chair",
-    "computer desk",
-    "racking desk",
-    "equipment rack"
+    "desk legs",
+    "computer tower",
+    "office chair wheels",
+    "fan",
+    "desk"
   ],
-  "raw_llm_output": "```json\n{\n  \"prompt_A\": \"yellow, orange, sturdy\",\n  \"prompt_B\": [\"desk chair\", \"computer desk\", \"racking desk\", \"equipment rack\"]\n}\n```",
+  "raw_llm_output": "```json\n{\n  \"prompt_A\": \"red, sleek\",\n  \"prompt_B\": [\"desk legs\", \"computer tower\", \"office chair wheels\", \"fan\", \"desk\"]\n}\n```",
   "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/after_vlm03.json",
-  "timestamp": "2025-11-28T15:25:15.044174"
+  "timestamp": "2025-11-28T16:13:26.723404"
 }
