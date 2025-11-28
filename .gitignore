@@ -1,0 +1,114 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyTorch
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+checkpoints/
+checkpoint/
+weights/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CUDA
+*.o
+*.a
+*.cu.o
+
+# Logs
+logs/
+*.log
+wandb/
+tensorboard/
+
+# Data files
+*.json.bak
+*.csv
+*.tsv
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+
+# Model files (uncomment if you don't want to track large models)
+# *.bin
+# *.model
+
+# Cache
+.cache/
+*.cache
+.pytest_cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Node modules (for frontend)
+node_modules/
+.npm
+.pnpm-debug.log*
+
+# Docker
+*.dockerignore
+
+# Large datasets
+Data_exchange/datasets/
+Data_exchange/images/
+
+# Compiled extensions
+*.pyc
+*.pyd
+*.dll
+*.exe
+*.out
+
+# OS
+Thumbs.db
+.DS_Store
+.Spotlight-V100
+.Trashes
