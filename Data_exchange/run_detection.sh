@@ -8,10 +8,10 @@ set -e
 
 # ========== 可配置参数 ==========
 # JSON文件路径（VLM 8B的输出）
-JSON_PATH="/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/after_vlm03.json"
+JSON_PATH="/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/after_vlm02.json"
 
 # 待检测的图片路径（请根据实际情况修改）
-IMAGE_PATH="/home/zrz/Desktop/LSTE/GroundingDINO/test/pic/corridor.png"
+IMAGE_PATH="/home/zrz/Desktop/LSTE/GroundingDINO/test/pic/lab-desk.png"
 
 # 输出的标注图片路径（可选）
 OUTPUT_IMAGE="/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/result/detection_result.jpg"
@@ -30,6 +30,18 @@ VLLM_MODEL="/home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B"
 
 # Python脚本路径
 SCRIPT_PATH="/home/zrz/Desktop/LSTE/Data_exchange/8B-05B.py"
+SCORING_DIR="/home/zrz/Desktop/LSTE/Scoring_module/scripts"
+VIS_SCRIPT="/home/zrz/Desktop/LSTE/Scoring_module/vis/plot_scores.py"
+VIS_OUTPUT_DIR="/home/zrz/Desktop/LSTE/Scoring_module/vis"
+
+# 结果目录（与 JSON 同级）以及日志/提示词路径
+RESULT_DIR="$(dirname "$JSON_PATH")/result"
+PROMPT_RESULT_PATH="$RESULT_DIR/llm_generated_prompts.json"
+LOG_DIR="$RESULT_DIR/log"
+mkdir -p "$RESULT_DIR" "$LOG_DIR" "$VIS_OUTPUT_DIR"
+
+# 日志输出路径
+LOG_PATH="$LOG_DIR/run_detection_$(date '+%Y%m%d-%H%M%S').log"
 
 # ========== 颜色输出 ==========
 RED='\033[0;31m'
@@ -55,7 +67,13 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# ========== 启动日志记录 ==========
+exec > >(tee -a "$LOG_PATH")
+exec 2>&1
+echo ""
+
 # ========== 主程序 ==========
+print_info "本次运行日志文件: $LOG_PATH"
 print_info "========================================"
 print_info "  VLM->MiniCPM->GroundingDINO 检测流程"
 print_info "========================================"
@@ -148,8 +166,8 @@ echo ""
 print_info "开始运行检测流程..."
 print_info "这将包括以下步骤："
 print_info "  1. 读取 after_vlm.json"
-print_info "  2. 调用 MiniCPM 0.5B 生成检测提示词"
-print_info "  3. 使用 GroundingDINO 进行目标检测"
+print_info "  2. 调用 MiniCPM 0.5B 生成目标/环境提示词"
+print_info "  3. 分别用 GroundingDINO 对目标和环境做两次检测"
 echo ""
 
 python "$SCRIPT_PATH" \
@@ -169,6 +187,84 @@ if [ $? -eq 0 ]; then
     if [ -f "$OUTPUT_IMAGE" ]; then
         print_success "标注图片已保存至: $OUTPUT_IMAGE"
     fi
+    if [ -f "$PROMPT_RESULT_PATH" ]; then
+        print_success "LLM 提示词记录: $PROMPT_RESULT_PATH"
+    fi
+
+    # ========== 评分步骤 ==========
+    set +e  # 评分阶段允许非零退出码（如 skip_frame）
+    # 所有评分输出统一放在 VIS_OUTPUT_DIR
+    S_TARGET_JSON="$VIS_OUTPUT_DIR/S_target.json"
+    S_ENV_JSON="$VIS_OUTPUT_DIR/S_env.json"
+    S_CTX_JSON="$VIS_OUTPUT_DIR/S_ctx.json"
+    S_TOTAL_JSON="$VIS_OUTPUT_DIR/S_total.json"
+    SCORE_VIS="$VIS_OUTPUT_DIR/score_vis.png"
+
+    # 清理旧的评分结果，避免使用陈旧文件
+    rm -f "$S_TARGET_JSON" "$S_ENV_JSON" "$S_CTX_JSON" "$S_TOTAL_JSON" "$SCORE_VIS"
+
+    TARGET_DET_JSON="$RESULT_DIR/target_detections.json"
+    ENV_DET_JSON="$RESULT_DIR/env_detections.json"
+
+    if [ -f "$TARGET_DET_JSON" ]; then
+        print_info "计算 S_target..."
+        python "$SCORING_DIR/calc_s_target.py" \
+            --detections "$TARGET_DET_JSON" \
+            --output "$S_TARGET_JSON" \
+            --task-json "$JSON_PATH"
+    else
+        print_warning "未找到目标检测结果: $TARGET_DET_JSON"
+    fi
+
+    if [ -f "$ENV_DET_JSON" ]; then
+        print_info "计算 S_env..."
+        python "$SCORING_DIR/calc_s_env.py" \
+            --detections "$ENV_DET_JSON" \
+            --output "$S_ENV_JSON" \
+            --task-json "$JSON_PATH" \
+            --prompt-b-json "$PROMPT_RESULT_PATH"
+    else
+        print_warning "未找到环境检测结果: $ENV_DET_JSON"
+    fi
+
+    if [ -f "$TARGET_DET_JSON" ]; then
+        print_info "计算 S_ctx..."
+        python "$SCORING_DIR/calc_s_ctx.py" \
+            --target-detections "$TARGET_DET_JSON" \
+            --env-detections "$ENV_DET_JSON" \
+            --output "$S_CTX_JSON" \
+            --task-json "$JSON_PATH"
+    fi
+
+    print_info "聚合分数..."
+    python "$SCORING_DIR/aggregate_target_score.py" \
+        --target-input "$S_TARGET_JSON" \
+        --env-input "$S_ENV_JSON" \
+        --ctx-input "$S_CTX_JSON" > "$S_TOTAL_JSON"
+    agg_status=$?
+    if [ $agg_status -eq 3 ]; then
+        print_warning "聚合器返回 skip_frame，未生成总分。"
+    elif [ $agg_status -ne 0 ]; then
+        print_warning "聚合器运行异常，退出码: $agg_status"
+    else
+        print_success "总分结果: $S_TOTAL_JSON"
+    fi
+
+    # ========== 可视化 ==========
+    if [ $agg_status -eq 0 ]; then
+        print_info "生成分数可视化..."
+        python "$VIS_SCRIPT" \
+            --target "$S_TARGET_JSON" \
+            --env "$S_ENV_JSON" \
+            --ctx "$S_CTX_JSON" \
+            --total "$S_TOTAL_JSON" \
+            --output "$SCORE_VIS" || print_warning "可视化生成失败"
+        if [ -f "$SCORE_VIS" ]; then
+            print_success "分数可视化已保存至: $SCORE_VIS"
+        fi
+    fi
+
+    set -e  # 恢复严格模式
 else
     print_error "检测过程中发生错误"
     exit 1

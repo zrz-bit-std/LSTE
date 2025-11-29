@@ -1,7 +1,7 @@
 {
   "task_parsed": {
     "target": {
-      "name": "girl in red clothes sitting on a chair",
+      "name": "girl in red ",
       "attributes": [
         "female",
         "wearing a red top",
@@ -51,6 +51,10 @@
         "kitchen or pantry area",
         "restroom"
       ]
+    },
+    "target_ctx": {
+      "left": "chair",
+      "right": "fan"
     }
   }
 }

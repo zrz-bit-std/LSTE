@@ -1,13 +1,20 @@
 {
-  "prompt_A": "yellow yellow mobile robot",
+  "prompt_A": "female girl in red",
   "prompt_B": [
-    "desk legs",
-    "computer tower",
-    "office chair wheels",
-    "fan",
-    "desk"
+    "computer",
+    "monitor",
+    "open",
+    "plan",
+    "workspace",
+    "office",
+    "chair",
+    "keyboard",
+    "desk",
+    "window",
+    "mouse",
+    "fan"
   ],
-  "raw_llm_output": "```json\n{\n  \"prompt_A\": \"red, sleek\",\n  \"prompt_B\": [\"desk legs\", \"computer tower\", \"office chair wheels\", \"fan\", \"desk\"]\n}\n```",
-  "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/after_vlm03.json",
-  "timestamp": "2025-11-28T16:13:26.723404"
+  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"bold\",\n    \"red\"\n  ],\n  \"prompt_B\": [\n    \"computer\",\n    \"monitor\",\n    \"open\",\n    \"plan\",\n    \"workspace\",\n    \"office\",\n    \"chair\",\n    \"keyboard\",\n    \"desk\",\n    \"window\",\n    \"mouse\"\n  ]\n}",
+  "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/after_vlm02.json",
+  "timestamp": "2025-11-29T17:22:35.528046"
 }

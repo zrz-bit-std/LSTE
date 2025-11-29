@@ -50,6 +50,10 @@
         "on chairs",
         "outside the workspace"
       ]
+    },
+    "target_ctx": {
+      "left": "fan",
+      "right": "chair"
     }
   }
 }

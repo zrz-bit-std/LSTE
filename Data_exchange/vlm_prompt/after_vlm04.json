@@ -1,7 +1,7 @@
 {
   "task_parsed": {
     "target": {
-      "name": "small orange chair",
+      "name": "orange chair",
       "attributes": [
         "orange",
         "small-sized",
@@ -51,6 +51,10 @@
         "areas far from the window",
         "computer desk region"
       ]
+    },
+    "target_ctx": {
+      "left": "none",
+      "right": "partition panels"
     }
   }
 }
