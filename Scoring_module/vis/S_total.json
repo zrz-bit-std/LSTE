@@ -1,0 +1,14 @@
+{
+  "scores": {
+    "S_target": 0.0,
+    "S_env": 0.9586263489399246,
+    "S_ctx": -1.0
+  },
+  "weights": {
+    "target": 0.2,
+    "env": 0.3,
+    "ctx": 0.5
+  },
+  "S_total": 0.0,
+  "detected": false
+}

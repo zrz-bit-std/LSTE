@@ -1,0 +1,16 @@
+{
+  "skip_frame": false,
+  "S_ctx": -1.0,
+  "raw_score": -1.0,
+  "ctx_terms": [
+    "chair",
+    "fan"
+  ],
+  "found_count": 0,
+  "nearest_hits": 0,
+  "best_target_phrase": null,
+  "found": {},
+  "target_center": null,
+  "ctx_centers": {},
+  "reason": "未检测到目标，S_ctx=-1"
+}

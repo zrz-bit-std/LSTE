@@ -1,0 +1,51 @@
+{
+  "skip_frame": false,
+  "S_env": 0.9586263489399246,
+  "details": {
+    "pos_terms_total": 14,
+    "pos_hits": 10,
+    "neg_terms_total": 4,
+    "neg_hits": 0,
+    "pos_ratio": 0.7142857142857143,
+    "neg_ratio": 0.0,
+    "pos_score": 0.9586263489399246,
+    "neg_score": 0.0,
+    "lambda_neg": 0.7,
+    "pos_terms": [
+      "chair",
+      "computer",
+      "computer monitor",
+      "desk",
+      "fan",
+      "keyboard",
+      "monitor",
+      "mouse",
+      "office",
+      "office chair",
+      "open",
+      "plan",
+      "window",
+      "workspace"
+    ],
+    "neg_terms": [
+      "corridors without desks",
+      "kitchen or pantry area",
+      "restroom",
+      "storage rooms"
+    ],
+    "detected_pos_terms": [
+      "chair",
+      "computer",
+      "desk",
+      "fan",
+      "keyboard",
+      "monitor",
+      "mouse",
+      "office",
+      "window",
+      "workspace"
+    ],
+    "detected_neg_terms": []
+  },
+  "source": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/result/env_detections.json"
+}

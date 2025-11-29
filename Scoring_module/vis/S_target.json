@@ -1,0 +1,9 @@
+{
+  "skip_frame": false,
+  "detected": false,
+  "S_target": 0.0,
+  "best_phrase": null,
+  "target_name": "girl in red",
+  "message": "在检测结果中未找到包含 'girl in red' 的框",
+  "source": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/result/target_detections.json"
+}
