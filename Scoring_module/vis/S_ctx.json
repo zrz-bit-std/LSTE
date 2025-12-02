@@ -1,16 +1,56 @@
 {
   "skip_frame": false,
-  "S_ctx": -1.0,
-  "raw_score": -1.0,
+  "S_ctx": 1.0,
+  "raw_score": 1.0,
   "ctx_terms": [
-    "chair",
-    "fan"
+    "fan",
+    "chair"
   ],
-  "found_count": 0,
-  "nearest_hits": 0,
-  "best_target_phrase": null,
-  "found": {},
-  "target_center": null,
-  "ctx_centers": {},
-  "reason": "未检测到目标，S_ctx=-1"
+  "found_count": 2,
+  "nearest_hits": 2,
+  "best_target_phrase": "yellow mobile robot",
+  "found": {
+    "fan": {
+      "phrase": "fan",
+      "score": 0.506479799747467,
+      "distance": 0.09344769185608837,
+      "rank": 0,
+      "box": [
+        0.3132682740688324,
+        0.43310168385505676,
+        0.024575183168053627,
+        0.038368262350559235
+      ]
+    },
+    "chair": {
+      "phrase": "chair",
+      "score": 0.6409335136413574,
+      "distance": 0.09583529895000871,
+      "rank": 1,
+      "box": [
+        0.438789427280426,
+        0.5486143827438354,
+        0.09609126299619675,
+        0.24594634771347046
+      ]
+    }
+  },
+  "target_center": [
+    0.21541568264365196,
+    0.31679534167051315
+  ],
+  "ctx_centers": {
+    "fan": [
+      0.168921728618443,
+      0.235734973102808
+    ],
+    "chair": [
+      0.2674403451383114,
+      0.39728036522865295
+    ]
+  },
+  "sources": {
+    "target": "../../Data_exchange/vlm_prompt/result/target_detections.json",
+    "env": "../../Data_exchange/vlm_prompt/result/env_detections.json"
+  }
 }

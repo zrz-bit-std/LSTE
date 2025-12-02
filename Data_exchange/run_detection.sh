@@ -6,33 +6,36 @@
 # 设置错误时退出
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # ========== 可配置参数 ==========
 # JSON文件路径（VLM 8B的输出）
-JSON_PATH="/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/after_vlm02.json"
+JSON_PATH="${JSON_PATH:-${SCRIPT_DIR}/vlm_prompt/after_vlm03.json}"
 
 # 待检测的图片路径（请根据实际情况修改）
-IMAGE_PATH="/home/zrz/Desktop/LSTE/GroundingDINO/test/pic/lab-desk.png"
+IMAGE_PATH="${IMAGE_PATH:-${PROJECT_ROOT}/GroundingDINO/test/pic/lab-car.png}"
 
 # 输出的标注图片路径（可选）
-OUTPUT_IMAGE="/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/result/detection_result.jpg"
+OUTPUT_IMAGE="${OUTPUT_IMAGE:-${SCRIPT_DIR}/vlm_prompt/result/detection_result.jpg}"
 
 # GroundingDINO 配置文件
-CONFIG_PATH="/home/zrz/Desktop/LSTE/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
+CONFIG_PATH="${CONFIG_PATH:-${PROJECT_ROOT}/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py}"
 
 # GroundingDINO 权重文件
-WEIGHTS_PATH="/home/zrz/Desktop/LSTE/GroundingDINO/weights/groundingdino_swint_ogc.pth"
+WEIGHTS_PATH="${WEIGHTS_PATH:-${PROJECT_ROOT}/GroundingDINO/weights/groundingdino_swint_ogc.pth}"
 
 # vLLM 服务地址
 VLLM_URL="http://localhost:8000/v1"
 
 # vLLM 模型路径
-VLLM_MODEL="/home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B"
+VLLM_MODEL="${VLLM_MODEL:-${PROJECT_ROOT}/MiniCPM/OpenBMB/MiniCPM4-0___5B}"
 
 # Python脚本路径
-SCRIPT_PATH="/home/zrz/Desktop/LSTE/Data_exchange/8B-05B.py"
-SCORING_DIR="/home/zrz/Desktop/LSTE/Scoring_module/scripts"
-VIS_SCRIPT="/home/zrz/Desktop/LSTE/Scoring_module/vis/plot_scores.py"
-VIS_OUTPUT_DIR="/home/zrz/Desktop/LSTE/Scoring_module/vis"
+SCRIPT_PATH="${SCRIPT_PATH:-${SCRIPT_DIR}/8B-05B.py}"
+SCORING_DIR="${SCORING_DIR:-${PROJECT_ROOT}/Scoring_module/scripts}"
+VIS_SCRIPT="${VIS_SCRIPT:-${PROJECT_ROOT}/Scoring_module/vis/plot_scores.py}"
+VIS_OUTPUT_DIR="${VIS_OUTPUT_DIR:-${PROJECT_ROOT}/Scoring_module/vis}"
 
 # 结果目录（与 JSON 同级）以及日志/提示词路径
 RESULT_DIR="$(dirname "$JSON_PATH")/result"

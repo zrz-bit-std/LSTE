@@ -5,6 +5,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # ========== 颜色输出 ==========
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,7 +32,8 @@ print_error() {
 }
 
 # ========== 配置 ==========
-MODEL_PATH="/home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B"
+DEFAULT_MODEL_PATH="${PROJECT_ROOT}/MiniCPM/OpenBMB/MiniCPM4-0___5B"
+MODEL_PATH="${MODEL_PATH:-$DEFAULT_MODEL_PATH}"
 PORT=8000
 MAX_MODEL_LEN=2048
 GPU_MEM_UTIL=0.6

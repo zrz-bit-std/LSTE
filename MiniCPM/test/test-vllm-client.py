@@ -6,6 +6,9 @@ MiniCPM4-0.5B vLLM 测试客户端
 
 import openai
 import sys
+from pathlib import Path
+
+MINICPM_MODEL_PATH = str(Path(__file__).resolve().parents[1] / "OpenBMB" / "MiniCPM4-0___5B")
 
 def test_vllm_service():
     """测试vLLM服务"""
@@ -35,7 +38,7 @@ def test_vllm_service():
         
         try:
             response = client.chat.completions.create(
-                model="/home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B",
+                model=MINICPM_MODEL_PATH,
                 messages=[messages],
                 temperature=0.6,
                 max_tokens=512,
@@ -95,7 +98,7 @@ def interactive_chat():
             
             # 调用API
             response = client.chat.completions.create(
-                model="/home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B",
+                model=MINICPM_MODEL_PATH,
                 messages=conversation_history,
                 temperature=0.6,
                 max_tokens=512,

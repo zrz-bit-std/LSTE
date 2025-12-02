@@ -7,6 +7,11 @@
 
 set -e  # 遇到错误立即退出
 
+TORCH_INDEX_URL="${MINICPM_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
+TORCH_VERSION="${MINICPM_TORCH_VERSION:-2.2.2}"
+TORCHVISION_VERSION="${MINICPM_TORCHVISION_VERSION:-0.17.2}"
+TORCHAUDIO_VERSION="${MINICPM_TORCHAUDIO_VERSION:-2.2.2}"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,6 +34,23 @@ log_error() {
 
 log_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
+}
+
+detect_gpu() {
+    log_step "检测 NVIDIA GPU"
+    if ! command -v nvidia-smi &>/dev/null; then
+        log_warn "未找到 nvidia-smi，跳过 GPU 信息检测"
+        return
+    fi
+    local gpu_info
+    gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -n 1)
+    log_info "GPU 信息: ${gpu_info}"
+
+    local gpu_mem
+    gpu_mem=$(echo "$gpu_info" | awk -F',' '{print $2}' | tr -dc '0-9')
+    if [[ -n "$gpu_mem" && "$gpu_mem" -lt 12000 ]]; then
+        log_warn "显存低于 12GB，建议优先使用 MiniCPM4-0.5B 模型"
+    fi
 }
 
 # 检查conda环境
@@ -64,17 +86,25 @@ activate_conda_env() {
 # 安装基础依赖
 install_base_requirements() {
     log_step "安装基础依赖包..."
+
+    pip install --upgrade pip setuptools wheel
     
     if [ -f "requirements.txt" ]; then
         log_info "从 requirements.txt 安装依赖..."
         pip install -r requirements.txt
     else
         log_warn "未找到 requirements.txt，手动安装核心依赖..."
-        pip install torch>=2.0.0 transformers>=4.36.2 gradio>=4.26.0 \
+        pip install transformers>=4.36.2 gradio>=4.26.0 \
                     openai>=1.17.1 tiktoken>=0.6.0 loguru>=0.7.2 \
                     sentence_transformers>=2.6.1 sse_starlette>=2.1.0 \
                     Pillow>=10.3.0 timm>=0.9.16 sentencepiece>=0.2.0
     fi
+
+    log_info "安装 PyTorch ${TORCH_VERSION} (CUDA 12.1) 及配套组件"
+    pip install --index-url "${TORCH_INDEX_URL}" \
+        "torch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}" \
+        "torchaudio==${TORCHAUDIO_VERSION}"
     
     # 安装accelerate（运行demo必需）
     log_info "安装accelerate依赖..."
@@ -306,6 +336,15 @@ install_finetune_requirements() {
     log_info "微调依赖安装完成"
 }
 
+auto_install_for_4080() {
+    log_info "检测到 --auto-4080 选项，开始一键部署 (RTX 4080 12GB)"
+    detect_gpu
+    install_base_requirements
+    install_vllm_standard
+    install_cpm_cu
+    log_info "自动安装完成。默认未下载模型，请运行脚本后选择选项 9 获取所需模型。"
+}
+
 # 显示菜单
 show_menu() {
     echo ""
@@ -341,6 +380,7 @@ show_menu() {
 
 # 主函数
 main() {
+    local mode="${1:-}"
     log_info "欢迎使用MiniCPM一键部署脚本"
     log_info "脚本位置: $(pwd)"
     
@@ -349,6 +389,11 @@ main() {
     
     # 激活环境
     activate_conda_env "minicpm"
+
+    if [[ "${mode}" == "--auto-4080" || "${AUTO_DEPLOY_4080:-}" == "1" ]]; then
+        auto_install_for_4080
+        return
+    fi
     
     # 显示菜单并处理选择
     while true; do
@@ -442,4 +487,4 @@ main() {
 }
 
 # 运行主函数
-main
+main "$@"

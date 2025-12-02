@@ -9,6 +9,6 @@
     "fan"
   ],
   "raw_llm_output": "```python\nimport json\n\n# Create prompt_A\nprompt_A = \"woman in red shirt sitting on chair\"\n\n# Create prompt_B\nprompt_B = [\"equipment rack\", \"computer tower\", \"fan\", \"testing rack\", \"floor\", \"office chair\", \"desk\", \"desk legs\"]\n\n# Output the JSON\nprint(json.dumps({\"prompt_A\": prompt_A, \"prompt_B\": prompt_B}))\n```",
-  "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/after_vlm03.json",
+  "source_json": "../after_vlm03.json",
   "timestamp": "2025-11-28T14:53:55.454517"
 }

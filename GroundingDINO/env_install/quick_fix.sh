@@ -5,6 +5,9 @@ echo "快速修复 CUDA 扩展"
 echo "=========================================="
 echo ""
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GROUNDINGDINO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # 激活环境
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate dino
@@ -29,7 +32,7 @@ python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA 可�
 echo ""
 
 echo "步骤 4: 清理旧的编译文件"
-cd /home/zrz/Desktop/LSTE/GroundingDINO
+cd "${GROUNDINGDINO_ROOT}"
 rm -rf build/ dist/ *.egg-info groundingdino.egg-info/
 find . -type f -name "*.so" -delete 2>/dev/null
 echo "清理完成"

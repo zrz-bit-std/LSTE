@@ -5,6 +5,9 @@ echo "修复 CUDA 扩展问题"
 echo "=========================================="
 echo ""
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GROUNDINGDINO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # 激活环境
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate dino
@@ -35,7 +38,7 @@ echo "CUDA_HOME=$CUDA_HOME"
 echo ""
 
 echo "步骤 5: 清理之前的编译文件"
-cd /home/zrz/Desktop/LSTE/GroundingDINO
+cd "${GROUNDINGDINO_ROOT}"
 rm -rf build/ dist/ *.egg-info
 find . -name "*.so" -delete
 echo "清理完成"

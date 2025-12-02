@@ -6,6 +6,6 @@
     "exit sign"
   ],
   "raw_llm_output": "```json\n{\n  \"prompt_A\": \"a short detailed sentence describing the target object, using its name and attributes\",\n  \"prompt_B\": [\"door\", \"wall\", \"exit sign\"]\n}\n```",
-  "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/after_vlm01.json",
+  "source_json": "../../after_vlm01.json",
   "timestamp": "2025-11-28T14:35:21.113809"
 }

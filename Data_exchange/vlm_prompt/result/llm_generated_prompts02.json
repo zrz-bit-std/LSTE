@@ -10,6 +10,6 @@
     "computer monitor"
   ],
   "raw_llm_output": "```python\n{\n  \"prompt_A\": \"A woman in red clothes is sitting on a chair in an office environment with a computer, mouse, and keyboard.\",\n  \"prompt_B\": [\"computer\", \"office chair\", \"mouse\", \"window\", \"desk\", \"keyboard\", \"computer monitor\"]\n}\n```",
-  "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/after_vlm02.json",
+  "source_json": "../../after_vlm02.json",
   "timestamp": "2025-11-28T14:40:35.484933"
 }

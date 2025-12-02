@@ -20,6 +20,11 @@ import torch
 import openai
 from torchvision.ops import box_convert
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_VLLM_MODEL_PATH = PROJECT_ROOT / "MiniCPM" / "OpenBMB" / "MiniCPM4-0___5B"
+DEFAULT_DINO_CONFIG_PATH = PROJECT_ROOT / "GroundingDINO" / "groundingdino" / "config" / "GroundingDINO_SwinT_OGC.py"
+DEFAULT_DINO_WEIGHTS_PATH = PROJECT_ROOT / "GroundingDINO" / "weights" / "groundingdino_swint_ogc.pth"
+
 COLOR_KEYWORDS = {
     "red", "orange", "yellow", "green", "blue", "purple",
     "pink", "brown", "black", "white", "gray", "grey",
@@ -254,7 +259,7 @@ def draw_custom_visualization(
 
 # vLLM服务配置
 _vllm_base_url = "http://localhost:8000/v1"
-_vllm_model_name = "/home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B"
+_vllm_model_name = str(DEFAULT_VLLM_MODEL_PATH)
 
 
 # ================= 0. vLLM & LLM 调用 =================
@@ -278,7 +283,7 @@ def init_vllm_client():
     except Exception as e:
         print(f"[LLM] 警告: vLLM服务连接失败: {e}")
         print("[LLM] 请确保vLLM服务已启动")
-        print("[LLM] 启动命令: VLLM_USE_V1=0 vllm serve /home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B --trust-remote-code --max-model-len 2048 --gpu-memory-utilization 0.6 --enforce-eager")
+        print(f"[LLM] 启动命令: VLLM_USE_V1=0 vllm serve {_vllm_model_name} --trust-remote-code --max-model-len 2048 --gpu-memory-utilization 0.6 --enforce-eager")
         raise
     return client
 
@@ -703,12 +708,12 @@ def main():
     )
     parser.add_argument(
         "--config_path", type=str,
-        default="/home/zrz/Desktop/LSTE/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
+        default=str(DEFAULT_DINO_CONFIG_PATH),
         help="GroundingDINO config .py path."
     )
     parser.add_argument(
         "--weights_path", type=str,
-        default="/home/zrz/Desktop/LSTE/GroundingDINO/weights/groundingdino_swint_ogc.pth",
+        default=str(DEFAULT_DINO_WEIGHTS_PATH),
         help="GroundingDINO weights .pth path."
     )
     parser.add_argument(
@@ -718,7 +723,7 @@ def main():
     )
     parser.add_argument(
         "--vllm_model", type=str,
-        default="/home/zrz/Desktop/LSTE/MiniCPM/OpenBMB/MiniCPM4-0___5B",
+        default=str(DEFAULT_VLLM_MODEL_PATH),
         help="vLLM服务中的模型名称/路径"
     )
     args = parser.parse_args()
