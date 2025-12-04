@@ -1,0 +1,57 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "red soda can",
+      "attributes": [
+        "red",
+        "cylindrical",
+        "aluminum",
+        "small drink container",
+        "placed upright on a desk"
+      ],
+      "typical_locations": [
+        "office desks",
+        "workstations",
+        "break rooms",
+        "near personal items such as mugs or books"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace",
+        "shared working area"
+      ],
+      "layout_prior": [
+        "long wooden desks with multiple monitors",
+        "dense arrangement of computers and chairs",
+        "personal items distributed around the workspace"
+      ],
+      "related_structures": [
+        "desk",
+        "computer monitor",
+        "keyboard",
+        "chair",
+        "green file folder"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "mug",
+        "book",
+        "keyboard",
+        "monitor"
+      ],
+      "search_strategy": "look for small bright red cylindrical objects on or near work desks, especially beside books or mugs",
+      "negative_clues": [
+        "corridor",
+        "kitchen",
+        "bathroom",
+        "empty floor areas"
+      ]
+    },
+    "target_ctx": {
+      "left": "green file folder",
+      "right": "white book with green/yellow cover"
+    }
+  }
+}

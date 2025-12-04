@@ -1,0 +1,16 @@
+{
+  "prompt_A": "paper-bound book",
+  "prompt_B": [
+    "small chair",
+    "storage box",
+    "laptop",
+    "couch",
+    "keyboard",
+    "desk",
+    "green mug",
+    "red soda can"
+  ],
+  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"bold green\",\n    \"thick yellow\"\n  ],\n  \"prompt_B\": [\n    \"small chair\",\n    \"storage box\",\n    \"laptop\",\n    \"couch\",\n    \"keyboard\",\n    \"desk\"\n  ]\n}",
+  "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/book.json",
+  "timestamp": "2025-12-04T22:34:28.551683"
+}

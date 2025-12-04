@@ -5,15 +5,15 @@
       "attributes": [
         "yellow",
         "ceramic",
-        "small-sized",
-        "used for drinking",
-        "placed on work desk"
+        "handle on the side",
+        "medium-sized drinking mug",
+        "placed on a wooden office desk"
       ],
       "typical_locations": [
         "office desks",
         "workstations",
         "break rooms",
-        "kitchen counters near office areas"
+        "near keyboards and monitors"
       ]
     },
     "env": {
@@ -22,9 +22,9 @@
         "shared working area"
       ],
       "layout_prior": [
-        "long tables with multiple computers",
-        "closely arranged chairs",
-        "equipment and documents placed near monitors"
+        "long desks arranged in rows",
+        "multiple monitors positioned closely",
+        "office chairs around the workstations"
       ],
       "related_structures": [
         "desk",
@@ -36,20 +36,21 @@
     },
     "obj_related": {
       "key_objects": [
-        "computer monitor",
         "keyboard",
-        "water bottles",
-        "other mugs"
+        "monitor",
+        "other mugs",
+        "file folder"
       ],
-      "search_strategy": "search along work desks where people typically place cups next to computers",
+      "search_strategy": "search along work desks near keyboards and monitors for brightly colored handled mugs",
       "negative_clues": [
-        "corridors",
-        "bathrooms",
-        "empty open areas"
+        "corridor",
+        "empty floor area",
+        "bathroom",
+        "kitchen floor"
       ]
     },
     "target_ctx": {
-      "left": "keyboard",
+      "left": "blue mug",
       "right": "computer monitor"
     }
   }

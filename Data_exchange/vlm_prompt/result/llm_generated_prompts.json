@@ -1,13 +1,13 @@
 {
   "prompt_A": "yellow mug",
   "prompt_B": [
-    "quaint",
-    "cozy",
-    "sophisticated",
+    "black desk",
+    "small plant",
+    "white cowl",
     "keyboard",
     "computer monitor"
   ],
-  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"bold green\",\n    \"lively yellow\"\n  ],\n  \"prompt_B\": [\n    \"quaint\",\n    \"cozy\",\n    \"sophisticated\"\n  ]\n}",
+  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"red chair\",\n    \"large cupboard\"\n  ],\n  \"prompt_B\": [\n    \"black desk\",\n    \"small plant\",\n    \"white cowl\"\n  ]\n}",
   "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/test1.json",
-  "timestamp": "2025-12-04T21:46:47.630030"
+  "timestamp": "2025-12-04T21:56:58.696733"
 }
