@@ -1,13 +1,13 @@
 {
-  "prompt_A": "yellow mobile robot",
+  "prompt_A": "yellow mug",
   "prompt_B": [
-    "desk",
-    "computer",
-    "tower",
-    "chair",
-    "fan"
+    "quaint",
+    "cozy",
+    "sophisticated",
+    "keyboard",
+    "computer monitor"
   ],
-  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"big\",\n    \"tower\"\n  ],\n  \"prompt_B\": [\n    \"desk\",\n    \"computer\",\n    \"tower\",\n    \"chair\"\n  ]\n}",
-  "source_json": "../after_vlm03.json",
-  "timestamp": "2025-11-29T20:21:03.531173"
+  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"bold green\",\n    \"lively yellow\"\n  ],\n  \"prompt_B\": [\n    \"quaint\",\n    \"cozy\",\n    \"sophisticated\"\n  ]\n}",
+  "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/test1.json",
+  "timestamp": "2025-12-04T21:46:47.630030"
 }

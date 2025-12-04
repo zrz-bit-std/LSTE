@@ -1,0 +1,56 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "yellow mug",
+      "attributes": [
+        "yellow",
+        "ceramic",
+        "small-sized",
+        "used for drinking",
+        "placed on work desk"
+      ],
+      "typical_locations": [
+        "office desks",
+        "workstations",
+        "break rooms",
+        "kitchen counters near office areas"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace",
+        "shared working area"
+      ],
+      "layout_prior": [
+        "long tables with multiple computers",
+        "closely arranged chairs",
+        "equipment and documents placed near monitors"
+      ],
+      "related_structures": [
+        "desk",
+        "computer monitor",
+        "keyboard",
+        "chair",
+        "storage box"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "computer monitor",
+        "keyboard",
+        "water bottles",
+        "other mugs"
+      ],
+      "search_strategy": "search along work desks where people typically place cups next to computers",
+      "negative_clues": [
+        "corridors",
+        "bathrooms",
+        "empty open areas"
+      ]
+    },
+    "target_ctx": {
+      "left": "keyboard",
+      "right": "computer monitor"
+    }
+  }
+}

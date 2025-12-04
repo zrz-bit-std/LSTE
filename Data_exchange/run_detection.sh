@@ -11,10 +11,10 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ========== 可配置参数 ==========
 # JSON文件路径（VLM 8B的输出）
-JSON_PATH="${JSON_PATH:-${SCRIPT_DIR}/vlm_prompt/after_vlm03.json}"
+JSON_PATH="${JSON_PATH:-${SCRIPT_DIR}/vlm_prompt/test1.json}"
 
 # 待检测的图片路径（请根据实际情况修改）
-IMAGE_PATH="${IMAGE_PATH:-${PROJECT_ROOT}/GroundingDINO/test/pic/lab-car.png}"
+IMAGE_PATH="${IMAGE_PATH:-${PROJECT_ROOT}/GroundingDINO/test/pic/test1.jpg}"
 
 # 输出的标注图片路径（可选）
 OUTPUT_IMAGE="${OUTPUT_IMAGE:-${SCRIPT_DIR}/vlm_prompt/result/detection_result.jpg}"
