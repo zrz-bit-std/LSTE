@@ -168,6 +168,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="额外补充的 prompt_B 物体名称，可多次添加",
     )
     parser.add_argument(
+        "--include-related-structures",
+        action="store_true",
+        help="是否将 task_json.env.related_structures 也计入正向关键词（默认仅使用 prompt_B 清洗后的列表）",
+    )
+    parser.add_argument(
         "--lambda-neg",
         type=float,
         default=0.7,
@@ -234,13 +239,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.prompt_b_term:
         prompt_terms.extend(args.prompt_b_term)
 
-    if not prompt_terms:
-        print(
-            "[warning] 未提供 prompt_B 列表，只使用 related_structures 作为正向环境关键词",
-            file=sys.stderr,
-        )
+    if args.include_related_structures:
+        prompt_terms.extend(related_structures)
 
-    pos_map = normalize_terms(list(prompt_terms) + list(related_structures))
+    if not prompt_terms:
+        print("[warning] 未提供 prompt_B 词汇，正向关键词集合为空", file=sys.stderr)
+
+    pos_map = normalize_terms(prompt_terms)
     neg_map = normalize_terms(negative_clues)
 
     detected_pos: Dict[str, float] = {}

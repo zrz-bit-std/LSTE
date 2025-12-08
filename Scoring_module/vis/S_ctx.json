@@ -1,56 +1,65 @@
 {
   "skip_frame": false,
-  "S_ctx": 1.0,
-  "raw_score": 1.0,
+  "S_ctx": 0.14081004178570733,
+  "raw_score": 0.14081004178570733,
+  "coverage_ratio": 0.0,
+  "proximity_avg": 0.28162008357141466,
+  "top30_hits": 0,
+  "top30_cutoff": 4,
   "ctx_terms": [
-    "fan",
-    "chair"
+    "white book green",
+    "green file folder"
   ],
-  "found_count": 2,
-  "nearest_hits": 2,
-  "best_target_phrase": "yellow mobile robot",
+  "found_count": 1,
+  "nearest_hits": 0,
+  "best_target_phrase": "red soda",
   "found": {
-    "fan": {
-      "phrase": "fan",
-      "score": 0.506479799747467,
-      "distance": 0.09344769185608837,
-      "rank": 0,
-      "box": [
-        0.3132682740688324,
-        0.43310168385505676,
-        0.024575183168053627,
-        0.038368262350559235
-      ]
-    },
-    "chair": {
-      "phrase": "chair",
-      "score": 0.6409335136413574,
-      "distance": 0.09583529895000871,
-      "rank": 1,
-      "box": [
-        0.438789427280426,
-        0.5486143827438354,
-        0.09609126299619675,
-        0.24594634771347046
+    "white book green": null,
+    "green file folder": {
+      "best": {
+        "phrase": "green file folder",
+        "score": 0.587224543094635,
+        "distance": 0.3088358395632085,
+        "distance_norm": 0.21837991642858534,
+        "rank": 6,
+        "in_top30pct": false,
+        "box": [
+          0.9574360847473145,
+          0.36743396520614624,
+          0.01801486499607563,
+          0.0627066120505333
+        ]
+      },
+      "matches": [
+        {
+          "phrase": "green file folder",
+          "score": 0.587224543094635,
+          "distance": 0.3088358395632085,
+          "distance_norm": 0.21837991642858534,
+          "rank": 6,
+          "in_top30pct": false,
+          "box": [
+            0.9574360847473145,
+            0.36743396520614624,
+            0.01801486499607563,
+            0.0627066120505333
+          ]
+        }
       ]
     }
   },
   "target_center": [
-    0.21541568264365196,
-    0.31679534167051315
+    0.1797594940289855,
+    0.19190716184675694
   ],
   "ctx_centers": {
-    "fan": [
-      0.168921728618443,
-      0.235734973102808
-    ],
-    "chair": [
-      0.2674403451383114,
-      0.39728036522865295
+    "green file folder": [
+      0.48772547487169504,
+      0.21507028862833977
     ]
   },
   "sources": {
-    "target": "../../Data_exchange/vlm_prompt/result/target_detections.json",
-    "env": "../../Data_exchange/vlm_prompt/result/env_detections.json"
+    "target": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/result/target_detections.json",
+    "env": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/result/env_detections.json"
   }
 }

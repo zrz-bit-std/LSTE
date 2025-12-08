@@ -6,9 +6,27 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import math
+import re
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 ScorePair = Tuple[str, float]
+
+PARTIAL_MATCH_THRESHOLD = 0.6  # 至少匹配目标关键词 60%
+COMMON_STOPWORDS = {
+    "the",
+    "a",
+    "an",
+    "of",
+    "with",
+    "and",
+    "on",
+    "in",
+    "at",
+    "object",
+    "item",
+    "thing",
+}
 
 
 def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -109,11 +127,32 @@ def extract_detection_pairs(det_json: Any) -> List[ScorePair]:
     raise ValueError("检测JSON中未找到有效的 phrases/logits 信息")
 
 
+def tokenize_phrase(text: str) -> List[str]:
+    tokens = re.split(r"[^a-z0-9]+", text.lower())
+    return [tok for tok in tokens if tok and tok not in COMMON_STOPWORDS]
+
+
+def is_partial_match(target_tokens: Sequence[str], phrase: str) -> bool:
+    if not target_tokens:
+        return False
+    phrase_tokens = tokenize_phrase(phrase)
+    if not phrase_tokens:
+        return False
+    hits = sum(1 for tok in target_tokens if tok in phrase_tokens)
+    min_hits = max(1, int(math.ceil(len(target_tokens) * PARTIAL_MATCH_THRESHOLD)))
+    return hits >= min_hits
+
+
 def compute_s_target(pairs: Sequence[ScorePair], target_name: str) -> Tuple[Optional[float], Optional[str]]:
     target_lower = target_name.lower()
+    target_tokens = tokenize_phrase(target_name)
     candidates: List[Tuple[float, str]] = []
     for phrase, score in pairs:
-        if target_lower in phrase.lower():
+        phrase_lower = phrase.lower()
+        if target_lower and target_lower in phrase_lower:
+            candidates.append((score, phrase))
+            continue
+        if is_partial_match(target_tokens, phrase):
             candidates.append((score, phrase))
     if not candidates:
         return None, None

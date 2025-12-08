@@ -13,5 +13,5 @@ VLLM_USE_V1=0 vllm serve "$MODEL_PATH" \
     --enforce-eager
 
 #之后再开一个终端
-conda activate minicpm
-python test/test-vllm-client.py
+# conda activate minicpm
+# python test/test-vllm-client.py

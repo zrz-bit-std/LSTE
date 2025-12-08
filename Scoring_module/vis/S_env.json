@@ -1,40 +1,41 @@
 {
   "skip_frame": false,
-  "S_env": 0.6093175418435606,
+  "S_env": 0.8257146788214146,
   "details": {
     "pos_terms_total": 9,
-    "pos_hits": 4,
+    "pos_hits": 5,
     "neg_terms_total": 4,
     "neg_hits": 0,
-    "pos_ratio": 0.4444444444444444,
+    "pos_ratio": 0.5555555555555556,
     "neg_ratio": 0.0,
-    "pos_score": 0.6093175418435606,
+    "pos_score": 0.8257146788214146,
     "neg_score": 0.0,
     "lambda_neg": 0.7,
     "pos_terms": [
+      "book",
       "chair",
       "computer",
-      "computer tower",
       "desk",
-      "equipment rack",
-      "fan",
-      "floor",
-      "office chair",
-      "tower"
+      "green file folder",
+      "monitor",
+      "mug",
+      "shared",
+      "white book green"
     ],
     "neg_terms": [
-      "inside cabinets",
-      "on chairs",
-      "on top of desks",
-      "outside the workspace"
+      "bathroom",
+      "corridor",
+      "empty floor areas",
+      "kitchen"
     ],
     "detected_pos_terms": [
       "chair",
-      "computer",
       "desk",
-      "fan"
+      "green file folder",
+      "monitor",
+      "mug"
     ],
     "detected_neg_terms": []
   },
-  "source": "../../Data_exchange/vlm_prompt/result/env_detections.json"
+  "source": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/result/env_detections.json"
 }

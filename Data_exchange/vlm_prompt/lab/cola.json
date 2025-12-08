@@ -1,19 +1,17 @@
 {
   "task_parsed": {
     "target": {
-      "name": "red soda can",
+      "name": "red soda",
       "attributes": [
-        "red",
-        "cylindrical",
-        "aluminum",
-        "small drink container",
-        "placed upright on a desk"
+        "bright red aluminum can with a glossy finish",
+        "standard cylindrical drink can roughly palm height",
+        "standing upright on the wooden desk surface",
+        "positioned between a white book with green and yellow accents and a tall green file folder"
       ],
       "typical_locations": [
-        "office desks",
-        "workstations",
-        "break rooms",
-        "near personal items such as mugs or books"
+        "shared office desks filled with desktop computers",
+        "workstations that have books, folders and cups beside monitors",
+        "areas near keyboards and monitors on long wooden tables"
       ]
     },
     "env": {
@@ -22,26 +20,28 @@
         "shared working area"
       ],
       "layout_prior": [
-        "long wooden desks with multiple monitors",
-        "dense arrangement of computers and chairs",
-        "personal items distributed around the workspace"
+        "long wooden desks arranged in rows with multiple monitors",
+        "dense arrangement of computers, keyboards and swivel chairs",
+        "personal desk items such as books, folders, cans and mugs distributed around the workspace"
       ],
       "related_structures": [
         "desk",
         "computer monitor",
         "keyboard",
         "chair",
-        "green file folder"
+        "green file folder",
+        "white book with green and yellow cover"
       ]
     },
     "obj_related": {
       "key_objects": [
+        "white book with green and yellow cover",
+        "green file folder",
         "mug",
-        "book",
         "keyboard",
         "monitor"
       ],
-      "search_strategy": "look for small bright red cylindrical objects on or near work desks, especially beside books or mugs",
+      "search_strategy": "look for a bright red cylindrical can on the desk, situated between the white book with green and yellow cover and the green file folder near the monitors",
       "negative_clues": [
         "corridor",
         "kitchen",
@@ -50,8 +50,8 @@
       ]
     },
     "target_ctx": {
-      "left": "green file folder",
-      "right": "white book with green/yellow cover"
+      "left": "white book with green and yellow cover",
+      "right": "green file folder"
     }
   }
 }

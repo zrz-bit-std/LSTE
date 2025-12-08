@@ -11,19 +11,22 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ========== 可配置参数 ==========
 # JSON文件路径（VLM 8B的输出）
-JSON_PATH="${JSON_PATH:-${SCRIPT_DIR}/vlm_prompt/lab/book.json}"
+JSON_PATH="${JSON_PATH:-${SCRIPT_DIR}/vlm_prompt/lab/cola.json}"
 
 # 待检测的图片路径（请根据实际情况修改）
-IMAGE_PATH="${IMAGE_PATH:-${PROJECT_ROOT}/Pic_path/Lab/book.jpg}"
+IMAGE_PATH="${IMAGE_PATH:-${PROJECT_ROOT}/Pic_path/Lab/lab.jpg}"
 
 # 输出的标注图片路径（可选）
 OUTPUT_IMAGE="${OUTPUT_IMAGE:-${SCRIPT_DIR}/vlm_prompt/lab/result/detection_result.jpg}"
 
 # GroundingDINO 配置文件
-CONFIG_PATH="${CONFIG_PATH:-${PROJECT_ROOT}/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py}"
+# CONFIG_PATH="${CONFIG_PATH:-${PROJECT_ROOT}/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py}"
+CONFIG_PATH="${CONFIG_PATH:-${PROJECT_ROOT}/GroundingDINO/groundingdino/config/GroundingDINO_SwinB_cfg.py}"
+
 
 # GroundingDINO 权重文件
-WEIGHTS_PATH="${WEIGHTS_PATH:-${PROJECT_ROOT}/GroundingDINO/weights/groundingdino_swint_ogc.pth}"
+# WEIGHTS_PATH="${WEIGHTS_PATH:-${PROJECT_ROOT}/GroundingDINO/weights/groundingdino_swint_ogc.pth}"
+WEIGHTS_PATH="${WEIGHTS_PATH:-${PROJECT_ROOT}/GroundingDINO/weights/groundingdino_swinb_cogcoor.pth}"
 
 # vLLM 服务地址
 VLLM_URL="http://localhost:8000/v1"
@@ -38,7 +41,7 @@ VIS_SCRIPT="${VIS_SCRIPT:-${PROJECT_ROOT}/Scoring_module/vis/plot_scores.py}"
 VIS_OUTPUT_DIR="${VIS_OUTPUT_DIR:-${PROJECT_ROOT}/Scoring_module/vis}"
 
 # 结果目录（与 JSON 同级）以及日志/提示词路径
-RESULT_DIR="$(dirname "$JSON_PATH")/result/Lab"
+RESULT_DIR="$(dirname "$JSON_PATH")/result"
 PROMPT_RESULT_PATH="$RESULT_DIR/llm_generated_prompts.json"
 LOG_DIR="$RESULT_DIR/log"
 mkdir -p "$RESULT_DIR" "$LOG_DIR" "$VIS_OUTPUT_DIR"

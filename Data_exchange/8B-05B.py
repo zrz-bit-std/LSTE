@@ -32,14 +32,16 @@ COLOR_KEYWORDS = {
 }
 
 COLOR_HSV_RANGES = {
-    "red": [((0, 70, 50), (10, 255, 255)), ((160, 70, 50), (180, 255, 255))],
-    "orange": [((11, 80, 50), (25, 255, 255))],
-    "yellow": [((26, 80, 50), (35, 255, 255))],
-    "green": [((36, 40, 40), (85, 255, 255))],
-    "blue": [((86, 50, 40), (130, 255, 255))],
-    "purple": [((131, 40, 40), (155, 255, 255))],
-    "pink": [((156, 40, 40), (169, 255, 255))],
-    "brown": [((10, 40, 20), (20, 255, 200))],
+    # 将各颜色区间尽量分开，避免重叠
+    "red": [((0, 70, 50), (8, 255, 255)), ((172, 70, 50), (180, 255, 255))],
+    "orange": [((9, 120, 80), (18, 255, 255))],
+    "yellow": [((19, 120, 80), (32, 255, 255))],
+    "green": [((33, 60, 40), (85, 255, 255))],
+    "blue": [((86, 60, 40), (125, 255, 255))],
+    "purple": [((131, 50, 40), (155, 255, 255))],
+    "pink": [((156, 50, 60), (169, 255, 255))],
+    # 棕色用不同的明度限制来避开橙色：同色调但 V 限制更低
+    "brown": [((10, 60, 30), (20, 220, 160))],
     "black": [((0, 0, 0), (180, 255, 40))],
     "white": [((0, 0, 200), (180, 40, 255))],
     "gray": [((0, 0, 40), (180, 40, 200))],
@@ -128,6 +130,244 @@ def analyze_color_attributes(image_source, boxes, color_terms, ratio_threshold=0
         if not color_found:
             missing.append(color)
     return missing
+
+
+def _cxcywh_to_xyxy_norm(box):
+    """Convert normalized cxcywh to normalized xyxy."""
+    cx, cy, w, h = box
+    x1 = cx - 0.5 * w
+    y1 = cy - 0.5 * h
+    x2 = cx + 0.5 * w
+    y2 = cy + 0.5 * h
+    return [x1, y1, x2, y2]
+
+
+def _iou_norm(box1, box2):
+    """IoU for normalized xyxy boxes."""
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    inter_w = max(0.0, x2 - x1)
+    inter_h = max(0.0, y2 - y1)
+    inter = inter_w * inter_h
+    area1 = max(0.0, box1[2] - box1[0]) * max(0.0, box1[3] - box1[1])
+    area2 = max(0.0, box2[2] - box2[0]) * max(0.0, box2[3] - box2[1])
+    union = area1 + area2 - inter
+    if union <= 0:
+        return 0.0
+    return inter / union
+
+
+def nms_iou(boxes, scores, phrases, threshold=0.9):
+    """Simple NMS on normalized cxcywh boxes."""
+    if boxes is None:
+        return boxes, scores, phrases
+    if isinstance(boxes, torch.Tensor):
+        boxes_list = boxes.cpu().tolist()
+    else:
+        boxes_list = boxes
+    if isinstance(scores, torch.Tensor):
+        scores_list = scores.cpu().tolist()
+    else:
+        scores_list = [float(s) for s in scores] if scores is not None else []
+    phrases_list = [str(p) for p in phrases] if phrases is not None else []
+
+    if not boxes_list:
+        return boxes, scores, phrases
+
+    xyxy_list = [_cxcywh_to_xyxy_norm(b) for b in boxes_list]
+    indices = sorted(range(len(boxes_list)), key=lambda i: scores_list[i] if i < len(scores_list) else 0.0, reverse=True)
+    keep = []
+    while indices:
+        i = indices.pop(0)
+        keep.append(i)
+        remain = []
+        for j in indices:
+            iou = _iou_norm(xyxy_list[i], xyxy_list[j])
+            if iou <= threshold:
+                remain.append(j)
+        indices = remain
+
+    filtered_boxes = [boxes_list[i] for i in keep]
+    filtered_scores = [scores_list[i] for i in keep] if scores_list else []
+    filtered_phrases = [phrases_list[i] for i in keep] if phrases_list else []
+
+    return torch.tensor(filtered_boxes), torch.tensor(filtered_scores), filtered_phrases
+
+
+def filter_boxes_by_overlap(boxes, logits, phrases, ref_boxes, threshold=0.5):
+    """Filter out boxes that overlap with any reference box above threshold."""
+    if boxes is None or ref_boxes is None:
+        return boxes, logits, phrases
+    if isinstance(boxes, torch.Tensor):
+        boxes_list = boxes.cpu().tolist()
+    else:
+        boxes_list = boxes
+    if isinstance(logits, torch.Tensor):
+        logits_list = logits.cpu().tolist()
+    else:
+        logits_list = [float(s) for s in logits] if logits is not None else []
+    phrases_list = [str(p) for p in phrases] if phrases is not None else []
+
+    if isinstance(ref_boxes, torch.Tensor):
+        ref_list = ref_boxes.cpu().tolist()
+    else:
+        ref_list = ref_boxes
+
+    ref_xyxy = [_cxcywh_to_xyxy_norm(b) for b in ref_list]
+    keep = []
+    for idx, b in enumerate(boxes_list):
+        xyxy = _cxcywh_to_xyxy_norm(b)
+        max_iou = max((_iou_norm(xyxy, rb) for rb in ref_xyxy), default=0.0)
+        if max_iou <= threshold:
+            keep.append(idx)
+    filtered_boxes = [boxes_list[i] for i in keep]
+    filtered_logits = [logits_list[i] for i in keep] if logits_list else []
+    filtered_phrases = [phrases_list[i] for i in keep] if phrases_list else []
+    return torch.tensor(filtered_boxes), torch.tensor(filtered_logits), filtered_phrases
+
+
+def validate_color_by_phrase(image_source, boxes, logits, phrases, ratio_threshold=0.02, blur_ksize=3, dilate_iter=1):
+    """
+    Remove detections whose color adjective is contradicted by HSV check.
+    - 仅对含颜色词的 phrase 检查
+    - 颜色匹配逻辑：颜色词命中任意一个即通过
+    - 支持轻量模糊/膨胀，减少光照噪声
+    """
+    if boxes is None or phrases is None:
+        return boxes, logits, phrases
+    if isinstance(boxes, torch.Tensor):
+        boxes_list = boxes.cpu().tolist()
+    else:
+        boxes_list = boxes
+    if isinstance(logits, torch.Tensor):
+        logits_list = logits.cpu().tolist()
+    else:
+        logits_list = [float(s) for s in logits] if logits is not None else []
+    phrases_list = [str(p) for p in phrases]
+
+    keep = []
+    removed = []
+    for idx, (phrase, box) in enumerate(zip(phrases_list, boxes_list)):
+        phrase_low = phrase.lower()
+        colors_in_phrase = [c for c in COLOR_KEYWORDS if c in phrase_low and c in COLOR_HSV_RANGES]
+        if not colors_in_phrase:
+            keep.append(idx)
+            continue
+        box_t = torch.tensor(box, dtype=torch.float32)
+        crop = _crop_box(image_source, box_t)
+        if crop is None or crop.size == 0:
+            removed.append((idx, phrase, "empty_crop"))
+            continue
+        hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+        if blur_ksize and blur_ksize > 1:
+            hsv = cv2.GaussianBlur(hsv, (blur_ksize, blur_ksize), 0)
+        matched = False
+        for color in colors_in_phrase:
+            for lower, upper in COLOR_HSV_RANGES[color]:
+                mask = cv2.inRange(hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
+                if dilate_iter and dilate_iter > 0:
+                    mask = cv2.dilate(mask, None, iterations=dilate_iter)
+                ratio = float(cv2.countNonZero(mask)) / float(mask.size)
+                if ratio >= ratio_threshold:
+                    matched = True
+                    break
+            if matched:
+                break
+        if matched:
+            keep.append(idx)
+        else:
+            removed.append((idx, phrase, "color_mismatch"))
+
+    filtered_boxes = [boxes_list[i] for i in keep]
+    filtered_logits = [logits_list[i] for i in keep] if logits_list else []
+    filtered_phrases = [phrases_list[i] for i in keep] if phrases_list else []
+    if removed:
+        removed_str = "; ".join(f"{p}:{reason}" for _, p, reason in removed)
+        print(f"[COLOR VALIDATION] 移除颜色不匹配的检测: {removed_str}")
+    return torch.tensor(filtered_boxes), torch.tensor(filtered_logits), filtered_phrases
+
+
+def print_hsv_stats(image_source, boxes, phrases, title="[HSV] Target boxes"):
+    """Print basic HSV statistics for each box to terminal."""
+    if boxes is None or len(boxes) == 0:
+        return
+    if isinstance(boxes, torch.Tensor):
+        boxes_list = boxes.cpu().tolist()
+    else:
+        boxes_list = boxes
+    phrases_list = [str(p) for p in phrases] if phrases is not None else []
+    print(title)
+    for idx, box in enumerate(boxes_list):
+        box_t = torch.tensor(box, dtype=torch.float32)
+        crop = _crop_box(image_source, box_t)
+        if crop is None or crop.size == 0:
+            print(f"  #{idx}: empty crop")
+            continue
+        hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+        mean = hsv.reshape(-1, 3).mean(axis=0)
+        minv = hsv.reshape(-1, 3).min(axis=0)
+        maxv = hsv.reshape(-1, 3).max(axis=0)
+        phrase = phrases_list[idx] if idx < len(phrases_list) else ""
+        print(
+            f"  #{idx}: phrase='{phrase}', box={box}, "
+            f"mean(H,S,V)=({mean[0]:.1f},{mean[1]:.1f},{mean[2]:.1f}), "
+            f"min=({minv[0]:.0f},{minv[1]:.0f},{minv[2]:.0f}), "
+            f"max=({maxv[0]:.0f},{maxv[1]:.0f},{maxv[2]:.0f})"
+        )
+
+
+def filter_boxes_by_color(image_source, boxes, logits, phrases, color_terms, ratio_threshold=0.01, min_keep=1):
+    """Filter out boxes whose HSV content does not match required colors."""
+    if not color_terms or boxes is None:
+        return boxes, logits, phrases, False, []
+    if isinstance(boxes, torch.Tensor):
+        boxes_list = boxes.cpu().tolist()
+    else:
+        boxes_list = boxes
+    if isinstance(logits, torch.Tensor):
+        logits_list = logits.cpu().tolist()
+    else:
+        logits_list = [float(s) for s in logits] if logits is not None else []
+    phrases_list = [str(p) for p in phrases] if phrases is not None else []
+
+    kept = []
+    removed = []
+    for idx, box in enumerate(boxes_list):
+        box_t = torch.tensor(box, dtype=torch.float32)
+        crop = _crop_box(image_source, box_t)
+        if crop is None or crop.size == 0:
+            removed.append((idx, "empty_crop"))
+            continue
+        hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+        match = False
+        for color in color_terms:
+            hsv_ranges = COLOR_HSV_RANGES.get(color)
+            if not hsv_ranges:
+                continue
+            mask_total = None
+            for lower, upper in hsv_ranges:
+                lower_np = np.array(lower, dtype=np.uint8)
+                upper_np = np.array(upper, dtype=np.uint8)
+                mask = cv2.inRange(hsv, lower_np, upper_np)
+                mask_total = mask if mask_total is None else cv2.bitwise_or(mask_total, mask)
+            if mask_total is None:
+                continue
+            ratio = float(cv2.countNonZero(mask_total)) / float(mask_total.size)
+            if ratio >= ratio_threshold:
+                match = True
+                break
+        if match:
+            kept.append(idx)
+        else:
+            removed.append((idx, "color_mismatch"))
+
+    filtered_boxes = [boxes_list[i] for i in kept]
+    filtered_logits = [logits_list[i] for i in kept] if logits_list else []
+    filtered_phrases = [phrases_list[i] for i in kept] if phrases_list else []
+    removed_flags = [phrases_list[i] if i < len(phrases_list) else f"idx{i}" for i, _ in removed]
+    return torch.tensor(filtered_boxes), torch.tensor(filtered_logits), filtered_phrases, len(removed) > 0, removed_flags
 
 def boxes_to_xyxy(boxes, image_shape):
     """Convert cxcywh boxes (normalized 0-1) to pixel xyxy."""
@@ -476,12 +716,13 @@ def build_prompt_a_from_task(task_parsed: dict) -> str:
         return name
 
 
-def clean_prompt_b_list(prompt_B_list, target_name: str):
+def clean_prompt_b_list(prompt_B_list, target_name: str, drop_colors: bool = True):
     """
     将 LLM 生成的 prompt_B 做简单清洗：
     - 去掉常见介词和冠词：near/on/in/at/by/.../the/a/an/of 等
     - 不允许包含 target_name
     - 每个短语最多保留前 3 个有效单词
+    - 默认移除颜色词，只让 prompt_A/ctx 保留颜色
     """
     if not isinstance(prompt_B_list, list):
         return []
@@ -505,6 +746,8 @@ def clean_prompt_b_list(prompt_B_list, target_name: str):
         words = [w.strip().lower() for w in phrase.split() if w.strip()]
         # 去停用词
         words = [w for w in words if w not in stopwords]
+        if drop_colors:
+            words = [w for w in words if w not in COLOR_KEYWORDS]
         if not words:
             continue
         # 最多保留三个词
@@ -541,7 +784,7 @@ def build_default_prompt_b(task_parsed: dict, target_name: str):
     candidates.extend(key_objects)
 
     # 清洗 + 去掉 target
-    b_list = clean_prompt_b_list(candidates, target_name)
+    b_list = clean_prompt_b_list(candidates, target_name, drop_colors=True)
 
     # 限制长度
     if len(b_list) > 6:
@@ -781,7 +1024,7 @@ def main():
         val = target_ctx.get(key)
         if val:
             ctx_terms_raw.append(str(val))
-    ctx_terms = clean_prompt_b_list(ctx_terms_raw, target_name)
+    ctx_terms = clean_prompt_b_list(ctx_terms_raw, target_name, drop_colors=False)
     if ctx_terms:
         # 保证 prompt_B 至少包含 target_ctx 中的邻居物体
         existing_lower = {p.lower() for p in prompt_B_list}
@@ -837,6 +1080,30 @@ def main():
         output_path=None,
     )
 
+    # 颜色过滤（尽量保留正确颜色，避免误删）
+    color_filtered = False
+    removed_color_phrases = []
+    if required_color_terms and len(target_boxes) > 0:
+        target_boxes, target_logits, target_phrases, color_filtered, removed_color_phrases = filter_boxes_by_color(
+            image_source, target_boxes, target_logits, target_phrases, required_color_terms, ratio_threshold=0.02
+        )
+        if color_filtered:
+            print(f"[COLOR FILTER] 移除颜色不匹配的框: {removed_color_phrases}")
+
+    # NMS 抑制高度重叠的目标框
+    if len(target_boxes) > 1:
+        target_boxes, target_logits, target_phrases = nms_iou(
+            target_boxes, target_logits, target_phrases, threshold=0.9
+        )
+        print(f"[NMS] 目标框去重后数量: {len(target_boxes)}")
+
+    # 针对包含颜色词的目标框做 HSV 验证，过滤不符颜色的检测
+    if len(target_boxes) > 0:
+        target_boxes, target_logits, target_phrases = validate_color_by_phrase(
+            image_source, target_boxes, target_logits, target_phrases, ratio_threshold=0.02, blur_ksize=3, dilate_iter=1
+        )
+        print_hsv_stats(image_source, target_boxes, target_phrases, title="[HSV] Target boxes")
+
     env_caption = " . ".join(prompt_B_list)
     env_boxes, env_logits, env_phrases = run_grounding_dino_with_caption(
         model=model,
@@ -848,6 +1115,24 @@ def main():
         text_threshold=0.25,
         output_path=None,
     )
+
+    # 避免环境检测重复覆盖目标区域
+    if len(env_boxes) > 0 and len(target_boxes) > 0:
+        env_boxes, env_logits, env_phrases = filter_boxes_by_overlap(
+            env_boxes, env_logits, env_phrases, target_boxes, threshold=0.5
+        )
+        print(f"[FILTER] 过滤与目标区域重叠的环境框后数量: {len(env_boxes)}")
+
+    # 针对含颜色形容词的环境检测做颜色验证
+    if len(env_boxes) > 0:
+        env_boxes, env_logits, env_phrases = validate_color_by_phrase(
+            image_source, env_boxes, env_logits, env_phrases, ratio_threshold=0.02, blur_ksize=3, dilate_iter=1
+        )
+
+    # 环境框再做一次 NMS，避免重复
+    if len(env_boxes) > 1:
+        env_boxes, env_logits, env_phrases = nms_iou(env_boxes, env_logits, env_phrases, threshold=0.9)
+        print(f"[NMS] 环境框去重后数量: {len(env_boxes)}")
 
     # 保存原始检测结果（含 boxes）供评分脚本使用
     def _save_detections(path, boxes, logits, phrases):

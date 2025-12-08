@@ -11,6 +11,30 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 
+CTX_STOPWORDS = {
+    "near",
+    "on",
+    "in",
+    "at",
+    "by",
+    "along",
+    "around",
+    "beside",
+    "between",
+    "inside",
+    "outside",
+    "over",
+    "under",
+    "the",
+    "a",
+    "an",
+    "of",
+    "to",
+    "from",
+    "with",
+}
+
+
 @dataclass
 class DetEntry:
     phrase: str
@@ -119,24 +143,32 @@ def compute_distance(b1: Sequence[float], b2: Sequence[float]) -> float:
 
 
 def normalize_ctx_terms(target_ctx: dict, target_name: str) -> List[str]:
+    """Clean ctx terms using the same rules as prompt_B cleaning."""
     raw_terms = []
     for key in ("left", "right"):
         val = target_ctx.get(key)
         if val:
             raw_terms.append(str(val))
-    # 去除包含目标名的和空白
-    cleaned = []
+
     t_lower = (target_name or "").lower()
+    cleaned: List[str] = []
     for term in raw_terms:
-        term_clean = term.strip()
-        if not term_clean:
+        # 去停用词、去空白
+        words = [w.strip().lower() for w in term.split() if w.strip()]
+        words = [w for w in words if w not in CTX_STOPWORDS]
+        if not words:
             continue
-        if t_lower and t_lower in term_clean.lower():
+        # 限制最多 3 个词，保持与 prompt_B 截断一致
+        trimmed = " ".join(words[:3])
+        if not trimmed:
             continue
-        cleaned.append(term_clean.lower())
-    # 去重
+        if t_lower and t_lower in trimmed:
+            continue
+        cleaned.append(trimmed)
+
+    # 去重，保持顺序
     seen = set()
-    final = []
+    final: List[str] = []
     for term in cleaned:
         if term not in seen:
             seen.add(term)
@@ -151,47 +183,67 @@ def best_ctx_score_for_target(target_entry: DetEntry, others: List[DetEntry], ct
         distances.append((dist, entry))
     distances.sort(key=lambda x: x[0])
 
-    found: Dict[str, Dict[str, Any]] = {}
+    max_possible_dist = math.sqrt(2.0) if distances else 1.0  # 归一化上限，坐标已是 0-1
+    topk_cutoff = max(1, math.ceil(0.3 * len(distances))) if distances else 0
+
+    def proximity_score(dist_norm: float, thresh: float = 0.5) -> float:
+        return clamp(1.0 - clamp(dist_norm / thresh, low=0.0, high=1.0), low=0.0, high=1.0)
+
+    found: Dict[str, Any] = {}
     found_count = 0
-    nearest_hits = 0
+    nearest_hits = 0  # 兼容旧字段：排名前 ctx_len 视为最近邻
+    top30_hits = 0
+    prox_scores: List[float] = []
 
     for term in ctx_terms:
         term_low = term.lower()
-        candidate = None
+        term_matches = []
         for idx, (dist, entry) in enumerate(distances):
             if term_low in entry.phrase.lower():
-                candidate = (idx, dist, entry)
-                break
-        if candidate:
-            rank, dist, entry = candidate
-            found_count += 1
-            if rank < len(ctx_terms):
-                nearest_hits += 1
-            found[term] = {
-                "phrase": entry.phrase,
-                "score": entry.score,
-                "distance": dist,
-                "rank": rank,
-                "box": entry.box,
-            }
-        else:
+                dist_norm = dist / max_possible_dist if max_possible_dist > 0 else dist
+                term_matches.append(
+                    {
+                        "phrase": entry.phrase,
+                        "score": entry.score,
+                        "distance": dist,
+                        "distance_norm": dist_norm,
+                        "rank": idx,
+                        "in_top30pct": idx < topk_cutoff if topk_cutoff else False,
+                        "box": entry.box,
+                    }
+                )
+        if not term_matches:
             found[term] = None
+            continue
+
+        # 选距离最近的作为 best
+        best_match = min(term_matches, key=lambda m: m["distance"])
+        found_count += 1
+        if best_match["rank"] < len(ctx_terms):
+            nearest_hits += 1
+        if best_match["in_top30pct"]:
+            top30_hits += 1
+
+        prox_scores.append(proximity_score(best_match["distance_norm"]))
+        found[term] = {
+            "best": best_match,
+            "matches": term_matches,
+        }
 
     ctx_len = len(ctx_terms)
-    if ctx_len == 0:
-        raw = 0.0
-    else:
-        if found_count == ctx_len and nearest_hits == ctx_len:
-            raw = 1.0  # 最近的两个都匹配 target_ctx，最高分
-        elif found_count == ctx_len:
-            raw = 0.6  # 都识别到了，但不是最近的
-        elif found_count > 0:
-            raw = 0.4 if nearest_hits > 0 else 0.2  # 只识别到部分，是否挤进最近排名决定分档
-        else:
-            raw = -0.4  # 一个都没识别到，负分
+    coverage_ratio = (top30_hits / ctx_len) if ctx_len else 0.0
+    prox_avg = (sum(prox_scores) / ctx_len) if ctx_len else 0.0
+    raw = 0.5 * coverage_ratio + 0.5 * prox_avg
+    # 如果完全未命中任何 ctx，给予轻微负分，保持与旧逻辑一致
+    if found_count == 0:
+        raw = -0.4
 
     return {
         "raw_score": raw,
+        "coverage_ratio": coverage_ratio,
+        "proximity_avg": prox_avg,
+        "top30_hits": top30_hits,
+        "top30_cutoff": topk_cutoff,
         "found_count": found_count,
         "nearest_hits": nearest_hits,
         "found": found,
@@ -370,13 +422,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     target_center = center_of_box(target_box) if target_box else None
     ctx_centers = {}
     for term, match in best_detail.get("found", {}).items():
-        if match and match.get("box"):
-            ctx_centers[term] = center_of_box(match["box"])
+        if match:
+            best = match.get("best") if isinstance(match, dict) else None
+            if best and best.get("box"):
+                ctx_centers[term] = center_of_box(best["box"])
 
     payload = {
         "skip_frame": False,
         "S_ctx": best_detail.get("S_ctx", 0.0),
         "raw_score": best_detail.get("raw_score", 0.0),
+        "coverage_ratio": best_detail.get("coverage_ratio", 0.0),
+        "proximity_avg": best_detail.get("proximity_avg", 0.0),
+        "top30_hits": best_detail.get("top30_hits", 0),
+        "top30_cutoff": best_detail.get("top30_cutoff", 0),
         "ctx_terms": ctx_terms,
         "found_count": best_detail.get("found_count", 0),
         "nearest_hits": best_detail.get("nearest_hits", 0),
