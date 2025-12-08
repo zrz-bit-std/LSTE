@@ -14,7 +14,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 JSON_PATH="${JSON_PATH:-${SCRIPT_DIR}/vlm_prompt/lab/cola.json}"
 
 # 待检测的图片路径（请根据实际情况修改）
-IMAGE_PATH="${IMAGE_PATH:-${PROJECT_ROOT}/Pic_path/Lab/lab.jpg}"
+IMAGE_PATH="${IMAGE_PATH:-${PROJECT_ROOT}/Pic_path/Lab/yellow_cup.jpg}"
 
 # 输出的标注图片路径（可选）
 OUTPUT_IMAGE="${OUTPUT_IMAGE:-${SCRIPT_DIR}/vlm_prompt/lab/result/detection_result.jpg}"

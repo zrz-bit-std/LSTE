@@ -1,17 +1,15 @@
 {
   "prompt_A": "red soda",
   "prompt_B": [
-    "desk",
-    "book",
-    "computer",
-    "monitor",
-    "chair",
-    "mug",
-    "shared",
-    "white book green",
+    "desk lamp",
+    "laptop",
+    "chair stool",
+    "cabinet",
+    "file folder",
+    "white book",
     "green file folder"
   ],
-  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"small\",\n    \"tall\",\n    \"juicy\",\n    \"flavorful\"\n  ],\n  \"prompt_B\": [\n    \"desk\",\n    \"book\",\n    \"computer\",\n    \"monitor\",\n    \"chair\",\n    \" mug\",\n    \"shared\"\n  ]\n}",
+  "raw_llm_output": "{\n  \"prompt_A\": [\n    \"small\",\n    \"tall\",\n    \"juicy\",\n    \"flavorful\"\n  ],\n  \"prompt_B\": [\n    \"desk lamp\",\n    \"laptop\",\n    \"chair stool\",\n    \"cabinet\",\n    \"file folder\"\n  ]\n}",
   "source_json": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/cola.json",
-  "timestamp": "2025-12-08T21:03:20.062463"
+  "timestamp": "2025-12-08T21:08:24.022566"
 }

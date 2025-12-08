@@ -30,18 +30,18 @@
         "keyboard",
         "chair",
         "green file folder",
-        "white book with green and yellow cover"
+        "white book"
       ]
     },
     "obj_related": {
       "key_objects": [
-        "white book with green and yellow cover",
+        "white book",
         "green file folder",
         "mug",
         "keyboard",
         "monitor"
       ],
-      "search_strategy": "look for a bright red cylindrical can on the desk, situated between the white book with green and yellow cover and the green file folder near the monitors",
+      "search_strategy": "look for a bright red cylindrical can on the desk, situated between the white book and the green file folder near the monitors",
       "negative_clues": [
         "corridor",
         "kitchen",
@@ -50,7 +50,7 @@
       ]
     },
     "target_ctx": {
-      "left": "white book with green and yellow cover",
+      "left": "white book",
       "right": "green file folder"
     }
   }

@@ -1,26 +1,24 @@
 {
   "skip_frame": false,
-  "S_env": 0.8257146788214146,
+  "S_env": 0.5709465968834662,
   "details": {
-    "pos_terms_total": 9,
-    "pos_hits": 5,
+    "pos_terms_total": 7,
+    "pos_hits": 3,
     "neg_terms_total": 4,
     "neg_hits": 0,
-    "pos_ratio": 0.5555555555555556,
+    "pos_ratio": 0.42857142857142855,
     "neg_ratio": 0.0,
-    "pos_score": 0.8257146788214146,
+    "pos_score": 0.5709465968834662,
     "neg_score": 0.0,
     "lambda_neg": 0.7,
     "pos_terms": [
-      "book",
-      "chair",
-      "computer",
-      "desk",
+      "cabinet",
+      "chair stool",
+      "desk lamp",
+      "file folder",
       "green file folder",
-      "monitor",
-      "mug",
-      "shared",
-      "white book green"
+      "laptop",
+      "white book"
     ],
     "neg_terms": [
       "bathroom",
@@ -29,11 +27,9 @@
       "kitchen"
     ],
     "detected_pos_terms": [
-      "chair",
-      "desk",
-      "green file folder",
-      "monitor",
-      "mug"
+      "chair stool",
+      "file folder",
+      "green file folder"
     ],
     "detected_neg_terms": []
   },

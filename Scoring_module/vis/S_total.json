@@ -1,14 +1,14 @@
 {
   "scores": {
-    "S_target": 0.5126631855964661,
-    "S_env": 0.8257146788214146,
-    "S_ctx": 0.14081004178570733
+    "S_target": 0.0,
+    "S_env": 0.5709465968834662,
+    "S_ctx": -1.0
   },
   "weights": {
     "target": 0.2,
     "env": 0.3,
     "ctx": 0.5
   },
-  "S_total": 0.4206520616585712,
-  "detected": true
+  "S_total": 0.0,
+  "detected": false
 }

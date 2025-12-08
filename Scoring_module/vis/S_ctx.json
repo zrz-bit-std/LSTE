@@ -1,63 +1,15 @@
 {
   "skip_frame": false,
-  "S_ctx": 0.14081004178570733,
-  "raw_score": 0.14081004178570733,
-  "coverage_ratio": 0.0,
-  "proximity_avg": 0.28162008357141466,
-  "top30_hits": 0,
-  "top30_cutoff": 4,
-  "ctx_terms": [
-    "white book green",
-    "green file folder"
-  ],
-  "found_count": 1,
+  "S_ctx": -1.0,
+  "raw_score": -1.0,
+  "ctx_terms": [],
+  "found_count": 0,
   "nearest_hits": 0,
-  "best_target_phrase": "red soda",
-  "found": {
-    "white book green": null,
-    "green file folder": {
-      "best": {
-        "phrase": "green file folder",
-        "score": 0.587224543094635,
-        "distance": 0.3088358395632085,
-        "distance_norm": 0.21837991642858534,
-        "rank": 6,
-        "in_top30pct": false,
-        "box": [
-          0.9574360847473145,
-          0.36743396520614624,
-          0.01801486499607563,
-          0.0627066120505333
-        ]
-      },
-      "matches": [
-        {
-          "phrase": "green file folder",
-          "score": 0.587224543094635,
-          "distance": 0.3088358395632085,
-          "distance_norm": 0.21837991642858534,
-          "rank": 6,
-          "in_top30pct": false,
-          "box": [
-            0.9574360847473145,
-            0.36743396520614624,
-            0.01801486499607563,
-            0.0627066120505333
-          ]
-        }
-      ]
-    }
-  },
-  "target_center": [
-    0.1797594940289855,
-    0.19190716184675694
-  ],
-  "ctx_centers": {
-    "green file folder": [
-      0.48772547487169504,
-      0.21507028862833977
-    ]
-  },
+  "best_target_phrase": null,
+  "found": {},
+  "target_center": null,
+  "ctx_centers": {},
+  "reason": "无法读取 target 检测结果: 检测JSON中未找到有效的 phrases/logits/boxes 信息",
   "sources": {
     "target": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/result/target_detections.json",
     "env": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/result/env_detections.json"

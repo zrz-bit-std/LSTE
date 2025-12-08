@@ -1,8 +1,9 @@
 {
   "skip_frame": false,
-  "detected": true,
-  "S_target": 0.5126631855964661,
-  "best_phrase": "red soda",
+  "detected": false,
+  "S_target": 0.0,
+  "best_phrase": null,
   "target_name": "red soda",
+  "message": "无法解析检测结果: 检测JSON中未找到有效的 phrases/logits 信息",
   "source": "/home/zrz/Desktop/LSTE/Data_exchange/vlm_prompt/lab/result/target_detections.json"
 }
