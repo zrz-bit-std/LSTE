@@ -506,6 +506,14 @@ class GoalManagerTargetFollowMixin:
         if self._await_required_terminal_observations(now):
             return None
 
+        # Once terminal continuity has begun collecting the configured
+        # completion votes, preserve this physical viewpoint until the vote
+        # completes or fresh evidence expires. Advancing immediately on the
+        # same first eligible frame repeatedly reset terminal readiness and
+        # kept the close-hit/hold contract from ever completing.
+        if self._hold_close_target_confirmation(now):
+            return None
+
         attempted, candidate = self._try_blind_target_terminal_advance(now)
         if candidate is not None:
             return candidate
@@ -515,8 +523,6 @@ class GoalManagerTargetFollowMixin:
                 return goal
             return self._finish_unavailable_terminal_continuation(now)
 
-        if self._hold_close_target_confirmation(now):
-            return None
         approach_transaction = getattr(
             self, "target_approach_transaction", None
         )

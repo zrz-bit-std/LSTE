@@ -1,6 +1,6 @@
 <launch>
   <node pkg="pointcloud_to_laserscan" type="pointcloud_to_laserscan_node" name="pro3_pointcloud_to_laserscan">
-    <remap from="cloud_in" to="/os_cloud_node/points"/>
+    <remap from="cloud_in" to="/pro3/os_cloud_node/points"/>
     <remap from="scan" to="/pro3/rlscan"/>
     <rosparam>
       min_height: -0.4

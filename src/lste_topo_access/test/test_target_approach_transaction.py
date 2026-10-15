@@ -171,6 +171,25 @@ class TargetApproachTransactionTest(unittest.TestCase):
         self.assertEqual(transaction.snapshot().state, STATE_FAILED)
         self.assertFalse(transaction.observe("track", 3.0))
 
+    def test_reconfirmed_preserved_track_opens_fresh_viewpoint_epoch(self):
+        transaction = TargetApproachTransaction()
+        self.assertTrue(transaction.begin("track", 1.0, target_epoch=4))
+        old_candidate = transaction.viewpoint_ledger.ensure_candidate(0)
+        old_id = old_candidate.candidate_id
+        old_candidate.route_status = "observed"
+
+        self.assertTrue(transaction.mark_lost(2.0, "target_reinspection_required"))
+        self.assertTrue(transaction.begin("track", 3.0, target_epoch=4))
+
+        self.assertEqual(transaction.target_epoch, 5)
+        self.assertEqual(
+            transaction.viewpoint_ledger.candidate_id(0),
+            "track::epoch:5::viewpoint:0",
+        )
+        self.assertNotEqual(transaction.viewpoint_ledger.candidate_id(0), old_id)
+        self.assertIsNone(transaction.viewpoint_ledger.get(old_id))
+        self.assertTrue(transaction.viewpoint_ledger.alternatives_exhausted() is False)
+
     def test_completion_is_explicit_and_terminal(self):
         transaction = TargetApproachTransaction()
         transaction.begin("track", 1.0)

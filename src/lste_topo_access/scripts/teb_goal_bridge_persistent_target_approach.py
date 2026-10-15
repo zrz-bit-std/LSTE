@@ -91,14 +91,10 @@ class TebGoalBridgePersistentTargetApproachMixin:
             ],
             lifecycle="single_action_target_approach",
         )
-        arm_watchdog = getattr(
-            self, "_arm_route_lease_watchdog_locked", None
-        )
-        if callable(arm_watchdog):
-            arm_watchdog(
-                reason="persistent_target_approach_terminal",
-                action_contract=getattr(self, "active_action_contract", None),
-            )
+        # This is not a MoveBase terminal and does not release the controller
+        # lease.  The persistent action is intentionally retained while the
+        # next target/frontier goal is selected, so a release-ACK watchdog
+        # would eventually cancel the still-valid action during that gap.
         rospy.loginfo(
             "TEB goal bridge forwarded persistent target approach: "
             "transaction=%d received=%d track=%s",

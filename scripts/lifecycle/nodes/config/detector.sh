@@ -78,7 +78,7 @@ case "$DETECTOR" in
     WDETECT_LANGUAGE_MODEL="$WS/model/WeDetect/xlm-roberta-base"
     WDETECT_VISION_ONNX="$WS/model/WeDetect/deploy/onnx_models/wedetect_base_vision.onnx"
     WDETECT_TRT_ENGINE_CACHE="$WS/model/WeDetect/deploy/trt_cache"
-    WDETECT_RUNTIME=tensorrt
+    WDETECT_RUNTIME=${WDETECT_RUNTIME:-${CFG_WDETECT_RUNTIME:-tensorrt}}
     ;;
   wedetect-large)
     DETECTOR_BACKEND=wedetect
@@ -87,7 +87,7 @@ case "$DETECTOR" in
     WDETECT_LANGUAGE_MODEL="$WS/model/WeDetect/xlm-roberta-large"
     WDETECT_VISION_ONNX="$WS/model/WeDetect/deploy/onnx_models/wedetect_large_vision.onnx"
     WDETECT_TRT_ENGINE_CACHE="$WS/model/WeDetect/deploy/trt_cache_large"
-    WDETECT_RUNTIME=tensorrt
+    WDETECT_RUNTIME=${WDETECT_RUNTIME:-${CFG_WDETECT_RUNTIME:-tensorrt}}
     ;;
   *)
     echo "[error] DETECTOR must be groundingdino, wedetect-base, or wedetect-large (got '$DETECTOR')" >&2

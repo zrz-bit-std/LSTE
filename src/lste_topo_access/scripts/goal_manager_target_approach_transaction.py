@@ -65,9 +65,16 @@ class TargetApproachTransaction:
             return False
         if self.track_id == track_id and self.active:
             return False
+        target_epoch = int(target_epoch or 0)
+        # A preserved room obligation can outlive a lost approach transaction.
+        # Re-confirming that same semantic track must create a new viewpoint
+        # episode; otherwise the ledger's deliberately durable closed rungs
+        # make every reinspection immediately exhaust the same portfolio.
+        if self.track_id == track_id and self.target_epoch > 0:
+            target_epoch = max(target_epoch, self.target_epoch + 1)
         self.state = STATE_APPROACHING
         self.track_id = track_id
-        self.target_epoch = int(target_epoch or 0)
+        self.target_epoch = target_epoch
         self.segment_count = 0
         self.last_evidence_at = float(now)
         self.last_terminal_at = None

@@ -728,6 +728,9 @@ MUX_GOVERNOR_MAX_SPEED: 0.50
 # The launcher automatically chooses the separate node file, checkpoint,
 # XLM-RoBERTa, ONNX, and TensorRT cache. Do not add model paths here.
 DETECTOR: wedetect-large
+# RTX 2070 (8 GiB) local profile: run the official PyTorch deployment path.
+# TensorRT engines from the RTX 3060 host are GPU-specific and are not reused.
+WDETECT_RUNTIME: pytorch
 # false draws the raw /lste/detections boxes exactly as published. No CSRT,
 # optical flow, EMA, association, interpolation, or other visual smoothing is
 # applied. Keep false for direct detector inspection.

@@ -274,6 +274,26 @@ class TargetCloseEvidenceTest(unittest.TestCase):
             1,
         )
 
+    def test_pending_terminal_close_vote_prevents_another_viewpoint_advance(self):
+        manager = self.GoalManagerStub()
+        manager.target_segment_terminal_ready = True
+        manager.controller_mode = "teb"
+        manager.target_observation_loss_certified = lambda: False
+        manager._await_required_terminal_observations = lambda _now: False
+        advances = []
+        manager._try_blind_target_terminal_advance = lambda now: (
+            advances.append(now) or (True, object())
+        )
+        manager._hold_close_target_confirmation = lambda _now: True
+        manager._handle_blocked_terminal_target_route = lambda _now: (False, None)
+
+        result = GoalManagerTargetFollowMixin._handle_target_segment_terminal(
+            manager, 12.0
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(advances, [])
+
     def test_direct_close_vote_cannot_release_to_frontier_without_monitor_context(self):
         manager = self.GoalManagerStub()
         manager.target_completed_segments = 0

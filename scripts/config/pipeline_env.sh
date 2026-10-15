@@ -11,14 +11,19 @@ if [ -z "${WS:-}" ]; then
   WS="${LSTE_WS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 fi
 
-# Auto-detect pre_work workspace (for Gazebo plugins). Can override with LSTE_PRE_WS.
+# Auto-detect the supporting workspace (robot model and Gazebo plugins).
+# Keep an explicit LSTE_PRE_WS override for installations in other locations.
 if [ -z "${LSTE_PRE_WS:-}" ]; then
-  LSTE_PRE_WS="$(dirname "$WS")/pre_work"
-  if [ ! -d "$LSTE_PRE_WS/devel/lib" ]; then
-    LSTE_PRE_WS=""  # not found, leave empty
-  fi
+  for candidate in "$(dirname "$WS")/pre_work" \
+                   "$(dirname "$WS")/pre_ws" \
+                   "$(dirname "$WS")/lste-previous/pre_ws"; do
+    if [ -f "$candidate/devel/setup.bash" ] && [ -d "$candidate/devel/lib" ]; then
+      LSTE_PRE_WS="$candidate"
+      break
+    fi
+  done
 fi
-export LSTE_PRE_WS
+export LSTE_PRE_WS="${LSTE_PRE_WS:-}"
 export LSTE_WS="$WS"
 
 # Catkin's generated Python relays use the base interpreter's shebang, while
@@ -35,6 +40,14 @@ export GAZEBO_MODEL_DATABASE_URI="${GAZEBO_MODEL_DATABASE_URI:-file://$WS/worlds
 if [ -f /opt/ros/noetic/setup.bash ]; then
   # shellcheck disable=SC1091
   source /opt/ros/noetic/setup.bash
+fi
+
+if [ -n "$LSTE_PRE_WS" ] && [ -f "$LSTE_PRE_WS/devel/setup.bash" ]; then
+  # pja (Pro3 URDF) lives in the supporting workspace on this machine.
+  # Source it before this workspace so both ROS packages and Gazebo plugins
+  # remain discoverable from tmux windows started in a fresh shell.
+  # shellcheck disable=SC1090
+  source "$LSTE_PRE_WS/devel/setup.bash"
 fi
 
 if [ -f "$WS/devel/setup.bash" ]; then

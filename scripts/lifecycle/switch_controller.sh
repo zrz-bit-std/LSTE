@@ -187,7 +187,7 @@ start_teleop() {
   fi
   local command
   command="bash -lc 'source \"$WS/scripts/config/pipeline_env.sh\"; \
-python \"$WS/scripts/tools/teleop_with_reset.py\" cmd_vel:=/lste/cmd_vel/teleop; exec bash'"
+python3 \"$WS/scripts/tools/teleop_with_reset.py\" cmd_vel:=/lste/cmd_vel/teleop; exec bash'"
   if tmux has-session -t "=$TELEOP_SESSION" 2>/dev/null; then
     tmux respawn-pane -k -t "=$TELEOP_SESSION:teleop" -c "$WS" "$command"
   else
