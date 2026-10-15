@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Start one reproducible fixed-goal method comparison and record the desktop.
+# It deliberately writes a temporary runtime config instead of changing the
+# user's normal test_config.yaml.
+
+WS="${LSTE_WS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+METHOD="${1:-}"
+DURATION="${2:-75}"
+BASE_CONFIG="${RL_RECORD_BASE_CONFIG:-$WS/scripts/tests/rl_fixed_goal/test_config.yaml}"
+RL_MODE="${RL_RECORD_RL_MODE:-}"
+CONFIG_DIR="$WS/runtime/rl_fixed_goal_test/recording_configs"
+
+case "${METHOD,,}" in
+  rl|dwa|teb)
+    METHOD="${METHOD,,}"
+    ;;
+  *)
+    echo "Usage: rlrecord <rl|dwa|teb> [duration_seconds]" >&2
+    exit 2
+    ;;
+esac
+if ! [[ "$DURATION" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[error] duration_seconds must be a positive integer." >&2
+  exit 2
+fi
+if [[ -n "$RL_MODE" ]]; then
+  case "$RL_MODE" in
+    policy_only|stabilized_recovery|rl_dwa_guard|rl_mppi_guard|rl_grid_guard)
+      ;;
+    *)
+      echo "[error] RL_RECORD_RL_MODE is not a supported SA-PPO test mode: $RL_MODE" >&2
+      exit 2
+      ;;
+  esac
+fi
+if [[ ! -f "$BASE_CONFIG" ]]; then
+  echo "[error] Base config not found: $BASE_CONFIG" >&2
+  exit 1
+fi
+
+mkdir -p "$CONFIG_DIR"
+TEMP_CONFIG="$(mktemp "$CONFIG_DIR/${METHOD}_XXXXXX.yaml")"
+python3 - "$BASE_CONFIG" "$TEMP_CONFIG" "$METHOD" "$DURATION" <<'PY'
+import os
+import sys
+
+import yaml
+
+source, destination, method, duration = sys.argv[1:]
+with open(source, encoding="utf-8") as stream:
+    config = yaml.safe_load(stream) or {}
+
+config["CONTROLLER_METHOD"] = method
+config["ALLOW_GAZEBO_CLICK_GOAL"] = False
+config["SCREEN_RECORD"] = True
+config["SCREEN_RECORD_START_DELAY_SECONDS"] = 18
+config["SCREEN_RECORD_DURATION_SECONDS"] = int(duration)
+config["SCREEN_RECORD_FPS"] = 30
+rl_mode = os.environ.get("RL_RECORD_RL_MODE")
+if method == "rl" and rl_mode:
+    config["RL_CONTROLLER_MODE"] = rl_mode
+
+with open(destination, "w", encoding="utf-8") as stream:
+    yaml.safe_dump(config, stream, allow_unicode=False, sort_keys=False)
+PY
+
+echo "[rlrecord] method=$METHOD duration=${DURATION}s"
+echo "[rlrecord] temporary config: $TEMP_CONFIG"
+exec env RL_FIXED_GOAL_CONFIG="$TEMP_CONFIG" "$WS/scripts/bin/rltest"

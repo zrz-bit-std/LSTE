@@ -1,0 +1,23 @@
+<launch>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="gui" default="true"/>
+  <arg name="gui_plugin" default="$(find gazebo_click_point)/../../devel/lib/libgazebo_click_point.so"/>
+  <!-- 默认 world 路径相对工作区，可通过上层传 world_name 覆盖 -->
+  <arg name="world_name" default="$(find lste_core)/../../worlds/lab_building.world"/>
+  <arg name="extra_gazebo_args" default=""/>
+
+  <env name="GAZEBO_MODEL_PATH"
+       value="$(find lste_core)/../../worlds:$(find lste_core)/../tools:$(optenv GAZEBO_MODEL_PATH)"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="gui" value="false"/>
+    <arg name="extra_gazebo_args" value="$(arg extra_gazebo_args)"/>
+  </include>
+
+  <group if="$(arg gui)">
+    <node name="gazebo_gui" pkg="gazebo_ros" type="gzclient" output="screen"
+          args="--gui-client-plugin $(arg gui_plugin)"/>
+  </group>
+</launch>

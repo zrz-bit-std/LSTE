@@ -1,0 +1,152 @@
+<launch>
+  <!-- Test-only lidar SLAM and navigation stack.  All topic names are
+       explicit so this launch can coexist with the normal LSTE system. -->
+  <arg name="scan_topic" default="/pro3/rlscan"/>
+  <arg name="odom_topic" default="/pro3/wheel_odom"/>
+  <arg name="max_linear_speed" default="0.50"/>
+  <!-- Compare TEB's single-band and multi-topology architectures in the
+       isolated fixed-goal experiment.  The production pipeline uses the same
+       capability switch in teb_navigation.launch. -->
+  <arg name="teb_homotopy_class_planning" default="false"/>
+  <!-- Keep the local planner selectable for isolated controller comparisons.
+       DWA remains available as dwa_local_planner/DWAPlannerROS. -->
+  <arg name="local_planner_plugin" default="teb_local_planner/TebLocalPlannerROS"/>
+
+  <node pkg="gmapping" type="slam_gmapping" name="rl_fixed_goal_slam" output="screen">
+    <remap from="scan" to="$(arg scan_topic)"/>
+    <remap from="odom" to="$(arg odom_topic)"/>
+    <!-- Gazebo's differential-drive plugin and the established PJA stack use
+         base_footprint as their planar base frame.  Keeping SLAM and both
+         costmaps on that frame prevents a future non-identity base_link
+         transform from skewing the navigation geometry. -->
+    <param name="base_frame" value="base_footprint"/>
+    <param name="odom_frame" value="odom"/>
+    <param name="map_update_interval" value="1.0"/>
+    <param name="linearUpdate" value="0.15"/>
+    <param name="angularUpdate" value="0.15"/>
+    <param name="maxUrange" value="10.0"/>
+    <!-- The default +/-100 m bounds create a 4,000 x 4,000 cell map at 5 cm.
+         This isolated route lives within the bounds below; keeping the map
+         compact lets move_base refresh costmaps faster than the lidar stream. -->
+    <param name="xmin" value="5.0"/>
+    <param name="xmax" value="22.0"/>
+    <param name="ymin" value="-16.0"/>
+    <param name="ymax" value="1.0"/>
+  </node>
+
+  <node pkg="move_base" type="move_base" name="rl_fixed_goal_move_base" output="screen">
+    <remap from="odom" to="$(arg odom_topic)"/>
+    <param name="base_global_planner" value="navfn/NavfnROS"/>
+    <param name="base_local_planner" value="$(arg local_planner_plugin)"/>
+    <!-- Publish Navfn's actual Dijkstra potential array as PointCloud2 for
+         the live RViz explanation. This is planner output, not a recreated
+         heatmap in the visualization layer. -->
+    <param name="NavfnROS/visualize_potential" value="true"/>
+    <param name="global_costmap/global_frame" value="map"/>
+    <param name="global_costmap/robot_base_frame" value="base_footprint"/>
+    <param name="global_costmap/robot_radius" value="0.30"/>
+    <param name="global_costmap/static_map" value="true"/>
+    <param name="global_costmap/track_unknown_space" value="false"/>
+    <!-- Extend wall costs far enough into a corridor that Navfn prefers its
+         centerline rather than an equally short wall-adjacent route. -->
+    <param name="global_costmap/inflation_radius" value="0.70"/>
+    <param name="local_costmap/global_frame" value="odom"/>
+    <param name="local_costmap/robot_base_frame" value="base_footprint"/>
+    <param name="local_costmap/robot_radius" value="0.30"/>
+    <param name="local_costmap/static_map" value="false"/>
+    <param name="local_costmap/rolling_window" value="true"/>
+    <param name="local_costmap/width" value="8.0"/>
+    <param name="local_costmap/height" value="8.0"/>
+    <param name="local_costmap/resolution" value="0.10"/>
+    <param name="local_costmap/inflation_radius" value="0.70"/>
+    <param name="local_costmap/obstacle_layer/observation_sources" value="laser"/>
+    <param name="local_costmap/obstacle_layer/laser/data_type" value="LaserScan"/>
+    <param name="local_costmap/obstacle_layer/laser/topic" value="$(arg scan_topic)"/>
+    <param name="local_costmap/obstacle_layer/laser/marking" value="true"/>
+    <param name="local_costmap/obstacle_layer/laser/clearing" value="true"/>
+    <param name="local_costmap/obstacle_layer/laser/obstacle_range" value="8.0"/>
+    <param name="local_costmap/obstacle_layer/laser/raytrace_range" value="10.0"/>
+    <param name="DWAPlannerROS/min_vel_x" value="0.0"/>
+    <param name="DWAPlannerROS/max_vel_x" value="$(arg max_linear_speed)"/>
+    <param name="DWAPlannerROS/min_vel_trans" value="0.0"/>
+    <param name="DWAPlannerROS/max_vel_trans" value="$(arg max_linear_speed)"/>
+    <param name="DWAPlannerROS/holonomic_robot" value="false"/>
+    <param name="DWAPlannerROS/min_vel_y" value="0.0"/>
+    <param name="DWAPlannerROS/max_vel_y" value="0.0"/>
+    <param name="DWAPlannerROS/min_vel_theta" value="-0.65"/>
+    <param name="DWAPlannerROS/max_vel_theta" value="0.75"/>
+    <!-- At move_base's default 20 Hz, the former low acceleration limits
+         made the DWA velocity window almost stationary after a recovery.
+         These match the working PJA navigation scale while respecting the
+         configured maximum linear speed. -->
+    <param name="DWAPlannerROS/acc_lim_x" value="1.0"/>
+    <param name="DWAPlannerROS/acc_lim_trans" value="1.0"/>
+    <param name="DWAPlannerROS/acc_lim_theta" value="2.5"/>
+    <!-- Frontier points must be observed from close range before choosing the
+         next branch. The final acceptance is still handled independently by
+         the fixed-goal monitor. -->
+    <param name="DWAPlannerROS/xy_goal_tolerance" value="0.45"/>
+    <param name="DWAPlannerROS/trans_stopped_vel" value="0.05"/>
+    <param name="DWAPlannerROS/vx_samples" value="12"/>
+    <param name="DWAPlannerROS/vth_samples" value="30"/>
+    <param name="DWAPlannerROS/sim_time" value="1.0"/>
+    <!-- A frontier has no meaningful desired heading. Do not waste a turn to
+         face the arbitrary zero-yaw simple-goal orientation at every branch. -->
+    <param name="DWAPlannerROS/yaw_goal_tolerance" value="3.14159"/>
+    <param name="DWAPlannerROS/forward_point_distance" value="0.35"/>
+    <!-- Prefer trajectories with clearance over wall-hugging shortcuts. -->
+    <param name="DWAPlannerROS/occdist_scale" value="0.60"/>
+    <param name="DWAPlannerROS/path_distance_bias" value="32.0"/>
+    <param name="DWAPlannerROS/goal_distance_bias" value="24.0"/>
+    <!-- At 1 m/s, 20 Hz limits one control interval to about 5 cm. This keeps
+         map and obstacle corrections smooth in corridors and near doorways. -->
+    <param name="controller_frequency" value="20.0"/>
+    <!-- TEB optimizes the complete local trajectory, so it can choose a
+         collision-free turn around the southern U-wall corner where the DWA
+         velocity samples repeatedly reached a local minimum. It is forward
+         only: the platform has 360-degree lidar, but this route should turn
+         in place rather than reverse toward unseen space. -->
+    <param name="TebLocalPlannerROS/max_vel_x" value="$(arg max_linear_speed)"/>
+    <param name="TebLocalPlannerROS/max_vel_x_backwards" value="0.01"/>
+    <!-- The map-to-odom estimate moves slightly as gmapping accepts scans.
+         Limit yaw dynamics so those small plan corrections do not make the
+         platform visibly weave from side to side. -->
+    <param name="TebLocalPlannerROS/max_vel_theta" value="0.45"/>
+    <param name="TebLocalPlannerROS/acc_lim_x" value="1.0"/>
+    <param name="TebLocalPlannerROS/acc_lim_theta" value="0.8"/>
+    <param name="TebLocalPlannerROS/max_vel_y" value="0.0"/>
+    <param name="TebLocalPlannerROS/dt_ref" value="0.2"/>
+    <!-- Do not turn noisy, incrementally updated SLAM waypoints into hard
+         TEB constraints.  The planner still follows the global plan's local
+         segment, but can keep a smooth trajectory between map updates. -->
+    <param name="TebLocalPlannerROS/global_plan_viapoint_sep" value="-1.0"/>
+    <param name="TebLocalPlannerROS/global_plan_overwrite_orientation" value="true"/>
+    <param name="TebLocalPlannerROS/allow_init_with_backwards_motion" value="false"/>
+    <param name="TebLocalPlannerROS/xy_goal_tolerance" value="0.45"/>
+    <param name="TebLocalPlannerROS/yaw_goal_tolerance" value="3.14159"/>
+    <param name="TebLocalPlannerROS/min_obstacle_dist" value="0.20"/>
+    <!-- Soft corridor-centering zone.  min_obstacle_dist remains the hard
+         safety limit; this larger range only makes wall-hugging expensive. -->
+    <param name="TebLocalPlannerROS/inflation_dist" value="0.80"/>
+    <param name="TebLocalPlannerROS/include_costmap_obstacles" value="true"/>
+    <!-- The local planner evaluates both sides of a blocking obstacle from
+         the live lidar costmap.  Deterministic left/right exploration keeps
+         the candidate set stable across map updates. -->
+    <param name="TebLocalPlannerROS/enable_homotopy_class_planning" value="$(arg teb_homotopy_class_planning)"/>
+    <param name="TebLocalPlannerROS/enable_multithreading" value="true"/>
+    <param name="TebLocalPlannerROS/simple_exploration" value="true"/>
+    <param name="TebLocalPlannerROS/max_number_classes" value="5"/>
+    <!-- Keep the Navfn route as the preferred candidate while allowing an
+         alternate topology to leave its via-points when the online map is
+         stale or incomplete. -->
+    <param name="TebLocalPlannerROS/viapoints_all_candidates" value="false"/>
+    <param name="TebLocalPlannerROS/weight_kinematics_nh" value="1000.0"/>
+    <param name="TebLocalPlannerROS/weight_kinematics_forward_drive" value="1000.0"/>
+    <param name="TebLocalPlannerROS/weight_obstacle" value="50.0"/>
+    <param name="TebLocalPlannerROS/weight_inflation" value="0.5"/>
+    <param name="TebLocalPlannerROS/footprint_model/type" value="circular"/>
+    <param name="TebLocalPlannerROS/footprint_model/radius" value="0.30"/>
+    <param name="TebLocalPlannerROS/publish_feedback" value="true"/>
+    <param name="NavfnROS/allow_unknown" value="true"/>
+  </node>
+</launch>

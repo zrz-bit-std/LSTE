@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Start only the persistent simulation environment in the background:
+# roscore, gzserver, and the Gazebo GUI with the click-point plugin.
+# It does not create the lste, lste-teleop, detector, MiniCPM, or SA-PPO sessions.
+WS="${LSTE_WS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+export LSTE_NO_ATTACH=1
+exec "$WS/scripts/lifecycle/run_env_tmux.sh" "$@"

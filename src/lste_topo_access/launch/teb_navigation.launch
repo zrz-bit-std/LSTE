@@ -1,0 +1,572 @@
+<launch>
+  <!-- Production TEB stack for the online-SLAM LSTE pipeline.
+       gmapping is started by online_slam_frontier.launch; this file owns only
+       move_base and the final-goal bridge. -->
+  <arg name="scan_topic" default="/pro3/rlscan"/>
+  <arg name="odom_topic" default="/pro3/wheel_odom"/>
+  <arg name="global_frame" default="map"/>
+  <arg name="max_linear_speed" default="0.50"/>
+  <arg name="teb_xy_goal_tolerance" default="0.50"/>
+  <arg name="controller_mode" default="teb"/>
+  <arg name="goal_topic" default="/lste/final_goal"/>
+  <arg name="intent_topic" default="/lste/goal_intent"/>
+  <arg name="goal_command_topic" default="/lste/mission_goal"/>
+  <arg name="navigation_hold_topic" default="/lste/navigation_hold"/>
+  <!-- Execute GoalManager's atomic pose-plus-intent transaction. Disable only
+       for an explicit legacy pose-only publisher experiment. -->
+  <arg name="use_goal_command" default="true"/>
+  <!-- A final goal and its mission ownership are one transaction. Keep this
+       enabled for the Goal Manager pipeline; legacy pose-only callers may
+       explicitly set it false. -->
+  <arg name="require_intent" default="true"/>
+  <arg name="terminal_topic" default="/lste/teb_goal_terminal"/>
+  <arg name="terminal_contract_topic" default="/lste/teb_goal_terminal_contract"/>
+  <arg name="target_failure_topic" default="/lste/teb_goal_failure"/>
+  <arg name="frontier_status_topic" default="/lste/global_frontier/status"/>
+  <arg name="navfn_plan_topic" default="/move_base/NavfnROS/plan"/>
+  <!-- TEB normally optimizes one local trajectory.  Exploration has a
+       structural ambiguity at every doorway/wall: the vehicle needs both
+       left and right route hypotheses before it can choose one.  Keep this
+       as a launch-level capability switch so experiments can compare the
+       single-band and multi-topology architectures without code changes. -->
+  <!-- The capability is retained for controlled experiments.  The default
+       stays on the validated single-band route until the recovery supervisor
+       below can hand off a blocked route without a stop/restart race. -->
+  <arg name="teb_homotopy_class_planning" default="false"/>
+  <!-- The raw rolling costmap is the production obstacle representation.
+       The DBSMCCH converter remains available for an explicit A/B, but its
+       polygons were observed to make TEB stall near a valid endpoint in the
+       compact T-junction world. The line-converter variant is not supported
+       by this Noetic installation because it crashes move_base. -->
+  <arg name="teb_costmap_converter_plugin" default="disabled"/>
+  <!-- Keep the initial production experiment single-threaded while isolating
+       converter behavior. Conversion at 5 Hz remains below the 20 Hz control
+       loop. -->
+  <arg name="teb_costmap_converter_spin_thread" default="false"/>
+  <!-- The local costmap updates at 10 Hz. Five Hz provides fresh wall
+       geometry without making TEB chase every individual scan update. -->
+  <arg name="teb_costmap_converter_rate" default="5"/>
+  <!-- The polygon converter and the raw costmap are alternative obstacle
+       representations for a focused A/B. Production uses the raw costmap;
+       polygon-only runs set this false explicitly. -->
+  <arg name="teb_include_costmap_obstacles" default="true"/>
+  <!-- endpoint_action uses the established action-per-route lifecycle.
+       persistent_stream is an opt-in plugin architecture that keeps one
+       execution lease while Navfn/TEB receive fresh mission paths. -->
+  <arg name="persistent_execution" default="false"/>
+  <!-- Local planner reports a physical endpoint here; the bridge validates
+       route ownership before turning it into a frontier lifecycle terminal. -->
+  <arg name="persistent_frontier_endpoint_topic" default="/lste/persistent_execution/frontier_endpoint_reached"/>
+  <!-- Experimental RouteCorridor handoff. When a prefetched exploration
+       successor enters the existing observation envelope, the bridge asks
+       Navfn for a route from the live feedback pose and verifies the first
+       local horizon against the lidar costmap before streaming it. A failed
+       admission leaves the current route untouched and uses the normal safe
+       terminal handoff. -->
+  <arg name="persistent_frontier_lookahead_handoff_enabled" default="false"/>
+  <!-- Distance remaining on the active frontier route at which a pre-admitted
+       successor may replace it. This is intentionally distinct from the
+       observation completion radius: production uses zero completion radius,
+       while the lookahead experiment needs time to update TEB before its
+       point-goal terminal envelope. -->
+  <arg name="persistent_frontier_lookahead_trigger_distance" default="1.0"/>
+  <arg name="persistent_frontier_admission_horizon" default="2.0"/>
+  <arg name="persistent_frontier_admission_max_costmap_age" default="0.50"/>
+  <arg name="persistent_frontier_admission_blocked_cost" default="100"/>
+  <arg name="persistent_frontier_admission_service_timeout" default="0.10"/>
+  <arg name="persistent_frontier_admission_endpoint_epsilon" default="0.20"/>
+  <!-- Tangent changes above the smooth-handoff envelope but below this bound
+       are installed as one streaming curve. Larger changes wait for the
+       endpoint boundary, then native TEB reorients on the successor path. -->
+  <arg name="persistent_frontier_curve_handoff_max_heading_deg" default="65.0"/>
+  <!-- StreamingNavfnPlanner must consume the bridge-approved stream, not the
+       public final-goal observer topic. This makes visual targets a two-phase
+       request: Navfn validates first, then the bridge approves execution. -->
+  <arg name="persistent_mission_goal_topic" default="/lste/persistent_execution/mission_goal"/>
+  <!-- Typed ownership commands carry an explicit transaction_id. The
+       PoseStamped topics remain observer-only because ROS rewrites Header.seq
+       as a transport counter. -->
+  <arg name="persistent_mission_command_topic" default="/lste/persistent_execution/mission_command"/>
+  <arg name="persistent_target_command_topic" default="/lste/persistent_execution/target_command"/>
+  <arg name="persistent_installed_target_command_topic" default="/lste/persistent_execution/installed_target_command"/>
+  <arg name="persistent_planner_command_contract_topic" default="/lste/persistent_execution/planner_command_contract"/>
+  <arg name="base_global_planner" default="navfn/NavfnROS"/>
+  <arg name="base_local_planner" default="teb_local_planner/TebLocalPlannerROS"/>
+  <!-- Production keeps the historical respawn behavior. Focused diagnostic
+       launchers can disable it so one startup dependency failure produces one
+       bounded artifact instead of a respawn storm. -->
+  <arg name="move_base_respawn" default="true"/>
+  <arg name="planner_frequency" default="0.0"/>
+  <arg name="persistent_plan_equivalence_distance" default="0.25"/>
+  <!-- Goal Manager already filters ordinary frontier updates. This smaller
+       bridge epsilon still forwards a new waypoint after a completed action,
+       even when the map moves it by only a few decimetres. -->
+  <!-- SLAM can move an already reached endpoint by a few centimetres while
+       publishing the next frontier. Treat that as the same action goal so a
+       terminal callback does not launch a duplicate near-identical action. -->
+  <arg name="goal_position_epsilon" default="0.15"/>
+  <arg name="goal_yaw_epsilon" default="0.08"/>
+  <!-- Goal yaw is advisory for this circular base. A bbox-induced yaw change
+       must not cancel an otherwise valid local trajectory. -->
+  <arg name="compare_goal_yaw" default="false"/>
+  <arg name="goal_min_update_interval" default="2.50"/>
+  <arg name="goal_retry_interval" default="3.00"/>
+  <!-- One move_base action is one execution transaction, but a continuous
+       frontier route should not brake at every endpoint.  In-place
+       replacement lets the bridge hot-swap the active goal through actionlib's
+       native new-goal preemption while TEB keeps its timed elastic band alive.
+       The bridge guards this with the distance/delta windows below so the
+       swap never lands inside TEB's terminal tolerance or a band-reinit jump,
+       and action generations discard callbacks from the replaced goal. -->
+  <arg name="allow_in_place_replacement" default="false"/>
+  <!-- Experimental only. Even a topologically continuous replacement enters
+       move_base through a new actionlib goal; ROS1 TEB can reset its temporal
+       band with ``timediff<=0`` at that boundary. Production therefore keeps
+       one action transaction through its terminal result, then dispatches the
+       queued route after the bridge's one-cycle follow-up. Visual targets,
+       branch changes, and controller transitions are always terminal-driven. -->
+  <arg name="allow_route_continuation_replacement" default="false"/>
+  <!-- Action health, not controller tuning: a newer frontier intent is
+       handed off only after the active move_base action makes no feedback
+       progress. A higher-priority target intent may take over immediately;
+       if that same visual action then makes no progress, the bridge retries
+       it after the normal action retry interval so move_base does not spend
+       minutes cycling recovery behaviors against a stale costmap. -->
+  <arg name="handoff_distance" default="1.00"/>
+  <!-- Deprecated compatibility argument; the bridge no longer performs
+       near-endpoint handoffs. -->
+  <arg name="handoff_radius" default="0.30"/>
+  <arg name="progress_timeout" default="12.0"/>
+  <arg name="progress_epsilon" default="0.12"/>
+  <arg name="handoff_min_interval" default="4.0"/>
+  <!-- Keep healthy frontier endpoints as native move_base transactions. A
+       non-zero observation radius cancels a valid action early and was shown
+       to create a PREEMPTED zero-velocity pulse. The only production shortcut
+       is a separately proven continuous successor replacement. -->
+  <arg name="frontier_observation_completion_radius" default="0.0"/>
+  <!-- Retained for the explicit observation-region A/B experiment. It has no
+       effect while the production radius is zero. -->
+  <arg name="frontier_observation_completion_max_linear_speed" default="0.15"/>
+  <!-- Release a prefetched successor only after this many seconds of fresh,
+       actual TEB zero/low-speed commands. It rejects one scheduler gap while
+       avoiding stale feedback delaying the terminal handoff. -->
+  <arg name="frontier_observation_stationary_hold" default="0.10"/>
+  <arg name="teb_planner_cmd_topic" default="/lste/cmd_vel/teb_planner"/>
+  <!-- Experimental only. A bare successor endpoint is not a route splice, so
+       production waits for the one real terminal callback before promotion.
+       Enable this only with an explicit two-segment route transaction. -->
+  <arg name="frontier_continuous_prefetch_handoff_enabled" default="false"/>
+  <arg name="frontier_continuous_prefetch_handoff_timeout" default="1.50"/>
+  <!-- Native TEB can execute a valid in-place obstacle reorientation. The
+       bridge requires live TEB feedback and odometry yaw progress, then grants
+       at most this bounded extension before ordinary stale-action recovery. -->
+  <arg name="teb_reorientation_enabled" default="true"/>
+  <arg name="teb_reorientation_linear_threshold" default="0.03"/>
+  <arg name="teb_reorientation_angular_threshold" default="0.15"/>
+  <arg name="teb_reorientation_yaw_progress" default="0.10"/>
+  <arg name="teb_reorientation_stagnation_timeout" default="1.50"/>
+  <arg name="teb_reorientation_max_extension" default="8.0"/>
+  <arg name="teb_reorientation_feedback_timeout" default="0.50"/>
+  <!-- Production keeps TEB as the sole local controller. Enable this only for
+       a controlled comparison of the retired external pre-route alignment. -->
+  <arg name="teb_frontier_pre_route_alignment" default="false"/>
+  <!-- Navfn treats unknown cells as high-cost but traversable. The online
+       frontier publisher still chooses goals from known, clearance-safe cells;
+       this fallback is required when a confirmed visual target lies just
+       beyond the current SLAM map. TEB/local costmap remains the collision
+       check while the map is being completed. -->
+  <arg name="navfn_allow_unknown" default="true"/>
+  <!-- Segment bounds are used only by the semantic frontier-route continuation
+       policy. They never authorize visual-target or branch replacement. -->
+  <arg name="target_early_handoff_distance" default="0.70"/>
+  <arg name="target_early_handoff_min_delta" default="0.40"/>
+  <!-- Bounds for the narrow route-continuation policy; generic in-place
+       replacement remains disabled by default. -->
+  <arg name="frontier_replacement_max_delta" default="1.00"/>
+  <!-- Native goal replacement preserves a TEB forward band only for a modest
+       route-tangent change. Larger turns use the explicit terminal lifecycle
+       instead of producing a zero-speed surprise immediately after a
+       nominally "continuous" handoff. -->
+  <arg name="frontier_early_handoff_max_heading_deg" default="45.0"/>
+  <!-- Compatibility values for the retired stale-action replacement path. -->
+  <arg name="frontier_stale_recovery_grace" default="4.0"/>
+  <arg name="frontier_stale_recovery_max_distance" default="1.50"/>
+
+  <node pkg="move_base" type="move_base" name="move_base" output="screen" respawn="$(arg move_base_respawn)">
+    <!-- TEB is never a second /cmd_vel publisher. The LSTE mux selects this
+         stream only when /lste/controller_mode is teb. -->
+    <!-- Keep TEB's raw planner stream separate. The turn supervisor below
+         owns the explicit frontier turn action before the mux sees it. -->
+    <remap from="cmd_vel" to="/lste/cmd_vel/teb_planner"/>
+    <remap from="odom" to="$(arg odom_topic)"/>
+
+    <!-- Navfn remains the production planner because its online frontier
+         handoff is the validated route in this workspace. A GlobalPlanner +
+         GradientPath experiment is retained in the metrics schema, but is
+         not enabled until it has a reliable unknown-space fallback. -->
+    <param name="base_global_planner" value="$(arg base_global_planner)"/>
+    <param name="base_local_planner" value="$(arg base_local_planner)"/>
+    <param name="persistent_execution" value="$(arg persistent_execution)"/>
+    <param name="persistent_frontier_endpoint_topic" value="$(arg persistent_frontier_endpoint_topic)"/>
+    <param name="persistent_frontier_lookahead_handoff_enabled" value="$(arg persistent_frontier_lookahead_handoff_enabled)"/>
+    <param name="persistent_frontier_lookahead_trigger_distance" value="$(arg persistent_frontier_lookahead_trigger_distance)"/>
+    <param name="persistent_frontier_admission_horizon" value="$(arg persistent_frontier_admission_horizon)"/>
+    <param name="persistent_frontier_admission_max_costmap_age" value="$(arg persistent_frontier_admission_max_costmap_age)"/>
+    <param name="persistent_frontier_admission_blocked_cost" value="$(arg persistent_frontier_admission_blocked_cost)"/>
+    <param name="persistent_frontier_admission_service_timeout" value="$(arg persistent_frontier_admission_service_timeout)"/>
+    <param name="persistent_frontier_admission_endpoint_epsilon" value="$(arg persistent_frontier_admission_endpoint_epsilon)"/>
+    <param name="persistent_frontier_curve_handoff_max_heading_deg" value="$(arg persistent_frontier_curve_handoff_max_heading_deg)"/>
+    <param name="persistent_task_done_topic" value="/lste/task_done"/>
+    <param name="persistent_mission_command_topic" value="$(arg persistent_mission_command_topic)"/>
+    <param name="persistent_installed_target_goal_topic" value="/lste/persistent_execution/installed_target_goal"/>
+    <param name="persistent_target_approach_topic" value="/lste/persistent_execution/target_approach"/>
+    <param name="persistent_target_plan_result_topic" value="/lste/persistent_execution/target_plan_result"/>
+    <param name="streaming_mission_command_topic" value="$(arg persistent_mission_command_topic)"/>
+    <param name="streaming_target_command_topic" value="$(arg persistent_target_command_topic)"/>
+    <param name="persistent_installed_target_command_topic" value="$(arg persistent_installed_target_command_topic)"/>
+    <param name="persistent_planner_command_contract_topic" value="$(arg persistent_planner_command_contract_topic)"/>
+    <param name="streaming_goal_epsilon" value="0.05"/>
+    <param name="streaming_replan_distance" value="0.50"/>
+    <param name="streaming_max_replan_interval" value="2.0"/>
+    <param name="persistent_plan_equivalence_distance" value="$(arg persistent_plan_equivalence_distance)"/>
+    <param name="persistent_plan_equivalence_prefix_distance" value="0.35"/>
+    <!--
+         Global planning is event driven.  Rebuilding Navfn's whole plan on a
+         fixed wall-clock timer while gmapping is updating the map resets TEB's
+         timed elastic band even when the committed endpoint and route are
+         unchanged; the resulting zero-velocity pulses look like braking.
+         move_base still wakes the planner for a new goal and recovery, while
+         the rolling local costmap/TEB remains high-rate for obstacle response.
+    -->
+    <param name="planner_frequency" value="$(arg planner_frequency)"/>
+    <param name="controller_frequency" value="20.0"/>
+    <param name="planner_patience" value="5.0"/>
+    <param name="controller_patience" value="5.0"/>
+    <param name="oscillation_timeout" value="15.0"/>
+    <param name="oscillation_distance" value="0.25"/>
+    <param name="shutdown_costmaps" value="false"/>
+    <param name="recovery_behavior_enabled" value="true"/>
+    <param name="clearing_rotation_allowed" value="true"/>
+    <!-- move_base's own transform tolerance for transformGlobalPlan.  The
+         costmap transform_tolerance values below do not cover this top-level
+         lookup: gmapping publishes map->odom in discrete steps, and at a fast
+         simulation clock the plan stamp can be ~1 ms ahead of the latest TF
+         data.  With the default 0.1 s the lookup fails with an extrapolation
+         error and TEB emits a zero velocity in open space, the "frequent
+         safety-distance braking" symptom.  A larger tolerance lets move_base
+         wait out that gap instead of stopping. -->
+    <param name="transform_tolerance" value="1.0"/>
+
+    <!-- Online gmapping supplies /map. Frontier endpoints are selected from
+         connected known free cells; Navfn may use unknown only as a high-cost
+         fallback for a confirmed visual target beyond the current map. -->
+    <param name="global_costmap/global_frame" value="$(arg global_frame)"/>
+    <param name="global_costmap/robot_base_frame" value="base_footprint"/>
+    <param name="global_costmap/update_frequency" value="2.0"/>
+    <param name="global_costmap/publish_frequency" value="1.0"/>
+    <param name="global_costmap/transform_tolerance" value="0.5"/>
+    <param name="global_costmap/static_map" value="true"/>
+    <param name="global_costmap/track_unknown_space" value="true"/>
+    <param name="global_costmap/unknown_cost_value" value="-1"/>
+    <param name="global_costmap/robot_radius" value="0.30"/>
+    <param name="global_costmap/inflation_radius" value="0.70"/>
+    <param name="global_costmap/cost_scaling_factor" value="5.0"/>
+
+    <param name="NavfnROS/allow_unknown" value="$(arg navfn_allow_unknown)"/>
+    <param name="NavfnROS/default_tolerance" value="0.20"/>
+    <param name="NavfnROS/visualize_potential" value="true"/>
+
+    <!-- The local rolling map is fed by the same 2-D lidar used by the
+         frontier explorer and remains available while SLAM updates /map. -->
+    <param name="local_costmap/global_frame" value="odom"/>
+    <param name="local_costmap/robot_base_frame" value="base_footprint"/>
+    <param name="local_costmap/update_frequency" value="10.0"/>
+    <param name="local_costmap/publish_frequency" value="5.0"/>
+    <param name="local_costmap/transform_tolerance" value="0.5"/>
+    <param name="local_costmap/static_map" value="false"/>
+    <param name="local_costmap/rolling_window" value="true"/>
+    <param name="local_costmap/width" value="8.0"/>
+    <param name="local_costmap/height" value="8.0"/>
+    <param name="local_costmap/resolution" value="0.10"/>
+    <param name="local_costmap/robot_radius" value="0.30"/>
+    <!-- Keep the physical footprint (0.30 m) hard, but avoid a second very
+         large local inflation band that turns a valid doorway into a stop. -->
+    <param name="local_costmap/inflation_radius" value="0.55"/>
+    <param name="local_costmap/cost_scaling_factor" value="3.0"/>
+    <param name="local_costmap/obstacle_layer/observation_sources" value="laser"/>
+    <param name="local_costmap/obstacle_layer/laser/data_type" value="LaserScan"/>
+    <param name="local_costmap/obstacle_layer/laser/topic" value="$(arg scan_topic)"/>
+    <param name="local_costmap/obstacle_layer/laser/marking" value="true"/>
+    <param name="local_costmap/obstacle_layer/laser/clearing" value="true"/>
+    <param name="local_costmap/obstacle_layer/laser/obstacle_range" value="8.0"/>
+    <param name="local_costmap/obstacle_layer/laser/raytrace_range" value="10.0"/>
+
+    <!-- TEB settings are deliberately forward-only. The robot can turn in
+         place instead of reversing toward unseen space at a wall corner. -->
+    <param name="TebLocalPlannerROS/max_vel_x" value="$(arg max_linear_speed)"/>
+    <!-- The platform should turn in place at a wall/corner. A non-zero
+         backwards limit made TEB repeatedly command -0.05 m/s while its
+         forward trajectory was blocked, which looked like safety braking and
+         kept it oscillating near the obstacle. -->
+    <!-- TEB's optimizer requires a positive reverse bound.  Keep it below
+         one centimetre/s so a blocked forward trajectory turns in place, and
+         make penalty_epsilon smaller than the bound (equal values trigger a
+         TEB warning and weaken the forward-drive penalty). -->
+    <param name="TebLocalPlannerROS/max_vel_x_backwards" value="0.001"/>
+    <param name="TebLocalPlannerROS/penalty_epsilon" value="0.0005"/>
+    <param name="TebLocalPlannerROS/max_vel_theta" value="0.65"/>
+    <param name="TebLocalPlannerROS/acc_lim_x" value="0.60"/>
+    <param name="TebLocalPlannerROS/acc_lim_theta" value="0.90"/>
+    <param name="TebLocalPlannerROS/max_vel_y" value="0.0"/>
+    <param name="TebLocalPlannerROS/min_turning_radius" value="0.0"/>
+    <param name="TebLocalPlannerROS/wheelbase" value="0.0"/>
+    <!-- A slightly coarser band and a two-pose command lookahead reduce the
+         one-cycle left/right corrections seen on straight map segments.  The
+         larger angular-acceleration weight and the wider viapoint spacing
+         below damp the optimizer's reaction to per-cell global-path zig-zag
+         and local-costmap noise on straight corridors. -->
+    <param name="TebLocalPlannerROS/dt_ref" value="0.25"/>
+    <param name="TebLocalPlannerROS/dt_hysteresis" value="0.12"/>
+    <param name="TebLocalPlannerROS/control_look_ahead_poses" value="5"/>
+    <param name="TebLocalPlannerROS/prevent_look_ahead_poses_near_goal" value="3"/>
+    <!-- A hot start is valid only for a true local continuation. Frontier
+         endpoints can be far apart while sharing one persistent action
+         lease; retaining the old band for that branch replaces only its last
+         pose and can collapse a time interval to zero. Keep TEB's upstream
+         continuation envelope: a divergent route receives a complete fresh
+         band, while identical Navfn refreshes remain filtered by the wrapper. -->
+    <param name="TebLocalPlannerROS/force_reinit_new_goal_dist" value="1.00"/>
+    <param name="TebLocalPlannerROS/force_reinit_new_goal_angular" value="0.78"/>
+    <!-- Wider viapoint separation and a softer viapoint weight: Navfn paths
+         step through grid-cell centres, and pulling the band hard onto every
+         30 cm point makes TEB reproduce the cell zig-zag as left/right
+         steering corrections.  Keeping the route tangent (via overwrite
+         orientation) while loosening the intermediate-point pull removes the
+         wobble without losing the global direction. -->
+    <param name="TebLocalPlannerROS/global_plan_viapoint_sep" value="0.60"/>
+    <param name="TebLocalPlannerROS/weight_viapoint" value="0.50"/>
+    <param name="TebLocalPlannerROS/weight_optimaltime" value="0.60"/>
+    <!-- Stronger angular-acceleration penalty: TEB re-optimises against a
+         10 Hz local costmap, and each scan slightly changes the band.  A
+         higher theta-acceleration weight suppresses the resulting one-cycle
+         left/right sign flips while keeping obstacle response intact. -->
+    <param name="TebLocalPlannerROS/weight_acc_lim_theta" value="3.00"/>
+    <!-- Use Navfn's path tangent for intermediate headings. This is stable
+         for the map-derived frontier path and prevents TEB from choosing its
+         tiny reverse fallback when the next waypoint is behind the base.
+         Disabling it (letting TEB derive headings from the band alone) was
+         tested and regressed: the robot stalled with multi-minute stops near
+         furniture and the forward steering energy increased, so the path
+         tangent is kept as the heading contract. -->
+    <param name="TebLocalPlannerROS/global_plan_overwrite_orientation" value="true"/>
+    <param name="TebLocalPlannerROS/allow_init_with_backwards_motion" value="false"/>
+    <param name="TebLocalPlannerROS/feasibility_check_no_poses" value="3"/>
+    <!-- LSTE frontier poses identify a clearance-safe observation region, not
+         a docking marker.  Requiring the circular base to remove the final
+         35 cm after the lidar has already observed that region caused TEB to
+         oscillate at the endpoint until the bridge's no-progress watchdog
+         cancelled the action.  A 50 cm native completion envelope expresses
+         that mission contract without an artificial cancel/PREEMPTED cycle.
+         Confirmed visual targets still receive their own close-range evidence
+         gate in GoalManager before task completion. -->
+    <param name="TebLocalPlannerROS/xy_goal_tolerance" value="$(arg teb_xy_goal_tolerance)"/>
+    <!-- A frontier endpoint's yaw is a path tangent, not an arrival contract.
+         Requiring a circular base to meet that yaw after it reaches the XY
+         point creates a zero-speed terminal rotation, and the bridge can
+         eventually mistake that legitimate orientation phase for a stalled
+         action. TEB therefore completes endpoint actions on XY arrival. The
+         separate turn supervisor keeps its own 0.35-rad tolerance for the
+         rare explicit in-place turn transaction. -->
+    <param name="TebLocalPlannerROS/yaw_goal_tolerance" value="3.14159"/>
+    <!-- Short visual/frontier segments should not force a full stop at every
+         handoff. The task_done mux gate still performs the final stop. -->
+    <param name="TebLocalPlannerROS/free_goal_vel" value="true"/>
+    <param name="TebLocalPlannerROS/min_obstacle_dist" value="0.22"/>
+    <param name="TebLocalPlannerROS/inflation_dist" value="0.55"/>
+    <!-- Official TEB velocity limiter: slow continuously near furniture,
+         instead of waiting for the hard obstacle constraint to force a
+         full-speed-to-zero transition. It does not weaken min_obstacle_dist.
+         The onset is 1.2 m so a corner-frontier approach starts throttling
+         before the robot is a metre from the wall; at the old 0.9 m onset the
+         robot cruised at full speed until ~1 m from a corner and visually
+         "dove" into the wall before the goal switch stopped it.  The 0.40
+         floor keeps the final approach a gentle ramp. -->
+    <param name="TebLocalPlannerROS/obstacle_proximity_ratio_max_vel" value="0.40"/>
+    <param name="TebLocalPlannerROS/obstacle_proximity_lower_bound" value="0.35"/>
+    <param name="TebLocalPlannerROS/obstacle_proximity_upper_bound" value="1.20"/>
+    <param name="TebLocalPlannerROS/include_costmap_obstacles" value="$(arg teb_include_costmap_obstacles)"/>
+    <param name="TebLocalPlannerROS/include_dynamic_obstacles" value="false"/>
+    <!-- Static indoor geometry is represented as clustered convex obstacles
+         instead of a dense cloud of occupied cells. This changes only TEB's obstacle
+         representation: the local costmap and its collision footprint remain
+         the safety authority. -->
+    <param if="$(eval arg('teb_costmap_converter_plugin') != 'disabled')"
+           name="TebLocalPlannerROS/costmap_converter_plugin"
+           value="$(arg teb_costmap_converter_plugin)"/>
+    <!-- ROS parameters outlive a restarted move_base. Remove the previous
+         converter setting for the raw-obstacle experiment instead of letting
+         the new planner inherit it from an earlier run. -->
+    <rosparam unless="$(eval arg('teb_costmap_converter_plugin') != 'disabled')"
+              command="delete"
+              param="TebLocalPlannerROS/costmap_converter_plugin"/>
+    <param name="TebLocalPlannerROS/costmap_converter_spin_thread" value="$(arg teb_costmap_converter_spin_thread)"/>
+    <param name="TebLocalPlannerROS/costmap_converter_rate" value="$(arg teb_costmap_converter_rate)"/>
+    <!-- Multi-topology local planning evaluates distinct left/right routes
+         from the same live lidar costmap.  Deterministic simple exploration
+         avoids random roadmap candidates changing the selected route between
+         otherwise identical SLAM updates. -->
+    <param name="TebLocalPlannerROS/enable_homotopy_class_planning" value="$(arg teb_homotopy_class_planning)"/>
+    <param name="TebLocalPlannerROS/enable_multithreading" value="true"/>
+    <param name="TebLocalPlannerROS/simple_exploration" value="true"/>
+    <param name="TebLocalPlannerROS/max_number_classes" value="5"/>
+    <!-- The global Navfn path remains the preferred candidate, but an
+         alternate local topology must be allowed to leave its via-points in
+         order to recover around a stale or incomplete online map. -->
+    <param name="TebLocalPlannerROS/viapoints_all_candidates" value="false"/>
+    <param name="TebLocalPlannerROS/weight_kinematics_nh" value="1000.0"/>
+    <param name="TebLocalPlannerROS/weight_kinematics_forward_drive" value="5000.0"/>
+    <param name="TebLocalPlannerROS/weight_obstacle" value="45.0"/>
+    <param name="TebLocalPlannerROS/weight_inflation" value="0.20"/>
+    <param name="TebLocalPlannerROS/footprint_model/type" value="circular"/>
+    <param name="TebLocalPlannerROS/footprint_model/radius" value="0.30"/>
+    <param name="TebLocalPlannerROS/publish_feedback" value="true"/>
+  </node>
+
+  <node pkg="lste_topo_access" type="lste_teb_goal_bridge.py"
+        name="lste_teb_goal_bridge" output="screen">
+    <param name="goal_topic" value="$(arg goal_topic)"/>
+    <param name="intent_topic" value="$(arg intent_topic)"/>
+    <param name="goal_command_topic" value="$(arg goal_command_topic)"/>
+    <param name="navigation_hold_topic" value="$(arg navigation_hold_topic)"/>
+    <param name="use_goal_command" value="$(arg use_goal_command)"/>
+    <param name="require_intent" value="$(arg require_intent)"/>
+    <param name="bridge_status_topic" value="/lste/teb_goal_bridge/status"/>
+    <param name="terminal_topic" value="$(arg terminal_topic)"/>
+    <param name="terminal_contract_topic" value="$(arg terminal_contract_topic)"/>
+    <param name="target_failure_topic" value="$(arg target_failure_topic)"/>
+    <param name="global_frame" value="$(arg global_frame)"/>
+    <param name="initial_mode" value="$(arg controller_mode)"/>
+    <param name="persistent_execution" value="$(arg persistent_execution)"/>
+    <param name="require_canonical_identity" value="$(arg persistent_execution)"/>
+    <param name="persistent_frontier_lookahead_handoff_enabled" value="$(arg persistent_frontier_lookahead_handoff_enabled)"/>
+    <param name="persistent_frontier_lookahead_trigger_distance" value="$(arg persistent_frontier_lookahead_trigger_distance)"/>
+    <param name="persistent_frontier_admission_horizon" value="$(arg persistent_frontier_admission_horizon)"/>
+    <param name="persistent_frontier_admission_max_costmap_age" value="$(arg persistent_frontier_admission_max_costmap_age)"/>
+    <param name="persistent_frontier_admission_blocked_cost" value="$(arg persistent_frontier_admission_blocked_cost)"/>
+    <param name="persistent_frontier_admission_service_timeout" value="$(arg persistent_frontier_admission_service_timeout)"/>
+    <param name="persistent_frontier_admission_endpoint_epsilon" value="$(arg persistent_frontier_admission_endpoint_epsilon)"/>
+    <param name="persistent_frontier_curve_handoff_max_heading_deg" value="$(arg persistent_frontier_curve_handoff_max_heading_deg)"/>
+    <param name="persistent_mission_goal_topic" value="$(arg persistent_mission_goal_topic)"/>
+    <param name="persistent_target_goal_topic" value="/lste/persistent_execution/target_goal"/>
+    <param name="persistent_mission_command_topic" value="$(arg persistent_mission_command_topic)"/>
+    <param name="persistent_target_command_topic" value="$(arg persistent_target_command_topic)"/>
+    <param name="persistent_installed_target_command_topic" value="$(arg persistent_installed_target_command_topic)"/>
+    <param name="persistent_installed_target_goal_topic" value="/lste/persistent_execution/installed_target_goal"/>
+    <param name="persistent_target_approach_topic" value="/lste/persistent_execution/target_approach"/>
+    <param name="persistent_frontier_endpoint_topic" value="$(arg persistent_frontier_endpoint_topic)"/>
+    <param name="persistent_target_plan_result_topic" value="/lste/persistent_execution/target_plan_result"/>
+    <param name="position_epsilon" value="$(arg goal_position_epsilon)"/>
+    <param name="yaw_epsilon" value="$(arg goal_yaw_epsilon)"/>
+    <param name="compare_goal_yaw" value="$(arg compare_goal_yaw)"/>
+    <param name="min_update_interval" value="$(arg goal_min_update_interval)"/>
+    <param name="goal_retry_interval" value="$(arg goal_retry_interval)"/>
+    <param name="allow_in_place_replacement" value="$(arg allow_in_place_replacement)"/>
+    <param name="allow_route_continuation_replacement" value="$(arg allow_route_continuation_replacement)"/>
+    <param name="handoff_distance" value="$(arg handoff_distance)"/>
+    <param name="handoff_radius" value="$(arg handoff_radius)"/>
+    <param name="progress_timeout" value="$(arg progress_timeout)"/>
+    <param name="progress_epsilon" value="$(arg progress_epsilon)"/>
+    <param name="handoff_min_interval" value="$(arg handoff_min_interval)"/>
+    <param name="frontier_observation_completion_radius" value="$(arg frontier_observation_completion_radius)"/>
+    <param name="frontier_observation_completion_max_linear_speed" value="$(arg frontier_observation_completion_max_linear_speed)"/>
+    <param name="frontier_observation_stationary_hold" value="$(arg frontier_observation_stationary_hold)"/>
+    <param name="teb_planner_cmd_topic" value="$(arg teb_planner_cmd_topic)"/>
+    <param name="frontier_continuous_prefetch_handoff_enabled" value="$(arg frontier_continuous_prefetch_handoff_enabled)"/>
+    <param name="frontier_continuous_prefetch_handoff_timeout" value="$(arg frontier_continuous_prefetch_handoff_timeout)"/>
+    <param name="teb_reorientation_enabled" value="$(arg teb_reorientation_enabled)"/>
+    <param name="teb_reorientation_linear_threshold" value="$(arg teb_reorientation_linear_threshold)"/>
+    <param name="teb_reorientation_angular_threshold" value="$(arg teb_reorientation_angular_threshold)"/>
+    <param name="teb_reorientation_yaw_progress" value="$(arg teb_reorientation_yaw_progress)"/>
+    <param name="teb_reorientation_stagnation_timeout" value="$(arg teb_reorientation_stagnation_timeout)"/>
+    <param name="teb_reorientation_max_extension" value="$(arg teb_reorientation_max_extension)"/>
+    <param name="teb_reorientation_feedback_timeout" value="$(arg teb_reorientation_feedback_timeout)"/>
+    <param name="target_early_handoff_distance" value="$(arg target_early_handoff_distance)"/>
+    <param name="target_early_handoff_min_delta" value="$(arg target_early_handoff_min_delta)"/>
+    <param name="frontier_replacement_max_delta" value="$(arg frontier_replacement_max_delta)"/>
+    <param name="frontier_early_handoff_max_heading_deg" value="$(arg frontier_early_handoff_max_heading_deg)"/>
+    <param name="frontier_stale_recovery_grace" value="$(arg frontier_stale_recovery_grace)"/>
+    <param name="frontier_stale_recovery_max_distance" value="$(arg frontier_stale_recovery_max_distance)"/>
+    <param name="frontier_status_topic" value="$(arg frontier_status_topic)"/>
+    <param name="navfn_plan_topic" value="$(arg navfn_plan_topic)"/>
+  </node>
+
+  <!-- Execution-state adapter for the route planner's in-place turn
+       connector. It never plans a path and passes ordinary TEB commands
+       through unchanged. Its limits are read from the TEB parameters above. -->
+  <node pkg="lste_topo_access" type="lste_teb_turn_supervisor.py"
+        name="lste_teb_turn_supervisor" output="screen">
+    <param name="planner_cmd_topic" value="/lste/cmd_vel/teb_planner"/>
+    <param name="command_contract_topic" value="/lste/cmd_vel/teb_contract"/>
+    <param name="planner_command_contract_topic" value="$(arg persistent_planner_command_contract_topic)"/>
+    <param name="mux_status_topic" value="/lste/cmd_vel_mux/status"/>
+    <param name="require_planner_command_contract" value="$(arg persistent_execution)"/>
+    <param name="navfn_plan_topic" value="$(arg navfn_plan_topic)"/>
+    <param name="output_cmd_topic" value="/lste/cmd_vel/teb"/>
+    <param name="goal_topic" value="$(arg goal_topic)"/>
+    <param name="intent_topic" value="$(arg intent_topic)"/>
+    <param name="bridge_status_topic" value="/lste/teb_goal_bridge/status"/>
+    <param name="pose_topic" value="/rbt_pose"/>
+    <param name="mode_topic" value="/lste/controller_mode"/>
+    <param name="task_done_topic" value="/lste/task_done"/>
+    <param name="navigation_hold_topic" value="/lste/navigation_hold"/>
+    <param name="status_topic" value="/lste/teb_turn_supervisor/status"/>
+    <param name="command_frequency" value="20.0"/>
+    <param name="max_vel_theta" value="0.65"/>
+    <param name="acc_lim_theta" value="0.90"/>
+    <param name="yaw_goal_tolerance" value="0.35"/>
+    <!-- Anti-spin protections: wait until the managed action is stable before
+         starting a pre-route turn, cap a single turn's swept rotation so it
+         can never wind up a full circle, and hold the achieved heading briefly
+         after the turn so TEB's band re-anchors instead of reversing. -->
+    <param name="turn_start_confirm_duration" value="0.50"/>
+    <param name="turn_rotation_cap_factor" value="1.6"/>
+    <param name="turn_settle_duration" value="0.35"/>
+    <param name="endpoint_alignment_enabled" value="$(arg teb_frontier_pre_route_alignment)"/>
+    <!-- Production leaves local trajectory recovery to TEB. The optional
+         external stalled-route rotation is retained only for a controlled
+         comparison: it can complete its yaw phase while TEB still rejects the
+         subsequent band, so it must not become a second local controller. -->
+    <!-- When TEB has a valid global path but emits a persistent near-zero
+         command because its first tangent is behind the base, let the
+         execution adapter perform one bounded in-place turn. This keeps the
+         recovery in the controller layer and prevents move_base from spending
+         every recovery behavior inside the same room. -->
+    <param name="stalled_route_reorientation_enabled" value="true"/>
+    <param name="stalled_route_reorientation_delay" value="0.80"/>
+    <param name="stalled_route_reorientation_heading_deg" value="45.0"/>
+    <param name="stalled_route_reorientation_linear" value="0.03"/>
+    <param name="stalled_route_reorientation_angular" value="0.15"/>
+    <param name="stalled_route_reorientation_min_distance" value="1.00"/>
+    <!-- Gmapping can enlarge the global costmap while a route is active. TEB
+         then has a short scheduler gap even though its last selected local
+         trajectory and rolling lidar costmap remain valid. Feedback freshness
+         adapts to its observed callback interval (0.35 to 0.60 s), while each
+         continuity bridge itself remains limited to 0.30 s. The actuator mux
+         independently enforces lidar braking. Terminal, task and hold states
+         always remain authoritative. -->
+    <param name="trajectory_continuity_enabled" value="true"/>
+    <param name="trajectory_feedback_timeout" value="0.35"/>
+    <param name="trajectory_feedback_timeout_cap" value="0.60"/>
+    <param name="trajectory_feedback_period_scale" value="1.50"/>
+    <param name="trajectory_continuity_min_forward" value="0.05"/>
+    <param name="trajectory_continuity_max_hold" value="0.30"/>
+    <!-- Do not bridge a zero when the robot is already within the action's
+         arrival envelope: feedback can lag one callback behind a terminal. -->
+    <param name="trajectory_continuity_terminal_radius" value="0.75"/>
+    <!-- Start an explicit pre-route rotation when the Navfn path tangent is
+         more than this angle behind the base.  75 deg (instead of 90) prevents
+         the robot from drifting toward a mapped wall during 60-90 deg goal
+         changes while TEB's hot-started band re-orients. -->
+    <param name="pre_route_turn_threshold_deg" value="75.0"/>
+  </node>
+</launch>

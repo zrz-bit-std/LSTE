@@ -1,0 +1,128 @@
+<launch>
+  <!-- Development-only composition for the two-room targeted world. It is
+       intentionally outside the production lifecycle launch files: a quick
+       doorway experiment must not start MiniCPM, detectors, or the full
+       semantic mission stack. -->
+  <arg name="gui" default="false"/>
+  <arg name="world_name" default="$(find lste_core)/../../worlds/targeted_navigation/portal_retry_single_door.world"/>
+  <!-- Disable the frontier-to-goal handoff for a controller-only replay. The
+       frontier node may still publish diagnostics, but Goal Manager will not
+       claim its route when this is false. -->
+  <arg name="global_frontier_enabled" default="true"/>
+  <arg name="global_frontier_command_enabled" default="true"/>
+  <arg name="start_frontier" default="true"/>
+  <!-- Persistent Navfn/TEB is an explicit diagnostic mode. The defaults keep
+       the historical endpoint-action composition unchanged. -->
+  <arg name="persistent_execution" default="false"/>
+  <arg name="base_global_planner" default="navfn/NavfnROS"/>
+  <arg name="base_local_planner" default="teb_local_planner/TebLocalPlannerROS"/>
+  <!-- Persistent target requests arrive while one move_base action remains
+       active.  A positive planner frequency is therefore required to wake
+       StreamingNavfnPlanner and either install or reject the request.  The
+       endpoint-action diagnostic keeps the historical event-driven 0.0 Hz
+       default; its runner passes 20 Hz for persistent runs. -->
+  <arg name="planner_frequency" default="0.0"/>
+  <!-- A focused runner must fail once on a dependency conflict and preserve
+       the startup artifact; production launch files retain respawn=true. -->
+  <arg name="move_base_respawn" default="false"/>
+  <arg name="use_goal_command" default="true"/>
+  <arg name="require_intent" default="true"/>
+  <arg name="teb_costmap_converter_plugin" default="costmap_converter::CostmapToPolygonsDBSMCCH"/>
+  <arg name="teb_include_costmap_obstacles" default="true"/>
+  <!-- The controller-only T-junction run talks directly to the TEB bridge;
+       omitting Goal Manager removes its legacy frontier fallback from that
+       experiment without changing the autonomous composition. -->
+  <arg name="start_goal_manager" default="true"/>
+  <!-- Diagnostic controller switch. Production and autonomous tests keep
+       this true; false lets TEB's native tiny reverse sample reach Gazebo so
+       a T-junction stall can be attributed to the mux constraint. -->
+  <arg name="teb_forward_only" default="true"/>
+  <!-- Make the route-entry execution contract explicit in focused tests.
+       A large Navfn tangent change is completed by the TEB turn supervisor
+       before TEB's translational band is allowed to advance.  This avoids
+       classifying a valid in-place reorientation as a translational stall. -->
+  <arg name="teb_frontier_pre_route_alignment" default="true"/>
+  <arg name="x" default="-2.0"/>
+  <arg name="y" default="0.0"/>
+  <arg name="z" default="0.1"/>
+  <arg name="yaw" default="0.0"/>
+
+  <include file="$(find lste_core)/launch/lab_with_pro3.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="spawn_pro3" value="true"/>
+    <arg name="x" value="$(arg x)"/>
+    <arg name="y" value="$(arg y)"/>
+    <arg name="z" value="$(arg z)"/>
+    <arg name="yaw" value="$(arg yaw)"/>
+  </include>
+
+  <!-- The Pro3 Gazebo model publishes a point cloud. The navigation stack
+       consumes the same 2-D LaserScan topic as production LSTE. -->
+  <include file="$(find pointcloud_to_laserscan)/launch/lste_pro3_to_scan.launch"/>
+
+  <!-- The explorer's pose interface is a lightweight projection of the same
+       wheel odometry. Keep it in this focused composition so graph planning
+       can bootstrap the current Place without starting perception nodes. -->
+  <include file="$(find lste_oc_srfc)/launch/oc_srfc_proj.launch"/>
+
+  <include file="$(find lste_topo_access)/launch/online_slam_frontier.launch">
+    <arg name="start_frontier" value="$(arg start_frontier)"/>
+    <arg name="persistent_execution" value="$(arg persistent_execution)"/>
+    <arg name="navfn_plan_validation" value="false"/>
+    <arg name="navfn_empty_warmup_seconds" value="2.0"/>
+    <arg name="navfn_startup_probe_distance" value="0.25"/>
+    <arg name="planning_period" value="0.5"/>
+    <arg name="active_timeout" value="20.0"/>
+    <arg name="stall_timeout" value="5.0"/>
+    <arg name="post_turn_stall_timeout" value="3.0"/>
+    <arg name="unreachable_grace" value="5.0"/>
+    <arg name="rejected_timeout" value="20.0"/>
+    <arg name="exploration_method" value="place_portal_workitem"/>
+  </include>
+
+  <include file="$(find lste_topo_access)/launch/teb_navigation.launch">
+    <arg name="use_goal_command" value="$(arg use_goal_command)"/>
+    <arg name="require_intent" value="$(arg require_intent)"/>
+    <arg name="teb_costmap_converter_plugin" value="$(arg teb_costmap_converter_plugin)"/>
+    <arg name="teb_include_costmap_obstacles" value="$(arg teb_include_costmap_obstacles)"/>
+    <arg name="persistent_execution" value="$(arg persistent_execution)"/>
+    <arg name="base_global_planner" value="$(arg base_global_planner)"/>
+    <arg name="base_local_planner" value="$(arg base_local_planner)"/>
+    <arg name="max_linear_speed" value="0.50"/>
+    <arg name="controller_mode" value="teb"/>
+    <arg name="planner_frequency" value="$(arg planner_frequency)"/>
+    <arg name="move_base_respawn" value="$(arg move_base_respawn)"/>
+    <arg name="progress_timeout" value="5.0"/>
+    <arg name="frontier_observation_completion_radius" value="0.0"/>
+    <arg name="teb_frontier_pre_route_alignment" value="$(arg teb_frontier_pre_route_alignment)"/>
+  </include>
+
+  <!-- Keep the production ownership boundary in the focused experiment:
+       global frontier emits a route command, Goal Manager atomically converts
+       it to /lste/mission_goal, and the TEB bridge owns MoveBase. Without this
+       node the explorer can only report a goal and will correctly declare a
+       controller stall because no action was ever dispatched. -->
+  <node if="$(arg start_goal_manager)" pkg="lste_topo_access" type="lste_goal_manager.py" name="lste_goal_manager" output="screen">
+    <param name="global_frontier_enabled" value="$(arg global_frontier_enabled)"/>
+    <param name="global_frontier_command_enabled" value="$(arg global_frontier_command_enabled)"/>
+    <param name="global_frontier_topic" value="/lste/global_frontier_goal"/>
+    <param name="global_frontier_command_topic" value="/lste/global_frontier/route_command"/>
+    <param name="global_frontier_status_topic" value="/lste/global_frontier/status"/>
+    <param name="goal_command_topic" value="/lste/mission_goal"/>
+    <param name="goal_intent_topic" value="/lste/goal_intent"/>
+    <param name="global_goal_source" value="brain"/>
+    <param name="global_frontier_max_age" value="3.0"/>
+  </node>
+
+  <!-- teb_navigation keeps move_base's planner output on the controller
+       stream. The mux is the only node that forwards that stream to Gazebo's
+       /cmd_vel actuator topic, so the targeted launch must include it even
+       though it deliberately omits the full mission/controller-switch stack. -->
+  <node pkg="lste_core" type="lste_cmd_vel_mux_node.py" name="lste_cmd_vel_mux" output="screen">
+    <param name="initial_mode" value="teb"/>
+    <param name="scan_topic" value="/pro3/rlscan"/>
+    <param name="teb_forward_only" value="$(arg teb_forward_only)"/>
+    <param name="governor_max_speed" value="0.50"/>
+  </node>
+</launch>

@@ -1,0 +1,92 @@
+<launch>
+  <!-- 整体：启动 GP frontier 节点，用于在 PASS 状态下基于 GP 生成探索子目标 -->
+
+  <!-- Access-Topo 配置 -->
+  <arg name="access_topo_config" default="$(find lste_topo_access)/topo_tree/cfgs/access_topo.yaml"/>
+  <arg name="access_topo_config_pass" default="$(find lste_topo_access)/topo_tree/cfgs/access_topo_pass.yaml"/>
+  <arg name="access_topo_config_sus_c" default="$(find lste_topo_access)/topo_tree/cfgs/access_topo_sus_c.yaml"/>
+  <arg name="access_topo_test_name" default="default_test"/>
+  <!-- 可选：运行目录/保存位置（如果不设，将使用 topo_tree_root/run_name） -->
+  <arg name="access_topo_run_name" default="run"/>
+  <!-- 默认保存目录：topo_tree/tree/<access_topo_run_name> -->
+  <arg name="access_topo_save_dir" default="$(find lste_topo_access)/topo_tree/tree/$(arg access_topo_run_name)"/>
+  <!-- frontier 日志开关与目录 -->
+  <arg name="frontier_log" default="true"/>
+  <arg name="frontier_log_dir" default="$(find lste_topo_access)/topo_tree/frontier_log"/>
+  <!-- GoalManager: LOCKED 持续多久视为任务完成 -->
+  <arg name="follow_locked_done_time" default="10.0"/>
+  <!-- The complete LSTE lifecycle starts the configured Goal Manager itself.
+       Keep this true only when launching this GP file as a standalone stack. -->
+  <arg name="launch_goal_manager" default="true"/>
+
+  <!-- 启动的节点属于 lste_topo_access 功能包 -->
+  <!-- pkg：包名；type：Python 脚本名；name：节点名；output="screen"：日志打印到终端 -->
+  <node pkg="lste_topo_access"
+        type="gp_subgoals_sim_topo.py"
+        name="gp_subgoal"
+        output="screen">
+
+    <!-- 占据球面配置：oc_srfc_rds 为占据面半径（激光最大考虑距离，单位 m） -->
+    <param name="oc_srfc_rds" value="4.0" />
+    <!-- 点云下采样步长：每隔 pcl_skp 个角度方向保留一个，用于减小 GP 训练点数量 -->
+    <param name="pcl_skp" value="2" />
+
+    <!-- GP 相关参数：gp_nav_indpts_sz 为稀疏 GP 的诱导点数量，值越大越准但越慢 -->
+    <param name="gp_nav_indpts_sz"   value="400" />
+    <!-- gp_nav_var_thrshld 为方差阈值，用于从方差图中提取“高不确定性”frontier 区域 -->
+    <param name="gp_nav_var_thrshld" value="0.03" />
+
+    <!-- 代价函数参数：gap_k_dir 控制方向项权重（越大越偏向机器人前方） -->
+    <param name="gap_k_dir"       value="4.0" />
+    <!-- gap_k_dst 控制与全局目标距离项权重（越大越偏向靠近全局目标的 frontier） -->
+    <param name="gap_k_dst"       value="5.0" />
+    <!-- gp_nav_goal_dst 为子目标距离机器人中心的标称半径（导航点所在球面的半径，单位 m） -->
+    <param name="gp_nav_goal_dst" value="4.0" />
+
+    <!-- 可视化参数：gp_nav_var_viz 为在 RViz 中绘制方差/占据球壳的半径（单位 m） -->
+    <param name="gp_nav_var_viz"     value="4.0" />
+    <!-- gp_nav_var_img_viz 控制是否弹出方差二值图窗口用于调试阈值（true 打开，false 关闭） -->
+    <param name="gp_nav_var_img_viz" value="false" />
+    <!-- frontier 日志 -->
+    <param name="frontier_log" value="$(arg frontier_log)"/>
+    <param name="frontier_log_dir" value="$(arg frontier_log_dir)"/>
+
+    <!-- Access-Topo 配置文件与测试名 -->
+    <param name="access_topo_config" value="$(arg access_topo_config)"/>
+    <param name="access_topo_config_pass" value="$(arg access_topo_config_pass)"/>
+    <param name="access_topo_config_sus_c" value="$(arg access_topo_config_sus_c)"/>
+
+    <!-- 保存路径/文件名控制：run_name 用于构造目录，topo_save_dir 直接指定绝对目录 -->
+    <param name="run_name" value="$(arg access_topo_run_name)"/>
+    <param name="topo_save_dir" value="$(arg access_topo_save_dir)"/>
+
+    <!-- 默认全局目标（odom 坐标系）
+         注意：实际运行时，gp_subgoals_sim_topo.py 会在没有收到 /lste/final_goal 时，
+         自动将全局目标重置为“起步位置正前方 10 m”。
+         这里的参数仅作为初始占位。 -->
+    <!-- gl_x：全局目标 x 坐标；gl_y：全局目标 y 坐标；gl_yaw：全局目标朝向（弧度） -->
+    <param name="gl_x" value="0.0" />
+    <param name="gl_y" value="0.0" />
+    <param name="gl_yaw" value="0.0" />
+
+  </node>
+
+  <!-- Goal Manager：依据 state/frontier/detections 生成唯一的 /lste/final_goal -->
+  <node pkg="lste_topo_access"
+        type="lste_goal_manager.py"
+        name="lste_goal_manager"
+        output="screen"
+        if="$(arg launch_goal_manager)">
+    <param name="pass_period" value="1.0" />
+    <param name="sus_c_period" value="1.0" />
+    <param name="locked_period" value="1.0" />
+    <param name="sus_a_period" value="2.0" />
+    <param name="sus_b_period" value="2.0" />
+    <param name="forward_dist" value="10.0" />
+    <param name="frontier_topic" value="/lste/gp_frontier_dir" />
+    <param name="depth_topic" value="/kinect/hd/image_depth_rect" />
+    <param name="image_topic" value="/kinect/hd/image_color_rect" />
+    <param name="use_depth" value="true" />
+    <param name="follow_locked_done_time" value="$(arg follow_locked_done_time)" />
+  </node>
+</launch>

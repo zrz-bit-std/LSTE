@@ -1,0 +1,35 @@
+<launch>
+  <!-- 参数：允许从命令行覆盖相机话题和 RViz 配置 -->
+  <arg name="image_topic" default="/kinect/hd/image_color_rect" />
+  <arg name="detections_topic" default="/lste/detections" />
+  <arg name="output_topic" default="/lste/det_vis_image" />
+  <!-- auto: GroundingDINO keeps the original tracker lifecycle; WeDetect
+       associates frequent measurements with persistent CSRT tracks. -->
+  <arg name="tracking_mode" default="auto" />
+  <arg name="tracking_enabled" default="true" />
+  <arg name="display_sync_mode" default="latest_frame" />
+  <arg name="display_history_size" default="90" />
+  <arg name="detector_backend" default="groundingdino" />
+  <arg name="rviz_config" default="$(find lste_core)/rviz/lste_det_vis.rviz" />
+
+  <!-- 检测可视化节点：订阅相机 + /lste/detections，发布叠加框后的图像 -->
+  <node pkg="lste_core"
+        type="lste_det_vis_node.py"
+        name="lste_det_vis_node"
+        output="screen">
+    <param name="image_topic" value="$(arg image_topic)" />
+    <param name="detections_topic" value="$(arg detections_topic)" />
+    <param name="output_topic" value="$(arg output_topic)" />
+    <param name="tracking_mode" value="$(arg tracking_mode)" />
+    <param name="tracking_enabled" value="$(arg tracking_enabled)" />
+    <param name="display_sync_mode" value="$(arg display_sync_mode)" />
+    <param name="display_history_size" value="$(arg display_history_size)" />
+    <param name="detector_backend" value="$(arg detector_backend)" />
+  </node>
+
+  <!-- RViz：直接加载预先保存好的配置文件 -->
+  <node pkg="rviz"
+        type="rviz"
+        name="rviz_lste_det_vis"
+        args="-d $(arg rviz_config)" />
+</launch>

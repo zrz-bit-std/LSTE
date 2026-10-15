@@ -1,0 +1,24 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "fire extinguisher",
+      "attributes": ["red", "cylinder-shaped", "usually mounted on walls"],
+      "typical_locations": ["corridor", "near exits", "next to doors"]
+    },
+    "env": {
+      "env_type_prior": ["corridor"],
+      "layout_prior": ["long narrow space", "multiple doors along walls"],
+      "related_structures": ["door", "wall", "exit sign"]
+    },
+    "obj_related": {
+      "key_objects": ["door"],
+      "search_strategy": "prioritize checking walls near doors and exits along the corridor",
+      "negative_clues": ["kitchen", "bathroom", "bedroom are less likely"]
+    },
+    "target_ctx": {
+      "left": "none",
+      "right": "door"
+    }
+  }
+}
+

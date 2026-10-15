@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WS="${LSTE_WS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+exec "$WS/scripts/lifecycle/stop_all_tmux.sh" "$@"

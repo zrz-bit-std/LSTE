@@ -1,0 +1,59 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "yellow mobile robot",
+      "attributes": [
+        "yellow",
+        "four-wheeled",
+        "low-profile chassis",
+        "box-shaped main body",
+        "placed on the floor"
+      ],
+      "typical_locations": [
+        "lab workspace",
+        "robotics office",
+        "indoor testing area",
+        "corridor near engineer desks"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office lab",
+        "robotics workspace"
+      ],
+      "layout_prior": [
+        "open space between desks",
+        "equipment racks and tools around",
+        "wide walkway for robot testing",
+        "computer workstations along one side"
+      ],
+      "related_structures": [
+        "desk",
+        "office chair",
+        "computer tower",
+        "floor",
+        "equipment rack",
+        "fan"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "desk legs",
+        "office chair wheels",
+        "computer equipment",
+        "testing rack"
+      ],
+      "search_strategy": "scan the floor area around desks and equipment racks where small robots are usually placed or tested",
+      "negative_clues": [
+        "on top of desks",
+        "inside cabinets",
+        "on chairs",
+        "outside the workspace"
+      ]
+    },
+    "target_ctx": {
+      "left": "fan",
+      "right": "chair"
+    }
+  }
+}

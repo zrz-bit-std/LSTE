@@ -1,0 +1,17 @@
+# Selection layer for the single office-building benchmark world.
+schema_version: 1
+manifest: worlds/benchmark/office_building_v1_manifest.yaml
+default_level: level_2
+levels:
+  level_1:
+    description: Building shell, main corridor, target room, minimal furniture
+    dynamic_obstacles: false
+  level_2:
+    description: Full semantic office furniture and target distractors
+    dynamic_obstacles: false
+  level_3:
+    description: Dead end, alternate route, occluded target, and narrow target doorway
+    dynamic_obstacles: false
+  level_4:
+    description: Level 3 plus a parked corridor trolley and semantic distractors
+    dynamic_obstacles: false

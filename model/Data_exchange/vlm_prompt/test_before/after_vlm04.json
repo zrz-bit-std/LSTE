@@ -1,0 +1,60 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "orange chair",
+      "attributes": [
+        "orange",
+        "small-sized",
+        "plastic",
+        "four-legged",
+        "placed on the floor near the window"
+      ],
+      "typical_locations": [
+        "meeting room",
+        "office workspace",
+        "break area",
+        "near windows or corner spaces"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "meeting room",
+        "office workspace"
+      ],
+      "layout_prior": [
+        "large meeting table in the foreground",
+        "rolling office chairs around the table",
+        "cabinets on one side",
+        "bright natural light from windows",
+        "open walkway leading toward the window"
+      ],
+      "related_structures": [
+        "desk",
+        "office chair",
+        "cabinet",
+        "window",
+        "partition panel"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "window",
+        "table",
+        "office chairs",
+        "partition panels",
+        "cabinets"
+      ],
+      "search_strategy": "focus on the far end of the room near windows where lightweight chairs or items are commonly placed",
+      "negative_clues": [
+        "under the meeting table",
+        "inside cabinets",
+        "areas far from the window",
+        "computer desk region"
+      ]
+    },
+    "target_ctx": {
+      "left": "none",
+      "right": "partition panels"
+    }
+  }
+}

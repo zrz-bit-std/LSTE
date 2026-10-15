@@ -1,0 +1,43 @@
+<launch>
+  <arg name="robot_name" default="pro3"/>
+  <arg name="x" default="20.0"/>
+  <arg name="y" default="-6.5"/>
+  <arg name="z" default="0.1"/>
+  <!-- +pi/2: Pro3 forward axis points along the world +Y axis. -->
+  <arg name="yaw" default="1.57079632679"/>
+  <arg name="robot_description_path" default="$(find pja)/urdf/pro3.xacro"/>
+  <arg name="benchmark_contact_sensor" default="false"/>
+  <!-- 控制是否真的向 Gazebo spawn 模型，false 时仍然加载 robot_description + rsp -->
+  <arg name="spawn_model" default="true"/>
+  <!-- robot_description, robot_state_publisher and the LiDAR-frame alias are
+       independent of Gazebo model insertion. A split env/nodes lifecycle must
+       start these support nodes exactly once, otherwise duplicate names remove
+       the only base_footprint -> laser TF chain used by SLAM. -->
+  <arg name="start_support_nodes" default="true"/>
+
+  <group ns="$(arg robot_name)" if="$(arg start_support_nodes)">
+    <param name="robot_description"
+           command="$(find xacro)/xacro '$(arg robot_description_path)' ns:=$(arg robot_name) benchmark_contact_sensor:=$(arg benchmark_contact_sensor)" />
+
+    <node pkg="robot_state_publisher"
+          type="robot_state_publisher"
+          name="robot_state_publisher"
+          output="screen">
+      <param name="publish_frequency" type="double" value="50.0"/>
+    </node>
+
+    <!-- Gazebo prefixes the LiDAR message frame with the robot namespace,
+         while robot_state_publisher exposes the URDF frame as os_lidar. -->
+    <node pkg="tf"
+          type="static_transform_publisher"
+          name="os_lidar_frame_alias"
+          args="0 0 0 0 0 0 os_lidar pro3/os_lidar 100"/>
+  </group>
+
+  <group ns="$(arg robot_name)" if="$(arg spawn_model)">
+    <node pkg="gazebo_ros"
+          type="spawn_model"
+          name="spawn_pro3"
+          args="-urdf -param robot_description -model $(arg robot_name) -x $(arg x) -y $(arg y) -z $(arg z) -Y $(arg yaw)"/>
+  </group>
+</launch>

@@ -1,0 +1,29 @@
+# Standard lidar-SLAM navigation comparison for the isolated fixed-goal test.
+# It reuses the same world, pose, target and ports as config.yaml, but leaves
+# SA-PPO inactive so move_base is the sole /cmd_vel publisher.
+WORLD: worlds/topo3.0_catch_mode/session_test/env04_no_pro3.world
+# Show Gazebo while manually validating the final-goal handoff. The test runner
+# enables software rendering for this process to avoid the host's GLX issue.
+GUI: true
+# When true, Shift + left-click in the Gazebo GUI replaces the YAML target for
+# this running test. The frontier manager cancels the old action and plans for
+# the new point. Keep false for a strictly repeatable fixed-goal benchmark.
+ALLOW_GAZEBO_CLICK_GOAL: true
+INITIAL_X: 15.79
+INITIAL_Y: -8.45
+INITIAL_Z: 0.1
+INITIAL_YAW: -1.57079632679
+GOAL_X: 12.95
+GOAL_Y: -6.51
+ROS_PORT: 11312
+GAZEBO_PORT: 11346
+# Maximum forward speed in m/s for the ROS navigation local planner.  This is
+# used by both TEB and DWA when selected.  Raise gradually in tight spaces.
+NAVIGATION_MAX_LINEAR_SPEED: 1.00
+# Only used by SA-PPO controller modes; ignored when CONTROLLER_MODE is
+# ros_navigation.
+SAPPO_SPEED: 0.50
+CONTROLLER_MODE: ros_navigation
+# ROS base_local_planner plugin. Set to dwa_local_planner/DWAPlannerROS to
+# repeat the original velocity-sampling baseline.
+LOCAL_PLANNER_PLUGIN: teb_local_planner/TebLocalPlannerROS

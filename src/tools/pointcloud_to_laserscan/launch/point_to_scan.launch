@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+
+<launch>
+
+    <!-- run pointcloud_to_laserscan node -->
+    <node pkg="pointcloud_to_laserscan" type="pointcloud_to_laserscan_node" name="pointcloud_to_laserscan">
+
+        <remap from="cloud_in" to="/os_cloud_node/points"/>
+        <remap from="scan" to="rlscan"/>
+
+        <rosparam>
+            # target_frame: rslidar # Leave disabled to output scan in pointcloud frame
+            transform_tolerance: 0.01
+            min_height: -0.4
+            #min_height: -0.4
+            max_height: 1.0
+
+            angle_min: -3.14159 # -M_PI
+            angle_max: 3.14159 # M_PI
+            #angle_min: -1.5708 # -M_PI
+            #angle_max: 4.7124 # M_PI
+            angle_increment: 0.01227 # 0.703degree 512
+            scan_time: 0.0
+            range_min: 0.1
+            range_max: 80.0
+            use_inf: true
+            inf_epsilon: 1.0
+
+            # Concurrency level, affects number of pointclouds queued for processing and number of threads used
+            # 0 : Detect number of cores
+            # 1 : Single threaded
+            # 2->inf : Parallelism level
+            concurrency_level: 1
+        </rosparam>
+
+    </node>
+
+</launch>

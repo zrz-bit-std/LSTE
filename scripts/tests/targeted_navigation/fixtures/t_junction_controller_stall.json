@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "scenario_id": "t_junction_controller_stall",
+  "description": "Captured local endpoint stall: a valid Navfn/TEB plan exists, the forward scan is clear, and no command reaches the actuator boundary.",
+  "source_failure_id": "captured_t_junction-F0001",
+  "trigger": {
+    "name": "route_invalidated_stall",
+    "source": "global_frontier",
+    "details": {
+      "route_id": 9,
+      "route_kind": "frontier_endpoint",
+      "reason": "stall",
+      "goal": [4.45, 0.15],
+      "distance": 0.75,
+      "path_distance": 0.75,
+      "best_path_distance": 0.75,
+      "best_goal_distance": 0.75,
+      "last_progress_signal": "none",
+      "odom_detour_distance": 0.02,
+      "odom_novel_cells": 0
+    }
+  },
+  "recent_events": [
+    {
+      "source": "global_frontier",
+      "event": "route_command",
+      "wall_elapsed_seconds": 7.8,
+      "payload": {
+        "route_id": 9,
+        "route_kind": "frontier_endpoint",
+        "goal": [4.45, 0.15]
+      }
+    },
+    {
+      "source": "teb_bridge",
+      "event": "active",
+      "wall_elapsed_seconds": 8.0,
+      "payload": {
+        "route_id": 9,
+        "route_kind": "frontier_endpoint",
+        "active": true
+      }
+    }
+  ],
+  "samples": [
+    {
+      "phase": "pre_trigger",
+      "wall_elapsed_seconds": 8.0,
+      "sample": {
+        "ros_time": 39.0,
+        "wall_elapsed_seconds": 8.0,
+        "pose": [3.70, 0.10, 0.05],
+        "pose_goal_frame": [3.70, 0.10, 0.05],
+        "goal": [4.45, 0.15],
+        "goal_frame": "map",
+        "distance_to_goal": 0.75,
+        "goal_source": "global_slam_frontier",
+        "goal_transaction_id": 9,
+        "cmd_vel": [0.06, 0.0],
+        "teb_cmd": [0.06, 0.0],
+        "teb_planner_cmd": [0.06, 0.0],
+        "teb_status": "trajectory_valid",
+        "teb_feedback": {
+          "selected_velocity": {"linear_x": 0.06, "angular_z": 0.0}
+        },
+        "teb_turn_supervisor": {
+          "state": "PASS_THROUGH",
+          "active_route_kind": "frontier_endpoint",
+          "turn_phase": ""
+        },
+        "cmd_vel_mux": {
+          "input": {"linear_x": 0.06, "angular_z": 0.0},
+          "output": {"linear_x": 0.06, "angular_z": 0.0},
+          "block_reason": "none",
+          "filter_reason": "none"
+        },
+        "navfn_plan": {
+          "poses": 20,
+          "length": 0.75,
+          "remaining_estimate_m": 0.75,
+          "endpoint": [4.45, 0.15]
+        },
+        "scan": {"min": 0.82, "forward_min": 1.14},
+        "obstacle_clearance_threshold": 0.57,
+        "move_base_status": "ACTIVE",
+        "bridge_active": true,
+        "route_context": {
+          "route": {
+            "route_id": 9,
+            "route_kind": "frontier_endpoint",
+            "goal": [4.45, 0.15],
+            "path_distance": 0.75,
+            "best_goal_distance": 0.75,
+            "reason": "active"
+          }
+        },
+        "failure_trigger": ""
+      }
+    },
+    {
+      "phase": "trigger",
+      "wall_elapsed_seconds": 10.2,
+      "sample": {
+        "ros_time": 41.2,
+        "wall_elapsed_seconds": 10.2,
+        "pose": [3.70, 0.10, 0.05],
+        "pose_goal_frame": [3.70, 0.10, 0.05],
+        "goal": [4.45, 0.15],
+        "goal_frame": "map",
+        "distance_to_goal": 0.75,
+        "goal_source": "global_slam_frontier",
+        "goal_transaction_id": 9,
+        "cmd_vel": [0.0, 0.0],
+        "teb_cmd": [0.0, 0.0],
+        "teb_planner_cmd": [0.0, 0.0],
+        "teb_status": "trajectory_valid",
+        "teb_feedback": {
+          "selected_velocity": {"linear_x": 0.0, "angular_z": 0.0}
+        },
+        "teb_turn_supervisor": {
+          "state": "PASS_THROUGH",
+          "active_route_kind": "frontier_endpoint",
+          "turn_phase": ""
+        },
+        "cmd_vel_mux": {
+          "input": {"linear_x": 0.0, "angular_z": 0.0},
+          "output": {"linear_x": 0.0, "angular_z": 0.0},
+          "block_reason": "none",
+          "filter_reason": "none"
+        },
+        "navfn_plan": {
+          "poses": 20,
+          "length": 0.75,
+          "remaining_estimate_m": 0.75,
+          "endpoint": [4.45, 0.15]
+        },
+        "scan": {"min": 0.82, "forward_min": 1.14},
+        "obstacle_clearance_threshold": 0.57,
+        "move_base_status": "ACTIVE",
+        "bridge_active": true,
+        "route_context": {
+          "route": {
+            "route_id": 9,
+            "route_kind": "frontier_endpoint",
+            "goal": [4.45, 0.15],
+            "path_distance": 0.75,
+            "best_goal_distance": 0.75,
+            "reason": "stall"
+          }
+        },
+        "failure_trigger": "route_invalidated_stall"
+      }
+    },
+    {
+      "phase": "post_window",
+      "wall_elapsed_seconds": 11.7,
+      "sample": {
+        "ros_time": 42.7,
+        "wall_elapsed_seconds": 11.7,
+        "pose": [3.70, 0.10, 0.05],
+        "pose_goal_frame": [3.70, 0.10, 0.05],
+        "goal": [4.45, 0.15],
+        "goal_frame": "map",
+        "distance_to_goal": 0.75,
+        "cmd_vel": [0.0, 0.0],
+        "teb_cmd": [0.0, 0.0],
+        "teb_planner_cmd": [0.0, 0.0],
+        "teb_status": "trajectory_valid",
+        "teb_feedback": {
+          "selected_velocity": {"linear_x": 0.0, "angular_z": 0.0}
+        },
+        "teb_turn_supervisor": {
+          "state": "PASS_THROUGH",
+          "active_route_kind": "frontier_endpoint",
+          "turn_phase": ""
+        },
+        "cmd_vel_mux": {
+          "input": {"linear_x": 0.0, "angular_z": 0.0},
+          "output": {"linear_x": 0.0, "angular_z": 0.0},
+          "block_reason": "none",
+          "filter_reason": "none"
+        },
+        "navfn_plan": {
+          "poses": 20,
+          "length": 0.75,
+          "remaining_estimate_m": 0.75,
+          "endpoint": [4.45, 0.15]
+        },
+        "scan": {"min": 0.82, "forward_min": 1.14},
+        "obstacle_clearance_threshold": 0.57,
+        "move_base_status": "ACTIVE",
+        "bridge_active": false,
+        "route_context": {
+          "route": {
+            "route_id": 9,
+            "route_kind": "frontier_endpoint",
+            "goal": [4.45, 0.15],
+            "path_distance": 0.75,
+            "best_goal_distance": 0.75,
+            "reason": "invalidated"
+          }
+        },
+        "failure_trigger": "route_invalidated_stall"
+      }
+    }
+  ],
+  "expected": {
+    "classification": "controller_stall",
+    "diagnosis_primary_cause": "controller_stall",
+    "diagnosis_layer": "global_frontier",
+    "route_id": 9,
+    "route_kind": "frontier_endpoint",
+    "forward_clearance_min_m": 0.57,
+    "command_zero_at_trigger": true
+  }
+}

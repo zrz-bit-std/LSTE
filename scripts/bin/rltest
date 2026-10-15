@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WS="${LSTE_WS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# The default configuration supports interactive TEB, DWA, and SA-PPO
+# comparisons. Override RL_FIXED_GOAL_CONFIG only for a separate experiment.
+export RL_FIXED_GOAL_CONFIG="${RL_FIXED_GOAL_CONFIG:-$WS/scripts/tests/rl_fixed_goal/test_config.yaml}"
+exec "$WS/scripts/tests/rl_fixed_goal/run_tmux.sh" "$@"

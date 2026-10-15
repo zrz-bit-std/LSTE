@@ -1,0 +1,57 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "green mug",
+      "attributes": [
+        "green",
+        "ceramic",
+        "handle on the side",
+        "medium-sized drinking mug",
+        "placed on a wooden office desk"
+      ],
+      "typical_locations": [
+        "office desks",
+        "workstations",
+        "break rooms",
+        "next to keyboards and monitors"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace",
+        "shared working area"
+      ],
+      "layout_prior": [
+        "long desks with multiple computer monitors",
+        "seats arranged in rows facing computers",
+        "personal items scattered along the desk surface"
+      ],
+      "related_structures": [
+        "desk",
+        "computer monitor",
+        "keyboard",
+        "chair",
+        "storage box"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "keyboard",
+        "monitor",
+        "soda can",
+        "other mugs"
+      ],
+      "search_strategy": "look for colored handled cups typically placed beside keyboards or monitors on office desks",
+      "negative_clues": [
+        "corridor",
+        "door",
+        "fire hydrant",
+        "fire extinguisher"
+      ]
+    },
+    "target_ctx": {
+      "left": "computer monitor",
+      "right": "keyboard"
+    }
+  }
+}

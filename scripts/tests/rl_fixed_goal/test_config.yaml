@@ -1,0 +1,56 @@
+# One configuration file for fair fixed-goal controller comparisons.
+# Edit CONTROLLER_METHOD, then run `rltest` again.
+
+WORLD: worlds/topo3.0_catch_mode/session_test/env04_no_pro3.world
+GUI: true
+
+# Robot pose in Gazebo world coordinates. INITIAL_YAW is radians.
+INITIAL_X: 15.79
+INITIAL_Y: -8.45
+INITIAL_Z: 0.1
+INITIAL_YAW: -1.57079632679
+
+# Default target. It is published by the production Goal Manager on
+# /lste/final_goal, so every controller test exercises the same global-goal
+# interface as the normal LSTE pipeline. Shift + left-click replaces it.
+GOAL_X: 12.95
+GOAL_Y: -6.51
+ALLOW_GAZEBO_CLICK_GOAL: true
+
+# A final target may fail once while SLAM/costmaps catch up. After this many
+# complete move_base recovery failures, hold position and mark it unreachable.
+# Set to 1 to stop after the first failure.
+FINAL_GOAL_MAX_FAILURES: 3
+
+# Select exactly one controller:
+# - teb: online SLAM + Navfn global planner + TEB local planner.
+# - dwa: online SLAM + Navfn global planner + DWA local planner.
+# - rl:  SA-PPO controller, without move_base or a global map planner.
+CONTROLLER_METHOD: teb
+
+# Start the test-only Live RViz window for TEB/DWA. It displays data emitted by
+# gmapping, Navfn, and the selected local planner on this isolated ROS master.
+LIVE_RVIZ: true
+
+# Keep false for normal interactive tests. rlrecord turns this on in a separate
+# runtime config and records the real RViz window into an MP4. Available values
+# are RViz (map, robot, plans), Gazebo (physical scene), and desktop.
+SCREEN_RECORD: false
+SCREEN_RECORD_WINDOW: RViz
+SCREEN_RECORD_START_DELAY_SECONDS: 18
+SCREEN_RECORD_DURATION_SECONDS: 75
+SCREEN_RECORD_FPS: 30
+
+# Shared forward-speed setting for TEB and DWA, in m/s.
+NAVIGATION_MAX_LINEAR_SPEED: 1.00
+
+# Used only when CONTROLLER_METHOD is rl. Values are the existing SA-PPO modes:
+# policy_only, stabilized_recovery, rl_dwa_guard, rl_mppi_guard, rl_grid_guard.
+RL_CONTROLLER_MODE: rl_grid_guard
+SAPPO_SPEED: 0.50
+
+ROS_PORT: 11312
+GAZEBO_PORT: 11346
+# Number of days to retain timestamped log directories.
+LOG_RETENTION_DAYS: 15
+LOG_MAX_BYTES: 1000000000

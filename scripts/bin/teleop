@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! tmux has-session -t "=lste-teleop" 2>/dev/null; then
+  echo "lste-teleop is not running. Start the system with: runall" >&2
+  exit 1
+fi
+
+exec tmux attach -t "=lste-teleop"

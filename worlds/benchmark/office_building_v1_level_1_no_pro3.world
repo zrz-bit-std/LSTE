@@ -1,0 +1,926 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.7">
+  <world name="office_building_v1">
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+    <scene>
+      <ambient>0.45 0.45 0.45 1</ambient>
+      <background>0.72 0.75 0.80 1</background>
+      <shadows>1</shadows>
+    </scene>
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.500 0.520 0.550 1.000</ambient>
+            <diffuse>0.500 0.520 0.550 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <light name="sun" type="directional">
+      <pose>12.500 11.000 25.000 0 0 0.000000</pose>
+      <cast_shadows>1</cast_shadows>
+      <diffuse>0.85 0.85 0.85 1</diffuse>
+      <specular>0.20 0.20 0.20 1</specular>
+      <direction>-0.35 0.20 -0.90</direction>
+      <attenuation>
+        <range>80</range>
+        <constant>0.8</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+    </light>
+    <model name="office_building_structure">
+      <static>true</static>
+      <link name="floor_lobby">
+        <pose>2.500 4.500 0.006 0 0 0.000000</pose>
+        <visual name="floor_lobby_visual">
+          <geometry>
+            <box>
+              <size>4.800 8.800 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.620 0.690 0.780 1.000</ambient>
+            <diffuse>0.620 0.690 0.780 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_open_office">
+        <pose>9.000 4.500 0.006 0 0 0.000000</pose>
+        <visual name="floor_open_office_visual">
+          <geometry>
+            <box>
+              <size>7.800 8.800 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.720 0.760 0.660 1.000</ambient>
+            <diffuse>0.720 0.760 0.660 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_printer">
+        <pose>15.000 4.500 0.006 0 0 0.000000</pose>
+        <visual name="floor_printer_visual">
+          <geometry>
+            <box>
+              <size>3.700 8.800 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.780 0.700 0.560 1.000</ambient>
+            <diffuse>0.780 0.700 0.560 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_storage">
+        <pose>19.500 4.500 0.006 0 0 0.000000</pose>
+        <visual name="floor_storage_visual">
+          <geometry>
+            <box>
+              <size>4.700 8.800 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.630 0.630 0.670 1.000</ambient>
+            <diffuse>0.630 0.630 0.670 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_lounge">
+        <pose>23.500 4.500 0.006 0 0 0.000000</pose>
+        <visual name="floor_lounge_visual">
+          <geometry>
+            <box>
+              <size>2.800 8.800 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.600 0.730 0.730 1.000</ambient>
+            <diffuse>0.600 0.730 0.730 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_conference">
+        <pose>4.500 17.400 0.006 0 0 0.000000</pose>
+        <visual name="floor_conference_visual">
+          <geometry>
+            <box>
+              <size>8.700 9.000 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.740 0.670 0.590 1.000</ambient>
+            <diffuse>0.740 0.670 0.590 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_manager">
+        <pose>10.000 17.400 0.006 0 0 0.000000</pose>
+        <visual name="floor_manager_visual">
+          <geometry>
+            <box>
+              <size>3.000 9.000 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.670 0.730 0.780 1.000</ambient>
+            <diffuse>0.670 0.730 0.780 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_kitchen">
+        <pose>16.000 17.400 0.006 0 0 0.000000</pose>
+        <visual name="floor_kitchen_visual">
+          <geometry>
+            <box>
+              <size>5.800 9.000 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.780 0.720 0.580 1.000</ambient>
+            <diffuse>0.780 0.720 0.580 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="floor_target_room">
+        <pose>22.000 17.400 0.006 0 0 0.000000</pose>
+        <visual name="floor_target_room_visual">
+          <geometry>
+            <box>
+              <size>5.800 9.000 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.720 0.660 0.760 1.000</ambient>
+            <diffuse>0.720 0.660 0.760 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="outer_west">
+        <pose>0.000 11.000 1.400 0 0 0.000000</pose>
+        <collision name="outer_west_collision">
+          <geometry>
+            <box>
+              <size>0.180 22.000 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="outer_west_visual">
+          <geometry>
+            <box>
+              <size>0.180 22.000 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.680 0.700 0.740 1.000</ambient>
+            <diffuse>0.680 0.700 0.740 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="outer_east">
+        <pose>25.000 11.000 1.400 0 0 0.000000</pose>
+        <collision name="outer_east_collision">
+          <geometry>
+            <box>
+              <size>0.180 22.000 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="outer_east_visual">
+          <geometry>
+            <box>
+              <size>0.180 22.000 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.680 0.700 0.740 1.000</ambient>
+            <diffuse>0.680 0.700 0.740 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="outer_north">
+        <pose>12.500 22.000 1.400 0 0 0.000000</pose>
+        <collision name="outer_north_collision">
+          <geometry>
+            <box>
+              <size>25.000 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="outer_north_visual">
+          <geometry>
+            <box>
+              <size>25.000 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.680 0.700 0.740 1.000</ambient>
+            <diffuse>0.680 0.700 0.740 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="outer_south_west">
+        <pose>0.900 0.000 1.400 0 0 0.000000</pose>
+        <collision name="outer_south_west_collision">
+          <geometry>
+            <box>
+              <size>1.800 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="outer_south_west_visual">
+          <geometry>
+            <box>
+              <size>1.800 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.680 0.700 0.740 1.000</ambient>
+            <diffuse>0.680 0.700 0.740 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="outer_south_east">
+        <pose>15.000 0.000 1.400 0 0 0.000000</pose>
+        <collision name="outer_south_east_collision">
+          <geometry>
+            <box>
+              <size>20.000 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="outer_south_east_visual">
+          <geometry>
+            <box>
+              <size>20.000 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.680 0.700 0.740 1.000</ambient>
+            <diffuse>0.680 0.700 0.740 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="south_entry_closed_door">
+        <pose>3.400 0.000 1.125 0 0 0.000000</pose>
+        <collision name="south_entry_closed_door_collision">
+          <geometry>
+            <box>
+              <size>3.200 0.180 2.250</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="south_entry_closed_door_visual">
+          <geometry>
+            <box>
+              <size>3.200 0.180 2.250</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lower_corridor_wall_segment_0">
+        <pose>1.125 9.300 1.400 0 0 0.000000</pose>
+        <collision name="lower_corridor_wall_segment_0_collision">
+          <geometry>
+            <box>
+              <size>2.250 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="lower_corridor_wall_segment_0_visual">
+          <geometry>
+            <box>
+              <size>2.250 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lower_corridor_wall_segment_1">
+        <pose>5.375 9.300 1.400 0 0 0.000000</pose>
+        <collision name="lower_corridor_wall_segment_1_collision">
+          <geometry>
+            <box>
+              <size>4.050 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="lower_corridor_wall_segment_1_visual">
+          <geometry>
+            <box>
+              <size>4.050 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lower_corridor_wall_segment_2">
+        <pose>11.525 9.300 1.400 0 0 0.000000</pose>
+        <collision name="lower_corridor_wall_segment_2_collision">
+          <geometry>
+            <box>
+              <size>5.850 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="lower_corridor_wall_segment_2_visual">
+          <geometry>
+            <box>
+              <size>5.850 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lower_corridor_wall_segment_3">
+        <pose>17.275 9.300 1.400 0 0 0.000000</pose>
+        <collision name="lower_corridor_wall_segment_3_collision">
+          <geometry>
+            <box>
+              <size>3.450 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="lower_corridor_wall_segment_3_visual">
+          <geometry>
+            <box>
+              <size>3.450 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lower_corridor_wall_segment_4">
+        <pose>21.500 9.300 1.400 0 0 0.000000</pose>
+        <collision name="lower_corridor_wall_segment_4_collision">
+          <geometry>
+            <box>
+              <size>3.000 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="lower_corridor_wall_segment_4_visual">
+          <geometry>
+            <box>
+              <size>3.000 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lower_corridor_wall_segment_final">
+        <pose>24.500 9.300 1.400 0 0 0.000000</pose>
+        <collision name="lower_corridor_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>1.000 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="lower_corridor_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>1.000 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="upper_corridor_wall_segment_0">
+        <pose>1.200 12.700 1.400 0 0 0.000000</pose>
+        <collision name="upper_corridor_wall_segment_0_collision">
+          <geometry>
+            <box>
+              <size>2.400 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="upper_corridor_wall_segment_0_visual">
+          <geometry>
+            <box>
+              <size>2.400 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="upper_corridor_wall_segment_1">
+        <pose>6.525 12.700 1.400 0 0 0.000000</pose>
+        <collision name="upper_corridor_wall_segment_1_collision">
+          <geometry>
+            <box>
+              <size>5.850 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="upper_corridor_wall_segment_1_visual">
+          <geometry>
+            <box>
+              <size>5.850 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="upper_corridor_wall_segment_2">
+        <pose>13.000 12.700 1.400 0 0 0.000000</pose>
+        <collision name="upper_corridor_wall_segment_2_collision">
+          <geometry>
+            <box>
+              <size>4.900 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="upper_corridor_wall_segment_2_visual">
+          <geometry>
+            <box>
+              <size>4.900 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="upper_corridor_wall_segment_3">
+        <pose>18.975 12.700 1.400 0 0 0.000000</pose>
+        <collision name="upper_corridor_wall_segment_3_collision">
+          <geometry>
+            <box>
+              <size>4.850 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="upper_corridor_wall_segment_3_visual">
+          <geometry>
+            <box>
+              <size>4.850 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="upper_corridor_wall_segment_final">
+        <pose>23.800 12.700 1.400 0 0 0.000000</pose>
+        <collision name="upper_corridor_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>2.400 0.180 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="upper_corridor_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>2.400 0.180 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lobby_office_wall_segment_final">
+        <pose>5.000 4.650 1.400 0 0 0.000000</pose>
+        <collision name="lobby_office_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="lobby_office_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="office_printer_wall_segment_0">
+        <pose>13.000 1.975 1.400 0 0 0.000000</pose>
+        <collision name="office_printer_wall_segment_0_collision">
+          <geometry>
+            <box>
+              <size>0.180 3.950 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="office_printer_wall_segment_0_visual">
+          <geometry>
+            <box>
+              <size>0.180 3.950 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="office_printer_wall_segment_final">
+        <pose>13.000 7.175 1.400 0 0 0.000000</pose>
+        <collision name="office_printer_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>0.180 4.250 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="office_printer_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>0.180 4.250 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="printer_storage_wall_segment_final">
+        <pose>17.000 4.650 1.400 0 0 0.000000</pose>
+        <collision name="printer_storage_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="printer_storage_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="storage_lounge_wall_segment_final">
+        <pose>22.000 4.650 1.400 0 0 0.000000</pose>
+        <collision name="storage_lounge_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="storage_lounge_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="conference_manager_wall_segment_final">
+        <pose>7.000 17.350 1.400 0 0 0.000000</pose>
+        <collision name="conference_manager_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="conference_manager_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="manager_kitchen_wall_segment_final">
+        <pose>13.000 17.350 1.400 0 0 0.000000</pose>
+        <collision name="manager_kitchen_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="manager_kitchen_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="kitchen_target_wall_segment_final">
+        <pose>19.000 17.350 1.400 0 0 0.000000</pose>
+        <collision name="kitchen_target_wall_segment_final_collision">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="kitchen_target_wall_segment_final_visual">
+          <geometry>
+            <box>
+              <size>0.180 9.300 2.800</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.430 0.460 0.500 1.000</ambient>
+            <diffuse>0.430 0.460 0.500 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lobby_corridor_lintel">
+        <pose>2.800 9.300 2.450 0 0 0.000000</pose>
+        <visual name="lobby_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.100 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="open_office_corridor_lintel">
+        <pose>8.000 9.300 2.450 0 0 0.000000</pose>
+        <visual name="open_office_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.200 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="printer_corridor_lintel">
+        <pose>15.000 9.300 2.450 0 0 0.000000</pose>
+        <visual name="printer_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.100 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="storage_corridor_lintel">
+        <pose>19.500 9.300 2.450 0 0 0.000000</pose>
+        <visual name="storage_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.000 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="lounge_corridor_lintel">
+        <pose>23.500 9.300 2.450 0 0 0.000000</pose>
+        <visual name="lounge_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.000 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="conference_corridor_lintel">
+        <pose>3.000 12.700 2.450 0 0 0.000000</pose>
+        <visual name="conference_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.200 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="manager_corridor_lintel">
+        <pose>10.000 12.700 2.450 0 0 0.000000</pose>
+        <visual name="manager_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.100 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="kitchen_corridor_lintel">
+        <pose>16.000 12.700 2.450 0 0 0.000000</pose>
+        <visual name="kitchen_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.100 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="target_room_corridor_lintel">
+        <pose>22.000 12.700 2.450 0 0 0.000000</pose>
+        <visual name="target_room_corridor_lintel_visual">
+          <geometry>
+            <box>
+              <size>1.200 0.180 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+      <link name="office_printer_staff_door_lintel">
+        <pose>13.000 4.500 2.450 0 0 0.000000</pose>
+        <visual name="office_printer_staff_door_lintel_visual">
+          <geometry>
+            <box>
+              <size>0.180 1.100 0.120</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300 0.380 0.450 1.000</ambient>
+            <diffuse>0.300 0.380 0.450 1.000</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <include>
+      <uri>model://desk_brown</uri>
+      <name>target_desk</name>
+      <pose>21.600 17.600 0.000 0 0 0.000000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>model://monitor_1</uri>
+      <name>target_monitor_left</name>
+      <pose>21.000 17.600 0.720 0 0 0.000000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>model://monitor_2</uri>
+      <name>target_monitor_right</name>
+      <pose>22.200 17.600 0.720 0 0 0.000000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>model://cup_yellow</uri>
+      <name>cup_yellow</name>
+      <pose>21.600 17.600 1.020 0 0 0.000000</pose>
+      <scale>1.800 1.800 1.800</scale>
+      <static>true</static>
+    </include>
+    <gui fullscreen="0">
+      <camera name="user_camera">
+        <pose>12.500 11.000 34.000 0 1.490 0</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+  </world>
+</sdf>

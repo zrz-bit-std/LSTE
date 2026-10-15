@@ -112,3 +112,51 @@ Thumbs.db
 .DS_Store
 .Spotlight-V100
 .Trashes
+
+# ROS workspace and local reproduction artifacts
+# Catkin build artifacts
+build/
+devel/
+install/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ROS logs
+ros_logs/
+log/
+runtime/
+
+# Native crash dumps
+core
+core.*
+
+# ROS tf2_tools view_frames output
+frames.gv
+
+# Runtime topology snapshots
+src/lste_topo_access/topo_tree/tree/**/access_topo_*.json
+
+# Local editor / IDE files
+.DS_Store
+.vscode/
+.idea/
+
+# Models: keep code/configs, ignore heavy checkpoints/outputs
+model/WeDetect/
+model/**/weights/
+model/**/checkpoints/
+model/**/result/
+model/**/runs/
+model/**/logs/
+model/**/*.pth
+model/**/*.pt
+model/**/*.bin
+model/**/*.ckpt
+model/**/*.safetensors
+model/**/*.onnx
+
+# SA-PPO policies are runtime artifacts; keep acquisition instructions only.
+rl_navigation/policy/*.pth

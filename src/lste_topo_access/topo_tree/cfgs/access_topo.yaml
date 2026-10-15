@@ -1,0 +1,54 @@
+# Access-Topo 参数默认配置（可根据实验修改）
+# 节点：gp_subgoals_sim_topo.py 会在启动时加载本文件（通过 ~access_topo_config）。
+
+# 实验/测试名称，用于归档 topo tree json 到子目录
+test_name: topo_3.0_catch_mode
+
+# 路钉采样
+anchor_step_dist: 1.5           # 米，路钉之间的最小间距
+
+# 回退判定
+backtrack_arrive_dist: 2.0      # 米，回退点到达判定半径
+
+# visited 过滤
+visited_thresh: 2.0             # 米，判定“已访问”的距离阈值
+
+# frontier 角度聚类
+cluster_eps_deg: 20.0           # 度，聚类半径
+cluster_stable_duration: 3.0    # 秒，持续出现时间才算稳定
+cluster_lost_timeout: 2.0       # 秒，丢失多久后移除 cluster
+
+# 路口窗口结束条件（离开路口距离/时间达到阈值即固化 pending 分支）
+junction_finalize_dist: 5.0     # 米，离开路口多远后固化 pending；默认 anchor_step_dist*1.5
+junction_finalize_timeout: 10.0  # 秒，窗口最长持续时间，超时也会固化 pending
+
+# 路口会话触发（过滤伪路口）：只有“双峰持续存在”才进入路口会话
+junction_enter_confirm_sec: 1.0   # 秒，双峰连续存在多久才算进入路口会话
+junction_peak_min_age: 0.6       # 秒，单个峰至少持续多久才算“有效峰”
+junction_peak_min_sep_deg: 30.0  # 度，两峰角度间隔太小视为同向误分簇
+junction_peak_min_weight: 0.0    # 绝对权重阈值（0 表示不启用）
+junction_second_weight_ratio: 0.15  # 第二峰/第一峰权重比例阈值（用于滤掉很小的伪峰）
+
+# 相邻 anchor 的兴趣方向合并距离（米），用于全局去重
+branch_merge_dist: 2.0
+
+# 路口角度调试日志：开启后记录路口会话内每帧 frontier 角度，写到 topo_tree_root/angle
+junction_angle_log: false
+junction_angle_dir: ""   # auto-resolved relative to topo_tree_root at runtime
+
+# 强制分支窗口（到达兴趣点后只放行兴趣方向）
+force_window_deg: 30.0          # 度，仅保留该窗口内的候选
+commit_dist: 2.0                # 米，沿兴趣方向走多远后解除强制
+commit_goal_dist: 5.0           # 米，mode2 固定目标（分叉点沿强制方向前推）
+commit_carrot_lookahead: 5.0    # 兼容旧字段，未使用动态 carrot 时可与 commit_goal_dist 一致
+# 分支上限与路口冷却
+max_pending_per_node: 2         # 每个 anchor 上最多保留的 PENDING 分支数
+junction_cooldown_anchors: 3     # 最近 N 个 anchor 内只生成一次“路口候选”
+
+# 回退触发：连续无可用 frontier 多久才认为需要回退（同时要求 access_mode==1）
+no_frontier_trigger_sec: 3.0
+
+# topo tree 保存
+topo_tree_root: ""        # auto-resolved at runtime from package path or LSTE_WS
+topo_save_period: 2.0           # 秒，保存频率
+# topo_save_dir 可选覆盖；默认使用 topo_tree_root/test_name

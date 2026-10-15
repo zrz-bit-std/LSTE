@@ -1,0 +1,3553 @@
+{
+  "stamp": 512.017,
+  "run_id": 1768210302,
+  "run_start": 355.131,
+  "run_end": null,
+  "test_name": "topo_pass",
+  "topo_tree_root": "/home/zrz/lste_ws/src/lste_topo_access/topo_tree/tree",
+  "pose": {
+    "x": 18.533665544818305,
+    "y": -4.328618339236031
+  },
+  "access_mode": 1,
+  "forced_heading_world": null,
+  "forced_branch": null,
+  "current_backtrack": null,
+  "backtrack_start_pose": {
+    "x": 17.67705902377049,
+    "y": -5.340855062310664
+  },
+  "backtrack_path": [
+    66
+  ],
+  "backtrack_history": [
+    {
+      "start_pose": {
+        "x": 3.4022568321769047,
+        "y": 4.720831115921865
+      },
+      "start_anchor": 9,
+      "path": [
+        9
+      ],
+      "end_anchor": 13,
+      "status": "reach_interest",
+      "finished": 404.38,
+      "target": {
+        "node": 5,
+        "branch": 0
+      }
+    },
+    {
+      "start_pose": {
+        "x": 2.3908702315693375,
+        "y": -5.884675670661764
+      },
+      "start_anchor": 27,
+      "path": [
+        27
+      ],
+      "end_anchor": 33,
+      "status": "reach_interest",
+      "finished": 441.783,
+      "target": {
+        "node": 22,
+        "branch": 0
+      }
+    },
+    {
+      "start_pose": {
+        "x": -0.006903114704830252,
+        "y": -12.255298394634107
+      },
+      "start_anchor": 46,
+      "path": [
+        46
+      ],
+      "end_anchor": 54,
+      "status": "reach_interest",
+      "finished": 492.118,
+      "target": {
+        "node": 39,
+        "branch": 0
+      }
+    }
+  ],
+  "return_home_target": 0,
+  "current_profile": "pass",
+  "nodes": [
+    {
+      "id": 0,
+      "x": 0.003226844421680323,
+      "y": 0.05233930789434546,
+      "stamp": 355.17,
+      "prev": null,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 1,
+      "x": 1.512855435637653,
+      "y": -0.0986730095621823,
+      "stamp": 374.372,
+      "prev": 0,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 2,
+      "x": 3.004989324186271,
+      "y": -0.2549876247801179,
+      "stamp": 375.77,
+      "prev": 1,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 3,
+      "x": 4.499818821735809,
+      "y": -0.41422884106922553,
+      "stamp": 377.27,
+      "prev": 2,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 4,
+      "x": 6.006390783652194,
+      "y": -0.2917545789942132,
+      "stamp": 379.651,
+      "prev": 3,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 5,
+      "x": 6.467530135067727,
+      "y": 1.150853113009491,
+      "stamp": 383.368,
+      "prev": 4,
+      "branches": [
+        {
+          "id": 0,
+          "heading_world": -0.14976845385571158,
+          "weight": 1092219.0,
+          "status": "DONE",
+          "created": 386.565
+        }
+      ],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown",
+      "chosen_heading": 1.5276200562617683
+    },
+    {
+      "id": 6,
+      "x": 6.757708502973538,
+      "y": 2.6287259400770284,
+      "stamp": 384.709,
+      "prev": 5,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 7,
+      "x": 7.05325223848409,
+      "y": 4.117022771594482,
+      "stamp": 386.052,
+      "prev": 6,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 8,
+      "x": 5.556759214363523,
+      "y": 4.367328609662062,
+      "stamp": 390.129,
+      "prev": 7,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 9,
+      "x": 4.058019360784072,
+      "y": 4.463607480767014,
+      "stamp": 392.03,
+      "prev": 8,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 10,
+      "x": 2.62821592158997,
+      "y": 4.971466546891088,
+      "stamp": 393.63,
+      "prev": 9,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 11,
+      "x": 4.025188619450282,
+      "y": 4.350411242091015,
+      "stamp": 399.469,
+      "prev": 10,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 12,
+      "x": 5.417370421570596,
+      "y": 3.7746417173191724,
+      "stamp": 400.878,
+      "prev": 11,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 13,
+      "x": 6.042724736986279,
+      "y": 2.908157797455832,
+      "stamp": 404.38,
+      "prev": 12,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 14,
+      "x": 6.554981814555608,
+      "y": 1.4849793645332996,
+      "stamp": 406.474,
+      "prev": 13,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 15,
+      "x": 7.721062398621248,
+      "y": 0.5165580639340999,
+      "stamp": 409.31,
+      "prev": 14,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 16,
+      "x": 9.132682615079913,
+      "y": -0.04946308738286785,
+      "stamp": 410.91,
+      "prev": 15,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 17,
+      "x": 10.560754804220142,
+      "y": -0.5239090320018932,
+      "stamp": 412.149,
+      "prev": 16,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 18,
+      "x": 11.791431044600529,
+      "y": -1.3835720950610058,
+      "stamp": 415.81,
+      "prev": 17,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 19,
+      "x": 11.843350509656382,
+      "y": -2.8972477243747026,
+      "stamp": 417.79,
+      "prev": 18,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 20,
+      "x": 11.910057149474877,
+      "y": -4.396794326017062,
+      "stamp": 418.871,
+      "prev": 19,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 21,
+      "x": 11.980462337705738,
+      "y": -5.90391618431937,
+      "stamp": 420.29,
+      "prev": 20,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 22,
+      "x": 10.647500922453885,
+      "y": -6.597743040208945,
+      "stamp": 424.569,
+      "prev": 21,
+      "branches": [
+        {
+          "id": 0,
+          "heading_world": -1.4285998195613192,
+          "weight": 759170.0,
+          "status": "DONE",
+          "created": 426.983
+        }
+      ],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown",
+      "chosen_heading": 2.9868644840724414
+    },
+    {
+      "id": 23,
+      "x": 9.139733021982812,
+      "y": -6.711573790053776,
+      "stamp": 425.669,
+      "prev": 22,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 24,
+      "x": 7.644126186339638,
+      "y": -6.832984614979095,
+      "stamp": 426.63,
+      "prev": 23,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 25,
+      "x": 6.143933524029044,
+      "y": -6.956619317079383,
+      "stamp": 427.591,
+      "prev": 24,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 26,
+      "x": 4.643914802651398,
+      "y": -7.082223096130176,
+      "stamp": 428.549,
+      "prev": 25,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 27,
+      "x": 3.260710094324951,
+      "y": -6.501275604591042,
+      "stamp": 430.072,
+      "prev": 26,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 28,
+      "x": 2.032803074543896,
+      "y": -5.630658704853821,
+      "stamp": 431.03,
+      "prev": 27,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 29,
+      "x": 3.430628221399007,
+      "y": -6.233167107720045,
+      "stamp": 436.41,
+      "prev": 28,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 30,
+      "x": 4.765965000793777,
+      "y": -6.919354328105162,
+      "stamp": 437.569,
+      "prev": 29,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 31,
+      "x": 6.2640988555696735,
+      "y": -7.173418460837347,
+      "stamp": 439.481,
+      "prev": 30,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 32,
+      "x": 7.730506126421357,
+      "y": -6.855950197500311,
+      "stamp": 440.929,
+      "prev": 31,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 33,
+      "x": 8.790788674704412,
+      "y": -6.63595857742833,
+      "stamp": 441.783,
+      "prev": 32,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 34,
+      "x": 10.279920767287207,
+      "y": -6.3253180538960345,
+      "stamp": 442.95,
+      "prev": 33,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 35,
+      "x": 11.560053155640913,
+      "y": -7.121158141799572,
+      "stamp": 445.61,
+      "prev": 34,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 36,
+      "x": 12.387348483052646,
+      "y": -8.384028825058925,
+      "stamp": 447.749,
+      "prev": 35,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 37,
+      "x": 12.522055756140398,
+      "y": -9.892603608322657,
+      "stamp": 450.05,
+      "prev": 36,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 38,
+      "x": 12.898256987370464,
+      "y": -11.366520285091795,
+      "stamp": 451.231,
+      "prev": 37,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 39,
+      "x": 11.463669792944419,
+      "y": -11.822730673549454,
+      "stamp": 454.63,
+      "prev": 38,
+      "branches": [
+        {
+          "id": 0,
+          "heading_world": 0.03053955630321159,
+          "weight": 717274.0,
+          "status": "DONE",
+          "created": 456.472
+        }
+      ],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown",
+      "chosen_heading": 3.0369216276710302
+    },
+    {
+      "id": 40,
+      "x": 9.96684009733551,
+      "y": -12.045493410359267,
+      "stamp": 455.55,
+      "prev": 39,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 41,
+      "x": 8.480005593987334,
+      "y": -12.26361339052652,
+      "stamp": 456.45,
+      "prev": 40,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 42,
+      "x": 7.146692259912103,
+      "y": -11.527402870515006,
+      "stamp": 458.089,
+      "prev": 41,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 43,
+      "x": 5.680199818086847,
+      "y": -11.194322434510955,
+      "stamp": 460.77,
+      "prev": 42,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 44,
+      "x": 4.21276410115338,
+      "y": -11.511461118229594,
+      "stamp": 462.453,
+      "prev": 43,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 45,
+      "x": 2.746723211100377,
+      "y": -11.864556348142834,
+      "stamp": 467.49,
+      "prev": 44,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 46,
+      "x": 1.274143011733757,
+      "y": -12.162732439257354,
+      "stamp": 471.29,
+      "prev": 45,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 47,
+      "x": -0.23866663207273706,
+      "y": -12.27186620837854,
+      "stamp": 473.23,
+      "prev": 46,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 48,
+      "x": 1.2394006612368436,
+      "y": -11.91953179133694,
+      "stamp": 481.428,
+      "prev": 47,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 49,
+      "x": 2.7114295780192554,
+      "y": -11.627163033897313,
+      "stamp": 482.306,
+      "prev": 48,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 50,
+      "x": 4.217577490478078,
+      "y": -11.390114933464444,
+      "stamp": 483.75,
+      "prev": 49,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 51,
+      "x": 5.715712504180921,
+      "y": -11.171350947648778,
+      "stamp": 484.549,
+      "prev": 50,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 52,
+      "x": 6.954560781903329,
+      "y": -12.017717514404243,
+      "stamp": 487.15,
+      "prev": 51,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 53,
+      "x": 8.461416308054746,
+      "y": -11.910178204276487,
+      "stamp": 490.73,
+      "prev": 52,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 54,
+      "x": 9.563265618155297,
+      "y": -11.784494386404097,
+      "stamp": 492.118,
+      "prev": 53,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 55,
+      "x": 11.064826038509043,
+      "y": -11.59898231764355,
+      "stamp": 493.211,
+      "prev": 54,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 56,
+      "x": 12.558827720247288,
+      "y": -11.400969350241478,
+      "stamp": 494.19,
+      "prev": 55,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 57,
+      "x": 14.086914527944376,
+      "y": -11.139583563339846,
+      "stamp": 494.81,
+      "prev": 56,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 58,
+      "x": 15.56476780442136,
+      "y": -10.876472000491324,
+      "stamp": 495.37,
+      "prev": 57,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 59,
+      "x": 17.042392366827354,
+      "y": -10.612112502374844,
+      "stamp": 495.933,
+      "prev": 58,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 60,
+      "x": 18.56138638370542,
+      "y": -10.339351814468685,
+      "stamp": 496.57,
+      "prev": 59,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 61,
+      "x": 20.06421649006976,
+      "y": -10.05910550989945,
+      "stamp": 497.31,
+      "prev": 60,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 62,
+      "x": 21.546344591301533,
+      "y": -9.779810251161674,
+      "stamp": 498.25,
+      "prev": 61,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 63,
+      "x": 21.26395599849567,
+      "y": -8.29541683896668,
+      "stamp": 502.19,
+      "prev": 62,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 64,
+      "x": 20.73893302126753,
+      "y": -6.883542233113624,
+      "stamp": 502.95,
+      "prev": 63,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 65,
+      "x": 20.179081944975305,
+      "y": -5.476970413688803,
+      "stamp": 503.511,
+      "prev": 64,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    },
+    {
+      "id": 66,
+      "x": 18.820851032253596,
+      "y": -4.797235691405498,
+      "stamp": 506.201,
+      "prev": 65,
+      "branches": [],
+      "lste_state": 0,
+      "lste_subtype": "",
+      "profile": "pass",
+      "active_mode": "unknown"
+    }
+  ],
+  "pending_junctions": [],
+  "backtrack_stack": [],
+  "state_events": [],
+  "profile_events": [],
+  "goal_events": [
+    {
+      "t": 355.803,
+      "goal": {
+        "x": 10.000746290134455,
+        "y": -0.170613846453106,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0032339994421799138,
+        "y": 0.052428744674512716
+      }
+    },
+    {
+      "t": 356.803,
+      "goal": {
+        "x": 10.000755207953322,
+        "y": -0.17046210265290157,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0032429172610481246,
+        "y": 0.052580488474717156
+      }
+    },
+    {
+      "t": 358.001,
+      "goal": {
+        "x": 10.000769893495029,
+        "y": -0.17027871048223525,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0032576028027554963,
+        "y": 0.05276388064538347
+      }
+    },
+    {
+      "t": 359.001,
+      "goal": {
+        "x": 10.00078002997138,
+        "y": -0.17012798927269568,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.003267739279107328,
+        "y": 0.05291460185492306
+      }
+    },
+    {
+      "t": 360.002,
+      "goal": {
+        "x": 10.000786780558819,
+        "y": -0.16997775310936586,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0032744898665446574,
+        "y": 0.05306483801825288
+      }
+    },
+    {
+      "t": 361.004,
+      "goal": {
+        "x": 10.000796559903549,
+        "y": -0.16982885094165845,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.003284269211274653,
+        "y": 0.053213740185960284
+      }
+    },
+    {
+      "t": 362.002,
+      "goal": {
+        "x": 10.000808112156555,
+        "y": -0.16967694336051067,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0032958214642804296,
+        "y": 0.05336564776710806
+      }
+    },
+    {
+      "t": 362.984,
+      "goal": {
+        "x": 10.00081896789822,
+        "y": -0.16953223059985217,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.003305174544141318,
+        "y": 0.053507571225045736
+      }
+    },
+    {
+      "t": 364.002,
+      "goal": {
+        "x": 10.000827058378519,
+        "y": -0.16938448142612908,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0033147676862444056,
+        "y": 0.05365810970148966
+      }
+    },
+    {
+      "t": 365.003,
+      "goal": {
+        "x": 10.000840818505415,
+        "y": -0.16924173479624244,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0033285278131399356,
+        "y": 0.05380085633137631
+      }
+    },
+    {
+      "t": 366.002,
+      "goal": {
+        "x": 10.000849482342582,
+        "y": -0.16909728914477407,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.003337191650307777,
+        "y": 0.05394530198284466
+      }
+    },
+    {
+      "t": 367.003,
+      "goal": {
+        "x": 10.000863899437057,
+        "y": -0.1689522676287954,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0033516087447834535,
+        "y": 0.05409032349882334
+      }
+    },
+    {
+      "t": 368.003,
+      "goal": {
+        "x": 10.000870989438182,
+        "y": -0.16880150827252388,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0033586987459075096,
+        "y": 0.05424108285509486
+      }
+    },
+    {
+      "t": 369.201,
+      "goal": {
+        "x": 10.000883221368793,
+        "y": -0.16862484217774087,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.003370930676519071,
+        "y": 0.05441774894987787
+      }
+    },
+    {
+      "t": 370.206,
+      "goal": {
+        "x": 10.000890858090509,
+        "y": -0.1684685013832118,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.0033785673982355264,
+        "y": 0.05457408974440695
+      }
+    },
+    {
+      "t": 371.204,
+      "goal": {
+        "x": 10.00090313419715,
+        "y": -0.1683218821735221,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.003390843504876281,
+        "y": 0.054720708954096635
+      }
+    },
+    {
+      "t": 372.402,
+      "goal": {
+        "x": 10.00091228003968,
+        "y": -0.16814042530843315,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.003399989347405269,
+        "y": 0.05490216581918559
+      }
+    },
+    {
+      "t": 373.399,
+      "goal": {
+        "x": 10.465655350830577,
+        "y": -0.21438503221952357,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 0,
+      "pose": {
+        "x": 0.4681430601383035,
+        "y": 0.008657558908095156
+      }
+    },
+    {
+      "t": 374.403,
+      "goal": {
+        "x": 11.531689745429128,
+        "y": -0.32392552967194976,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 1,
+      "pose": {
+        "x": 1.5341774547368547,
+        "y": -0.10088293854433106
+      }
+    },
+    {
+      "t": 375.401,
+      "goal": {
+        "x": 12.597530782841032,
+        "y": -0.4352315723507895,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 1,
+      "pose": {
+        "x": 2.600018492148758,
+        "y": -0.2121889812231708
+      }
+    },
+    {
+      "t": 376.401,
+      "goal": {
+        "x": 13.66314649153366,
+        "y": -0.5485116654452781,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 2,
+      "pose": {
+        "x": 3.665634200841385,
+        "y": -0.32546907431765937
+      }
+    },
+    {
+      "t": 377.401,
+      "goal": {
+        "x": 14.508647286773268,
+        "y": -0.6371692920911429,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 3,
+      "pose": {
+        "x": 4.511134996080994,
+        "y": -0.41412670096352416
+      }
+    },
+    {
+      "t": 378.403,
+      "goal": {
+        "x": 15.120955381309063,
+        "y": -0.5863331520604037,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 3,
+      "pose": {
+        "x": 5.123443090616788,
+        "y": -0.36329056093278494
+      }
+    },
+    {
+      "t": 379.401,
+      "goal": {
+        "x": 15.82172334830793,
+        "y": -0.5296756876541088,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 3,
+      "pose": {
+        "x": 5.824211057615657,
+        "y": -0.30663309652649007
+      }
+    },
+    {
+      "t": 380.402,
+      "goal": {
+        "x": 6.346064815522153,
+        "y": 9.712575190453737,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 4,
+      "pose": {
+        "x": 6.123022224394534,
+        "y": -0.2849371002385377
+      }
+    },
+    {
+      "t": 381.401,
+      "goal": {
+        "x": 6.435694229110621,
+        "y": 9.936037093610292,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 4,
+      "pose": {
+        "x": 6.212651637983002,
+        "y": -0.06147519708198277
+      }
+    },
+    {
+      "t": 382.401,
+      "goal": {
+        "x": 6.535611862119355,
+        "y": 10.331191602513139,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 4,
+      "pose": {
+        "x": 6.312569270991736,
+        "y": 0.33367931182086497
+      }
+    },
+    {
+      "t": 383.402,
+      "goal": {
+        "x": 6.694436099157749,
+        "y": 11.168590064511559,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 5,
+      "pose": {
+        "x": 6.47139350803013,
+        "y": 1.1710777738192848
+      }
+    },
+    {
+      "t": 384.402,
+      "goal": {
+        "x": 6.910575688850501,
+        "y": 12.270745743039031,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 5,
+      "pose": {
+        "x": 6.6875330977228815,
+        "y": 2.2732334523467563
+      }
+    },
+    {
+      "t": 385.401,
+      "goal": {
+        "x": 7.130383319190895,
+        "y": 13.381566443740516,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 6,
+      "pose": {
+        "x": 6.907340728063276,
+        "y": 3.384054153048241
+      }
+    },
+    {
+      "t": 386.394,
+      "goal": {
+        "x": 7.351748770313984,
+        "y": 14.492059941239102,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 7,
+      "pose": {
+        "x": 7.128706179186365,
+        "y": 4.494547650546827
+      }
+    },
+    {
+      "t": 387.4,
+      "goal": {
+        "x": -2.8669014220285867,
+        "y": 4.7717168774503635,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 7,
+      "pose": {
+        "x": 7.1306108686636875,
+        "y": 4.548674286322743
+      }
+    },
+    {
+      "t": 388.401,
+      "goal": {
+        "x": -2.859880597815942,
+        "y": 4.766816324028561,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 7,
+      "pose": {
+        "x": 7.137631692876332,
+        "y": 4.543773732900941
+      }
+    },
+    {
+      "t": 389.401,
+      "goal": {
+        "x": -3.5619057715718396,
+        "y": 4.689748202634948,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 7,
+      "pose": {
+        "x": 6.435606519120435,
+        "y": 4.466705611507328
+      }
+    },
+    {
+      "t": 390.403,
+      "goal": {
+        "x": -4.655454325056874,
+        "y": 4.573066453295615,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 8,
+      "pose": {
+        "x": 5.342057965635401,
+        "y": 4.350023862167995
+      }
+    },
+    {
+      "t": 391.401,
+      "goal": {
+        "x": -5.431602363615872,
+        "y": 4.46150357623627,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 8,
+      "pose": {
+        "x": 4.565909927076402,
+        "y": 4.23846098510865
+      }
+    },
+    {
+      "t": 392.406,
+      "goal": {
+        "x": -6.334182912463036,
+        "y": 4.8591103979347245,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 9,
+      "pose": {
+        "x": 3.663329378229238,
+        "y": 4.636067806807104
+      }
+    },
+    {
+      "t": 393.402,
+      "goal": {
+        "x": -7.096135262518668,
+        "y": 5.105943353025194,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 9,
+      "pose": {
+        "x": 2.9013770281736053,
+        "y": 4.882900761897574
+      }
+    },
+    {
+      "t": 394.39,
+      "goal": {
+        "x": -8.22467520375484,
+        "y": 5.467107306828719,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 10,
+      "pose": {
+        "x": 1.7728370869374346,
+        "y": 5.244064715701099
+      }
+    },
+    {
+      "t": 395.401,
+      "goal": {
+        "x": 1.530302757893651,
+        "y": -4.753199342071303,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 10,
+      "pose": {
+        "x": 1.7533453490212692,
+        "y": 5.244312948620971
+      }
+    },
+    {
+      "t": 396.351,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 10,
+      "pose": {
+        "x": 1.7574655399886778,
+        "y": 5.251475282325001
+      }
+    },
+    {
+      "t": 397.294,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 10,
+      "pose": {
+        "x": 1.7541038686701382,
+        "y": 5.25893464634143
+      }
+    },
+    {
+      "t": 398.347,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 10,
+      "pose": {
+        "x": 2.3182687106815307,
+        "y": 5.041171823965417
+      }
+    },
+    {
+      "t": 399.351,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 10,
+      "pose": {
+        "x": 3.8178261498863364,
+        "y": 4.436121667377664
+      }
+    },
+    {
+      "t": 400.356,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 11,
+      "pose": {
+        "x": 5.108126392849893,
+        "y": 3.9035645099277656
+      }
+    },
+    {
+      "t": 401.351,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 12,
+      "pose": {
+        "x": 5.675016728785101,
+        "y": 3.6701812649761636
+      }
+    },
+    {
+      "t": 402.353,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 12,
+      "pose": {
+        "x": 5.678392766158925,
+        "y": 3.666357847901252
+      }
+    },
+    {
+      "t": 403.351,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 12,
+      "pose": {
+        "x": 5.873379079304711,
+        "y": 3.349899749392224
+      }
+    },
+    {
+      "t": 404.351,
+      "goal": {
+        "x": 6.467530135067727,
+        "y": 1.150853113009491,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 12,
+      "pose": {
+        "x": 6.034021428755976,
+        "y": 2.9324631547723228
+      }
+    },
+    {
+      "t": 405.351,
+      "goal": {
+        "x": 11.46627263620555,
+        "y": 1.0387219071907092,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 13,
+      "pose": {
+        "x": 6.259208574318006,
+        "y": 2.3046018104348254
+      }
+    },
+    {
+      "t": 406.352,
+      "goal": {
+        "x": 11.46627263620555,
+        "y": 1.0387219071907092,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 13,
+      "pose": {
+        "x": 6.52314411782176,
+        "y": 1.5731149151824184
+      }
+    },
+    {
+      "t": 407.351,
+      "goal": {
+        "x": 11.46627263620555,
+        "y": 1.0387219071907092,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 14,
+      "pose": {
+        "x": 6.678450359624155,
+        "y": 1.1247174760790022
+      }
+    },
+    {
+      "t": 408.351,
+      "goal": {
+        "x": 11.46627263620555,
+        "y": 1.0387219071907092,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 14,
+      "pose": {
+        "x": 7.117108358081853,
+        "y": 0.8629323280608685
+      }
+    },
+    {
+      "t": 409.347,
+      "goal": {
+        "x": 11.46627263620555,
+        "y": 1.0387219071907092,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 15,
+      "pose": {
+        "x": 7.766919985632587,
+        "y": 0.496972930898557
+      }
+    },
+    {
+      "t": 410.406,
+      "goal": {
+        "x": 18.872889688310536,
+        "y": -0.18390512176476265,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 15,
+      "pose": {
+        "x": 8.875377397618264,
+        "y": 0.03913746936285607
+      }
+    },
+    {
+      "t": 411.399,
+      "goal": {
+        "x": 19.70320288244967,
+        "y": -0.4626177439072364,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 16,
+      "pose": {
+        "x": 9.705690591757396,
+        "y": -0.23957515277961772
+      }
+    },
+    {
+      "t": 412.602,
+      "goal": {
+        "x": 10.662674537961614,
+        "y": -10.630205147233848,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 17,
+      "pose": {
+        "x": 10.885717129089231,
+        "y": -0.6326928565415733
+      }
+    },
+    {
+      "t": 413.597,
+      "goal": {
+        "x": 11.028024912558484,
+        "y": -10.75221117871135,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 17,
+      "pose": {
+        "x": 11.251067503686102,
+        "y": -0.7546988880190763
+      }
+    },
+    {
+      "t": 414.593,
+      "goal": {
+        "x": 11.455108965230876,
+        "y": -11.141550645875853,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 17,
+      "pose": {
+        "x": 11.678151556358493,
+        "y": -1.144038355183579
+      }
+    },
+    {
+      "t": 415.603,
+      "goal": {
+        "x": 11.546191401115083,
+        "y": -11.25063033889269,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 17,
+      "pose": {
+        "x": 11.7692339922427,
+        "y": -1.2531180482004154
+      }
+    },
+    {
+      "t": 416.601,
+      "goal": {
+        "x": 11.583849238925376,
+        "y": -11.733608428796217,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 18,
+      "pose": {
+        "x": 11.806891830052994,
+        "y": -1.7360961381039424
+      }
+    },
+    {
+      "t": 417.601,
+      "goal": {
+        "x": 11.612421445109094,
+        "y": -12.672981332391693,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 18,
+      "pose": {
+        "x": 11.835464036236711,
+        "y": -2.675469041699418
+      }
+    },
+    {
+      "t": 418.605,
+      "goal": {
+        "x": 11.668806038921574,
+        "y": -13.99753663047122,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 19,
+      "pose": {
+        "x": 11.891848630049191,
+        "y": -4.000024339778945
+      }
+    },
+    {
+      "t": 419.602,
+      "goal": {
+        "x": 11.731954433629978,
+        "y": -15.360011007848922,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 20,
+      "pose": {
+        "x": 11.954997024757596,
+        "y": -5.362498717156648
+      }
+    },
+    {
+      "t": 420.597,
+      "goal": {
+        "x": 11.765420469738148,
+        "y": -16.066060708797274,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 21,
+      "pose": {
+        "x": 11.988463060865765,
+        "y": -6.068548418104998
+      }
+    },
+    {
+      "t": 421.605,
+      "goal": {
+        "x": 2.011341605623107,
+        "y": -6.2783081872883,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 21,
+      "pose": {
+        "x": 12.008853896315381,
+        "y": -6.501350778415921
+      }
+    },
+    {
+      "t": 422.61,
+      "goal": {
+        "x": 2.0063470640188097,
+        "y": -6.285182689984751,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 21,
+      "pose": {
+        "x": 12.003859354711084,
+        "y": -6.508225281112371
+      }
+    },
+    {
+      "t": 423.601,
+      "goal": {
+        "x": 1.6737300975193588,
+        "y": -6.305500783984741,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 21,
+      "pose": {
+        "x": 11.671242388211633,
+        "y": -6.528543375112361
+      }
+    },
+    {
+      "t": 424.599,
+      "goal": {
+        "x": 0.6241402090293349,
+        "y": -6.376588183011954,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 22,
+      "pose": {
+        "x": 10.621652499721609,
+        "y": -6.599630774139574
+      }
+    },
+    {
+      "t": 425.604,
+      "goal": {
+        "x": -0.7440845836275507,
+        "y": -6.4797579833676435,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 22,
+      "pose": {
+        "x": 9.253427707064724,
+        "y": -6.702800574495264
+      }
+    },
+    {
+      "t": 426.602,
+      "goal": {
+        "x": -2.2908701433385223,
+        "y": -6.604826583771015,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 23,
+      "pose": {
+        "x": 7.706642147353752,
+        "y": -6.827869174898635
+      }
+    },
+    {
+      "t": 427.603,
+      "goal": {
+        "x": -3.8535787666632304,
+        "y": -6.733576725951763,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 25,
+      "pose": {
+        "x": 6.143933524029044,
+        "y": -6.956619317079383
+      }
+    },
+    {
+      "t": 428.601,
+      "goal": {
+        "x": -5.4160940572933445,
+        "y": -6.8644575191605615,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 26,
+      "pose": {
+        "x": 4.58141823339893,
+        "y": -7.087500110288182
+      }
+    },
+    {
+      "t": 429.587,
+      "goal": {
+        "x": 4.097980329863056,
+        "y": 3.0612784295124724,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 26,
+      "pose": {
+        "x": 3.8749377387354365,
+        "y": -6.936233861179802
+      }
+    },
+    {
+      "t": 430.599,
+      "goal": {
+        "x": -7.401998772672509,
+        "y": -5.806761357302126,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 27,
+      "pose": {
+        "x": 2.5955135180197653,
+        "y": -6.0298039484297465
+      }
+    },
+    {
+      "t": 431.602,
+      "goal": {
+        "x": -8.661355533185155,
+        "y": -4.918706080136731,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 28,
+      "pose": {
+        "x": 1.3361567575071194,
+        "y": -5.141748671264351
+      }
+    },
+    {
+      "t": 432.598,
+      "goal": {
+        "x": -8.68305625299658,
+        "y": -4.914733162974648,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 28,
+      "pose": {
+        "x": 1.3144560376956937,
+        "y": -5.137775754102268
+      }
+    },
+    {
+      "t": 433.603,
+      "goal": {
+        "x": 1.1009598596268522,
+        "y": -15.132961515454065,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 28,
+      "pose": {
+        "x": 1.3240024507544703,
+        "y": -5.135449224761791
+      }
+    },
+    {
+      "t": 434.551,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 28,
+      "pose": {
+        "x": 1.3252306378439864,
+        "y": -5.1248047348100165
+      }
+    },
+    {
+      "t": 435.551,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 28,
+      "pose": {
+        "x": 1.8434719413940643,
+        "y": -5.393929538082474
+      }
+    },
+    {
+      "t": 436.551,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 29,
+      "pose": {
+        "x": 3.718509198540695,
+        "y": -6.3891058003813255
+      }
+    },
+    {
+      "t": 437.55,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 29,
+      "pose": {
+        "x": 4.725596229053972,
+        "y": -6.8989710656190395
+      }
+    },
+    {
+      "t": 438.55,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 30,
+      "pose": {
+        "x": 5.441182745903444,
+        "y": -7.381585370717487
+      }
+    },
+    {
+      "t": 439.552,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 31,
+      "pose": {
+        "x": 6.339184929844202,
+        "y": -7.154847339620844
+      }
+    },
+    {
+      "t": 440.751,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 31,
+      "pose": {
+        "x": 7.503283163230162,
+        "y": -6.902951205583416
+      }
+    },
+    {
+      "t": 441.748,
+      "goal": {
+        "x": 10.647500922453885,
+        "y": -6.597743040208945,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 32,
+      "pose": {
+        "x": 8.765550032636362,
+        "y": -6.641203325250482
+      }
+    },
+    {
+      "t": 442.751,
+      "goal": {
+        "x": 10.535369716635103,
+        "y": -11.59648554134677,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 33,
+      "pose": {
+        "x": 10.027547272077026,
+        "y": -6.378070289013286
+      }
+    },
+    {
+      "t": 443.751,
+      "goal": {
+        "x": 10.535369716635103,
+        "y": -11.59648554134677,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 34,
+      "pose": {
+        "x": 10.43616915988279,
+        "y": -6.306239947953118
+      }
+    },
+    {
+      "t": 444.751,
+      "goal": {
+        "x": 10.535369716635103,
+        "y": -11.59648554134677,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 34,
+      "pose": {
+        "x": 10.656048716267858,
+        "y": -6.4795023880406
+      }
+    },
+    {
+      "t": 445.752,
+      "goal": {
+        "x": 10.535369716635103,
+        "y": -11.59648554134677,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 35,
+      "pose": {
+        "x": 11.707161814016457,
+        "y": -7.225695918761478
+      }
+    },
+    {
+      "t": 446.751,
+      "goal": {
+        "x": 10.535369716635103,
+        "y": -11.59648554134677,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 35,
+      "pose": {
+        "x": 12.173092681110944,
+        "y": -7.733645708599073
+      }
+    },
+    {
+      "t": 447.749,
+      "goal": {
+        "x": 10.535369716635103,
+        "y": -11.59648554134677,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 35,
+      "pose": {
+        "x": 12.387526322870782,
+        "y": -8.368446102124333
+      }
+    },
+    {
+      "t": 448.796,
+      "goal": {
+        "x": 12.334042121353963,
+        "y": -19.248435075832855,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 36,
+      "pose": {
+        "x": 12.557084712481581,
+        "y": -9.250922785140581
+      }
+    },
+    {
+      "t": 449.796,
+      "goal": {
+        "x": 2.4700290514725474,
+        "y": -9.47671410965732,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 36,
+      "pose": {
+        "x": 12.467541342164822,
+        "y": -9.69975670078494
+      }
+    },
+    {
+      "t": 450.798,
+      "goal": {
+        "x": 22.755266284135093,
+        "y": -11.04000635206097,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 37,
+      "pose": {
+        "x": 12.757753993442819,
+        "y": -10.816963760933351
+      }
+    },
+    {
+      "t": 451.799,
+      "goal": {
+        "x": 22.93893522012614,
+        "y": -11.819507810861804,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 38,
+      "pose": {
+        "x": 12.941422929433866,
+        "y": -11.596465219734185
+      }
+    },
+    {
+      "t": 452.801,
+      "goal": {
+        "x": 22.933336758191057,
+        "y": -11.826782901960716,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 38,
+      "pose": {
+        "x": 12.935824467498783,
+        "y": -11.603740310833096
+      }
+    },
+    {
+      "t": 453.798,
+      "goal": {
+        "x": 22.2450758475145,
+        "y": -11.937046171380464,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 38,
+      "pose": {
+        "x": 12.247563556822227,
+        "y": -11.714003580252845
+      }
+    },
+    {
+      "t": 454.81,
+      "goal": {
+        "x": 1.2311549923952008,
+        "y": -11.633525629182992,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 39,
+      "pose": {
+        "x": 11.228667283087475,
+        "y": -11.856568220310612
+      }
+    },
+    {
+      "t": 455.802,
+      "goal": {
+        "x": -0.42981179843522455,
+        "y": -11.882422408086574,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 40,
+      "pose": {
+        "x": 9.56770049225705,
+        "y": -12.105464999214194
+      }
+    },
+    {
+      "t": 456.801,
+      "goal": {
+        "x": -1.6108163608573918,
+        "y": -12.036021649790829,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 41,
+      "pose": {
+        "x": 8.386695929834882,
+        "y": -12.259064240918448
+      }
+    },
+    {
+      "t": 457.802,
+      "goal": {
+        "x": -2.4440863087706557,
+        "y": -11.569657464743777,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 41,
+      "pose": {
+        "x": 7.5534259819216185,
+        "y": -11.792700055871396
+      }
+    },
+    {
+      "t": 458.81,
+      "goal": {
+        "x": -3.1490453990999114,
+        "y": -11.13409944575191,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 42,
+      "pose": {
+        "x": 6.848466891592363,
+        "y": -11.357142036879528
+      }
+    },
+    {
+      "t": 459.809,
+      "goal": {
+        "x": -3.8760859141648663,
+        "y": -10.91349812405534,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 42,
+      "pose": {
+        "x": 6.121426376527408,
+        "y": -11.13654071518296
+      }
+    },
+    {
+      "t": 460.818,
+      "goal": {
+        "x": -4.33478793811469,
+        "y": -10.975040794677408,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 43,
+      "pose": {
+        "x": 5.645250079346398,
+        "y": -11.201840280576247
+      }
+    },
+    {
+      "t": 461.801,
+      "goal": {
+        "x": -5.2083287266621525,
+        "y": -11.163472401439787,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 43,
+      "pose": {
+        "x": 4.789183564030122,
+        "y": -11.386514992567406
+      }
+    },
+    {
+      "t": 462.802,
+      "goal": {
+        "x": -6.081650693179317,
+        "y": -11.3529605027053,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 44,
+      "pose": {
+        "x": 3.915861597512957,
+        "y": -11.57600309383292
+      }
+    },
+    {
+      "t": 463.8,
+      "goal": {
+        "x": -6.661148038954183,
+        "y": -11.472665498286917,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 44,
+      "pose": {
+        "x": 3.3363642517380914,
+        "y": -11.695708089414536
+      }
+    },
+    {
+      "t": 464.808,
+      "goal": {
+        "x": -6.756663872171445,
+        "y": -11.506376913188443,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 44,
+      "pose": {
+        "x": 3.2408484185208293,
+        "y": -11.729419504316063
+      }
+    },
+    {
+      "t": 466.008,
+      "goal": {
+        "x": -7.01886164417761,
+        "y": -11.564775747828271,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 44,
+      "pose": {
+        "x": 2.9786506465146645,
+        "y": -11.78781833895589
+      }
+    },
+    {
+      "t": 467.001,
+      "goal": {
+        "x": 2.7556209108511616,
+        "y": -21.785473868143704,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 44,
+      "pose": {
+        "x": 2.9786635019787795,
+        "y": -11.787961577451432
+      }
+    },
+    {
+      "t": 468.001,
+      "goal": {
+        "x": 2.2130642888833343,
+        "y": -21.941922594594647,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 45,
+      "pose": {
+        "x": 2.436106880010952,
+        "y": -11.944410303902373
+      }
+    },
+    {
+      "t": 469.0,
+      "goal": {
+        "x": 2.213375985304312,
+        "y": -21.942388524186175,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 45,
+      "pose": {
+        "x": 2.43641857643193,
+        "y": -11.9448762334939
+      }
+    },
+    {
+      "t": 470.001,
+      "goal": {
+        "x": 1.671257762880964,
+        "y": -22.02708208444538,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 45,
+      "pose": {
+        "x": 1.894300354008582,
+        "y": -12.029569793753105
+      }
+    },
+    {
+      "t": 471.004,
+      "goal": {
+        "x": 1.3138571826611098,
+        "y": -22.10704956984719,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 45,
+      "pose": {
+        "x": 1.536899773788728,
+        "y": -12.109537279154917
+      }
+    },
+    {
+      "t": 472.012,
+      "goal": {
+        "x": 0.64367270715762,
+        "y": -22.191194107893047,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 46,
+      "pose": {
+        "x": 0.8488894849211223,
+        "y": -12.194926891066869
+      }
+    },
+    {
+      "t": 473.002,
+      "goal": {
+        "x": -0.24777530383701724,
+        "y": -22.254079962572938,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 46,
+      "pose": {
+        "x": -0.02473271270939915,
+        "y": -12.256567671880664
+      }
+    },
+    {
+      "t": 473.999,
+      "goal": {
+        "x": -0.8397273951617439,
+        "y": -22.293872368783482,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": -0.6166848040341258,
+        "y": -12.29636007809121
+      }
+    },
+    {
+      "t": 475.001,
+      "goal": {
+        "x": -0.8396420186299252,
+        "y": -22.294015412682494,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": -0.6165994275023071,
+        "y": -12.29650312199022
+      }
+    },
+    {
+      "t": 476.001,
+      "goal": {
+        "x": -0.8396467354742427,
+        "y": -22.294159941954838,
+        "yaw": -1.593102435642157
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": -0.6166007180645982,
+        "y": -12.296650326945791
+      }
+    },
+    {
+      "t": 476.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": -0.6135713027740471,
+        "y": -12.29615088882291
+      }
+    },
+    {
+      "t": 477.95,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": -0.607858722934011,
+        "y": -12.288957003010609
+      }
+    },
+    {
+      "t": 478.95,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": -0.6115301685218574,
+        "y": -12.280480784669503
+      }
+    },
+    {
+      "t": 479.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": -0.6137758074838455,
+        "y": -12.275892815388394
+      }
+    },
+    {
+      "t": 480.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 47,
+      "pose": {
+        "x": 0.43075366014406574,
+        "y": -12.079605459751129
+      }
+    },
+    {
+      "t": 481.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 48,
+      "pose": {
+        "x": 2.1276569394161178,
+        "y": -11.74302223091316
+      }
+    },
+    {
+      "t": 482.953,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 49,
+      "pose": {
+        "x": 3.2492978017041625,
+        "y": -11.527631671307832
+      }
+    },
+    {
+      "t": 483.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 50,
+      "pose": {
+        "x": 4.599746658043811,
+        "y": -11.32940460567388
+      }
+    },
+    {
+      "t": 484.992,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 51,
+      "pose": {
+        "x": 5.839684392861009,
+        "y": -11.212790745178056
+      }
+    },
+    {
+      "t": 485.952,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 51,
+      "pose": {
+        "x": 6.50853090018692,
+        "y": -11.855692983229973
+      }
+    },
+    {
+      "t": 486.95,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 51,
+      "pose": {
+        "x": 6.740301801371954,
+        "y": -11.947773860942362
+      }
+    },
+    {
+      "t": 487.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 52,
+      "pose": {
+        "x": 7.34357689239108,
+        "y": -12.10294076844537
+      }
+    },
+    {
+      "t": 488.949,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 52,
+      "pose": {
+        "x": 7.622557542095301,
+        "y": -12.003221137954766
+      }
+    },
+    {
+      "t": 489.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 52,
+      "pose": {
+        "x": 7.894995537589669,
+        "y": -12.046432748711215
+      }
+    },
+    {
+      "t": 490.954,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 53,
+      "pose": {
+        "x": 8.480462435900142,
+        "y": -11.909189951301734
+      }
+    },
+    {
+      "t": 491.951,
+      "goal": {
+        "x": 11.463669792944419,
+        "y": -11.822730673549454,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 53,
+      "pose": {
+        "x": 9.353589469322118,
+        "y": -11.810045288396564
+      }
+    },
+    {
+      "t": 492.951,
+      "goal": {
+        "x": 16.46241229408224,
+        "y": -11.934861879368237,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 54,
+      "pose": {
+        "x": 10.709941782746357,
+        "y": -11.643047854647042
+      }
+    },
+    {
+      "t": 493.951,
+      "goal": {
+        "x": 16.46241229408224,
+        "y": -11.934861879368237,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 55,
+      "pose": {
+        "x": 12.107641154839602,
+        "y": -11.46681764855456
+      }
+    },
+    {
+      "t": 495.003,
+      "goal": {
+        "x": 24.559470707928334,
+        "y": -11.278198348714938,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 57,
+      "pose": {
+        "x": 14.56195841723606,
+        "y": -11.055155757587318
+      }
+    },
+    {
+      "t": 496.001,
+      "goal": {
+        "x": 27.198212569651137,
+        "y": -10.806746549561694,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 59,
+      "pose": {
+        "x": 17.200700278958863,
+        "y": -10.583703958434075
+      }
+    },
+    {
+      "t": 497.002,
+      "goal": {
+        "x": 19.67974973101842,
+        "y": -0.17459246339702794,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 60,
+      "pose": {
+        "x": 19.4567071398908,
+        "y": -10.172104754089302
+      }
+    },
+    {
+      "t": 498.001,
+      "goal": {
+        "x": 21.433909925301943,
+        "y": 0.15513671219174263,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 61,
+      "pose": {
+        "x": 21.210867334174324,
+        "y": -9.842375578500532
+      }
+    },
+    {
+      "t": 499.0,
+      "goal": {
+        "x": 11.900297854875056,
+        "y": -9.503864350487063,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 62,
+      "pose": {
+        "x": 21.89781014556733,
+        "y": -9.726906941614683
+      }
+    },
+    {
+      "t": 500.001,
+      "goal": {
+        "x": 11.896377048889569,
+        "y": -9.512184494724268,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 62,
+      "pose": {
+        "x": 21.893889339581843,
+        "y": -9.735227085851887
+      }
+    },
+    {
+      "t": 501.005,
+      "goal": {
+        "x": 22.053616837750095,
+        "y": 0.357328140333637,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 62,
+      "pose": {
+        "x": 21.830574246622476,
+        "y": -9.640184150358637
+      }
+    },
+    {
+      "t": 502.201,
+      "goal": {
+        "x": 11.266443707803397,
+        "y": -8.072374247839061,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 63,
+      "pose": {
+        "x": 21.26395599849567,
+        "y": -8.29541683896668
+      }
+    },
+    {
+      "t": 503.201,
+      "goal": {
+        "x": 10.507996417723753,
+        "y": -6.070556963672393,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 64,
+      "pose": {
+        "x": 20.505508708416027,
+        "y": -6.293599554800013
+      }
+    },
+    {
+      "t": 504.201,
+      "goal": {
+        "x": 9.781813149994186,
+        "y": -4.056071975500933,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 65,
+      "pose": {
+        "x": 19.77932544068646,
+        "y": -4.279114566628553
+      }
+    },
+    {
+      "t": 505.201,
+      "goal": {
+        "x": 9.788356533325619,
+        "y": -4.062991900797464,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 65,
+      "pose": {
+        "x": 19.785868824017893,
+        "y": -4.286034491925085
+      }
+    },
+    {
+      "t": 506.201,
+      "goal": {
+        "x": 8.862537702917045,
+        "y": -4.555016411266838,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 65,
+      "pose": {
+        "x": 18.86004999360932,
+        "y": -4.778059002394458
+      }
+    },
+    {
+      "t": 507.202,
+      "goal": {
+        "x": 27.606356722200687,
+        "y": -5.565251248334304,
+        "yaw": -0.022306108847260475
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 66,
+      "pose": {
+        "x": 17.608844431508412,
+        "y": -5.342208657206686
+      }
+    },
+    {
+      "t": 508.199,
+      "goal": {
+        "x": 17.83683973555809,
+        "y": 4.663125146626336,
+        "yaw": 1.548490217947636
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 66,
+      "pose": {
+        "x": 17.61379714443047,
+        "y": -5.334387144065938
+      }
+    },
+    {
+      "t": 509.203,
+      "goal": {
+        "x": 7.611589562933897,
+        "y": -5.103349116875136,
+        "yaw": 3.1192865447425326
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 66,
+      "pose": {
+        "x": 17.60910185362617,
+        "y": -5.326391708002756
+      }
+    },
+    {
+      "t": 510.151,
+      "goal": {
+        "x": 0.003226844421680323,
+        "y": 0.05233930789434546,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 66,
+      "pose": {
+        "x": 17.913623477742682,
+        "y": -5.007056156604812
+      }
+    },
+    {
+      "t": 511.151,
+      "goal": {
+        "x": 0.003226844421680323,
+        "y": 0.05233930789434546,
+        "yaw": 0.0
+      },
+      "mode": "unknown",
+      "profile": "pass",
+      "state": 0,
+      "subtype": "",
+      "anchor_id": 66,
+      "pose": {
+        "x": 18.525745501291755,
+        "y": -4.327433867461202
+      }
+    }
+  ],
+  "visited_events": []
+}

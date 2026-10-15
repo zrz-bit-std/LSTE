@@ -1,0 +1,57 @@
+# Access-Topo 参数（fine，适用于 Sus-C 精细探索）
+# 相比 coarse：更密 anchor、更细聚类、更快路口会话、更严 visited。
+
+test_name: topo_sus_c
+
+# 路钉采样（更密）
+anchor_step_dist: 1.0
+
+# 回退判定
+backtrack_arrive_dist: 2.0
+
+# visited 过滤（更严格）
+visited_thresh: 1.5
+
+# frontier 角度聚类（更细、更快）
+cluster_eps_deg: 15.0
+cluster_stable_duration: 2.0
+cluster_lost_timeout: 1.0
+
+# 路口窗口结束条件（更快固化）
+junction_finalize_dist: 4.0
+junction_finalize_timeout: 10.0
+
+# 路口会话触发（更敏感）
+junction_enter_confirm_sec: 0.8
+junction_peak_min_age: 0.5
+junction_peak_min_sep_deg: 25.0
+junction_peak_min_weight: 0.0
+junction_second_weight_ratio: 0.12
+
+# 相邻 anchor 的兴趣方向合并距离
+branch_merge_dist: 1.5
+
+# 路口角度调试日志
+junction_angle_log: false
+junction_angle_dir: ""   # auto-resolved relative to topo_tree_root at runtime
+
+# 强制分支窗口
+force_window_deg: 30.0
+commit_dist: 2.0
+commit_goal_dist: 5.0
+commit_carrot_lookahead: 5.0
+
+# 前方可行距离过滤（开启 + 阈值）
+enable_min_frontier_clearance: false
+min_frontier_clearance: 0.5
+
+# 分支上限与路口冷却（更激进）
+max_pending_per_node: 3
+junction_cooldown_anchors: 2
+
+# 回退触发（更快考虑回退）
+no_frontier_trigger_sec: 2.0
+
+# topo tree 保存
+topo_tree_root: ""        # auto-resolved at runtime from package path or LSTE_WS
+topo_save_period: 2.0

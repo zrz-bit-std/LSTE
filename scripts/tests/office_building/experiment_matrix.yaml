@@ -1,0 +1,90 @@
+# Declarative study matrix. A trial is a complete process restart, not a
+# continuation inside an already-built SLAM map. Each seed is passed to
+# gzserver itself and retained in the trial record.
+schema_version: 1
+study_id: office_place_portal_workitem_v1
+controller: teb
+profile: primary
+methods:
+  - frontier
+  - frontier_distance_dedup
+  - place_portal
+  - place_portal_workitem
+  - place_portal_workitem_legacy_rank
+  - place_portal_workitem_strict
+phases:
+  topology_smoke:
+    # Smoke runs validate the launcher and evidence pipeline; they are not
+    # part of the formal method-comparison denominator.
+    formal: false
+    levels: [level_2]
+    seeds: [20260905]
+    # Bounds Gazebo/node startup separately from the navigation episode. A
+    # wedged launch must not consume the full 300-second run_all barrier.
+    startup_timeout_seconds: 180
+    # Once the metrics log exists, navigation must announce a usable
+    # readiness state or publish its first route within this short gate. A
+    # deadlocked StreamingNavfn startup is infrastructure failure, not a
+    # 420-second navigation timeout.
+    startup_readiness_timeout_seconds: 45
+    timeout_seconds: 420
+    terminal_event: frontier_exhausted
+    task_json: scripts/tests/office_building/topology_only_task.json
+    task_id: topology_only
+    target_eval_enabled: false
+  diagnostic_short:
+    # A bounded diagnostic slice: first route and the first portal lifecycle
+    # boundary. Cold runs still use the startup bounds below; use
+    # run_experiment_suite.py --warm-slices N to pay that cost once for a
+    # sequence of continuation slices, or --reuse-runtime for an already-live
+    # compatible runtime.
+    formal: false
+    levels: [level_1]
+    seeds: [20260905, 20260906, 20260907]
+    startup_timeout_seconds: 28
+    startup_readiness_timeout_seconds: 8
+    timeout_seconds: 12
+    terminal_event: task_done
+    task_json: model/Data_exchange/vlm_prompt/lab/yellow_cup.json
+    task_id: yellow_cup
+    target_eval_enabled: true
+  topology_main:
+    levels: [level_1, level_2, level_3, level_4]
+    seeds: [20260905, 20260906, 20260907]
+    startup_timeout_seconds: 180
+    startup_readiness_timeout_seconds: 45
+    timeout_seconds: 600
+    terminal_event: frontier_exhausted
+    task_json: scripts/tests/office_building/topology_only_task.json
+    task_id: topology_only
+    target_eval_enabled: false
+  semantic_main:
+    levels: [level_1, level_2, level_3, level_4]
+    seeds: [20260905, 20260906, 20260907]
+    startup_timeout_seconds: 180
+    startup_readiness_timeout_seconds: 45
+    timeout_seconds: 600
+    terminal_event: task_done
+    task_json: model/Data_exchange/vlm_prompt/lab/yellow_cup.json
+    task_id: yellow_cup
+    target_eval_enabled: true
+  level4_chunked:
+    # Phase 4.95 task-level validation. Each runner slice is bounded to 120 s;
+    # the runtime, map, graph state, and task lease are inherited between
+    # slices instead of being hard-reset at every diagnostic boundary.
+    formal: false
+    levels: [level_4]
+    seeds: [20260907]
+    startup_timeout_seconds: 180
+    startup_readiness_timeout_seconds: 45
+    timeout_seconds: 120
+    terminal_event: task_done
+    task_json: model/Data_exchange/vlm_prompt/lab/yellow_cup.json
+    task_id: yellow_cup
+    target_eval_enabled: true
+artifacts:
+  require_summary: true
+  require_topology_verification: true
+  require_video: true
+  video_window: Gazebo
+  video_fps: 20

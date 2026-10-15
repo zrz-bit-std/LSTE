@@ -1,0 +1,20 @@
+<launch>
+  <!--
+  Project LiDAR point cloud (/os_cloud_node/points) into spherical occupancy surface.
+  Publishes:
+    - /sph_pcl    (sensor_msgs/PointCloud2, spherical coords)
+    - /rbt_pose   (geometry_msgs/Pose2D, from /wheel_odom)
+  -->
+
+  <node pkg="lste_oc_srfc"
+        type="oc_srfc_proj"
+        name="oc_srfc_proj"
+        output="screen">
+    <!-- remap odom to the actual topic with data -->
+    <remap from="/wheel_odom" to="/pro3/wheel_odom" />
+    <param name="lidar_frame" value="os_sensor" />
+    <param name="oc_srfc_rds" value="4.0" />
+    <param name="org_oc_srfc_rds_viz" value="4.0" />
+    <param name="proj_lfrq" value="10.0" />
+  </node>
+</launch>

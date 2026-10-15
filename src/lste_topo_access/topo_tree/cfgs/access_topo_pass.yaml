@@ -1,0 +1,57 @@
+# Access-Topo 参数（coarse，适用于 PASS）
+# 基于原 access_topo.yaml，作为 explore_pass_mode 的默认配置。
+
+test_name: topo_pass
+
+# 路钉采样
+anchor_step_dist: 1.5
+
+# 回退判定
+backtrack_arrive_dist: 2.0
+
+# visited 过滤
+visited_thresh: 2.0
+
+# frontier 角度聚类
+cluster_eps_deg: 20.0
+cluster_stable_duration: 3.0
+cluster_lost_timeout: 2.0
+
+# 路口窗口结束条件
+junction_finalize_dist: 5.5
+junction_finalize_timeout: 15.0
+
+# 路口会话触发
+junction_enter_confirm_sec: 1.0
+junction_peak_min_age: 0.6
+junction_peak_min_sep_deg: 30.0
+junction_peak_min_weight: 0.0
+junction_second_weight_ratio: 0.15
+
+# 相邻 anchor 的兴趣方向合并距离
+branch_merge_dist: 2.0
+
+# 路口角度调试日志
+junction_angle_log: false
+junction_angle_dir: ""   # auto-resolved relative to topo_tree_root at runtime
+
+# 强制分支窗口
+force_window_deg: 30.0
+commit_dist: 2.0
+commit_goal_dist: 5.0
+commit_carrot_lookahead: 5.0
+
+# 前方可行距离过滤（开启 + 阈值）
+enable_min_frontier_clearance: false
+min_frontier_clearance: 0.5
+
+# 分支上限与路口冷却
+max_pending_per_node: 2
+junction_cooldown_anchors: 3
+
+# 回退触发
+no_frontier_trigger_sec: 3.0
+
+# topo tree 保存
+topo_tree_root: ""        # auto-resolved at runtime from package path or LSTE_WS
+topo_save_period: 2.0

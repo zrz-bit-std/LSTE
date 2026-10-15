@@ -1,0 +1,44 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "purple stapler",
+      "attributes": [
+        "purple",
+        "desktop stapler",
+        "small office supply"
+      ],
+      "typical_locations": [
+        "office desks",
+        "workstations"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace"
+      ],
+      "layout_prior": [
+        "rooms connected by a main corridor"
+      ],
+      "related_structures": [
+        "desk",
+        "monitor",
+        "chair"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "desk",
+        "monitor"
+      ],
+      "search_strategy": "explore each reachable office area",
+      "negative_clues": [
+        "yellow cup",
+        "blue cup"
+      ]
+    },
+    "target_ctx": {
+      "left": "",
+      "right": ""
+    }
+  }
+}

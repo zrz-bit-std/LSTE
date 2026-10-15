@@ -1,0 +1,54 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "yellow cup",
+      "attributes": [
+        "yellow",
+        "ceramic",
+        "handle on the side",
+        "medium-sized drinking cup",
+        "placed on a wooden office desk"
+      ],
+      "typical_locations": [
+        "office desks",
+        "workstations",
+        "break rooms",
+        "near keyboards and monitors"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace",
+        "shared working area"
+      ],
+      "layout_prior": [
+        "long office desks arranged in rows",
+        "multiple monitors positioned closely",
+        "office chairs around the workstations"
+      ],
+      "related_structures": [
+        "office desk",
+        "monitor",
+        "chair"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "monitor",
+        "other cups",
+        "file folder",
+        "chair"
+      ],
+      "search_strategy": "search along work desks near keyboards and monitors for brightly colored handled cups",
+      "negative_clues": [
+        "door",
+        "fire hydrant",
+        "fire extinguisher"
+      ]
+    },
+    "target_ctx": {
+      "left": "monitor",
+      "right": "monitor"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="yellowcup_world">
+    <gravity>0 0 -9.8</gravity>
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- 自己的建筑/模型（假设已放在 Gazebo 模型路径中） -->
+    <include>
+      <name>yellowcup</name>
+      <uri>model://yellowcup</uri>
+    </include>
+  </world>
+</sdf>

@@ -1,0 +1,9 @@
+.*DS_Store
+*__pycache__*
+*.pyc
+finetune/output/*
+wip.*
+.idea
+venv
+.venv
+.env

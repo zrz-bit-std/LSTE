@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WS="${LSTE_WS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+exec python3 "$WS/scripts/tests/targeted_navigation/replay_failure_evidence.py" run "$@"

@@ -1,0 +1,45 @@
+<launch>
+  <!-- Gazebo camera sensors need an OGRE render context even when the GUI is
+       disabled or the launcher is reached through SSH.  Default to Mesa's
+       software path so a missing X/GLX display cannot silently remove all
+       camera frames; callers may override LIBGL_ALWAYS_SOFTWARE explicitly. -->
+  <env name="LIBGL_ALWAYS_SOFTWARE" value="$(optenv LIBGL_ALWAYS_SOFTWARE 1)"/>
+  <!-- Keep custom LiDAR plugins and Gazebo's system camera plugin discoverable.
+       pipeline_env.sh also adds the system directory to LD_LIBRARY_PATH so
+       libgazebo_ros_camera.so can resolve its libCameraPlugin.so dependency. -->
+  <env name="GAZEBO_PLUGIN_PATH" value="$(optenv LSTE_PRE_WS)/devel/lib:/opt/ros/noetic/lib:/usr/lib/x86_64-linux-gnu/gazebo-11/plugins"/>
+  <arg name="gui" default="true"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="robot_name" default="pro3"/>
+  <!-- 当 world 已自带机器人时，设置 spawn_pro3:=false 跳过重复 spawn -->
+  <arg name="spawn_pro3" default="true"/>
+
+  <!-- 默认 world，允许从命令行覆盖为任意 .world 路径 -->
+  <arg name="world_name" default="$(find lste_core)/../../worlds/lab_building.world"/>
+  <arg name="extra_gazebo_args" default=""/>
+
+  <arg name="x" default="20.0"/>
+  <arg name="y" default="-6.5"/>
+  <arg name="z" default="0.1"/>
+  <arg name="yaw" default="1.57079632679"/>
+
+  <include file="$(find lste_core)/launch/lab_world.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="extra_gazebo_args" value="$(arg extra_gazebo_args)"/>
+  </include>
+
+  <include file="$(find lste_core)/launch/spawn_pro3.launch">
+    <arg name="robot_name" value="$(arg robot_name)"/>
+    <arg name="x" value="$(arg x)"/>
+    <arg name="y" value="$(arg y)"/>
+    <arg name="z" value="$(arg z)"/>
+    <arg name="yaw" value="$(arg yaw)"/>
+    <arg name="spawn_model" value="$(arg spawn_pro3)"/>
+    <!-- In the split lifecycle, run_nodes_tmux owns these nodes after Gazebo
+         is ready. Keeping them off here when spawn_pro3 is false prevents a
+         delayed duplicate robot_state_publisher from breaking sensor TF. -->
+    <arg name="start_support_nodes" value="$(arg spawn_pro3)"/>
+  </include>
+</launch>

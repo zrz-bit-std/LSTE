@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WS="${LSTE_WS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+STATUS_FILE="${LSTE_HEALTH_STATUS:-$WS/runtime/health/status.json}"
+
+python3 - "$STATUS_FILE" "${1:-}" <<'PY'
+import json
+import sys
+import time
+from pathlib import Path
+
+path = Path(sys.argv[1])
+mode = sys.argv[2]
+if not path.is_file():
+    print("LSTE health: NOT RUNNING")
+    print("No sidecar status file found. Start the system with: runall")
+    raise SystemExit(1)
+
+try:
+    status = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    print("LSTE health: INVALID STATUS (%s)" % exc)
+    raise SystemExit(1)
+
+age = max(0.0, time.time() - float(status.get("wall_time", 0.0)))
+if age > 10.0 and status.get("status") != "stopped":
+    status["status"] = "stale"
+    status["ok"] = False
+    status.setdefault("failures", []).append("sidecar_stale")
+
+if mode == "--json":
+    print(json.dumps(status, indent=2, sort_keys=True))
+    raise SystemExit(0 if status.get("ok") else 1)
+
+label = str(status.get("status", "unknown")).upper()
+cuda = status.get("cuda") or {}
+print("LSTE health: %s" % label)
+print("Status age: %.1fs" % age)
+print("CUDA: %s (cuInit=%s)" % ("OK" if cuda.get("ok") else "FAILED", cuda.get("cu_init", "?")))
+
+for key, title in (
+    ("missing_nodes", "Missing nodes"),
+    ("unreachable_nodes", "Unreachable nodes"),
+    ("missing_publishers", "Missing publishers"),
+    ("stale_topics", "Stale topics"),
+):
+    values = status.get(key) or []
+    if values:
+        print("%s: %s" % (title, ", ".join(values)))
+
+if status.get("ok"):
+    print("All monitored processes and data paths are healthy.")
+else:
+    failures = status.get("failures") or []
+    if failures:
+        print("Failures: %s" % ", ".join(failures))
+    recovery = status.get("cuda_recovery") or []
+    if recovery:
+        print("CUDA recovery:")
+        for command in recovery:
+            print("  %s" % command)
+
+raise SystemExit(0 if status.get("ok") else 1)
+PY

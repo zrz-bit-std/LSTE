@@ -1,0 +1,243 @@
+<launch>
+  <!-- Online map only: no prebuilt map and no move_base controller. -->
+  <arg name="scan_topic" default="/pro3/rlscan"/>
+  <arg name="odom_topic" default="/pro3/wheel_odom"/>
+  <arg name="pose_topic" default="/rbt_pose"/>
+  <!-- Task/detection streams feed the task-conditioned Place belief. They
+       never publish goals or alter controller parameters. -->
+  <arg name="task_topic" default="/lste/task"/>
+  <arg name="detections_topic" default="/lste/detections"/>
+  <!-- Candidate validation follows the same inflated grid used by Navfn. -->
+  <arg name="costmap_topic" default="/move_base/global_costmap/costmap"/>
+  <arg name="costmap_updates_topic" default="/move_base/global_costmap/costmap_updates"/>
+  <arg name="costmap_max_age" default="3.0"/>
+  <arg name="costmap_stationary_pose_epsilon" default="0.01"/>
+  <!-- Connectivity validation is throttled because the rolling local
+       costmap/TEB checks every command at a higher rate. -->
+  <arg name="costmap_validation_period" default="2.0"/>
+  <!-- Validate only selected/prefetched candidates with the live Navfn
+       service. A false response means the candidate has no executable global
+       path even if a simplified occupancy BFS considered it connected. -->
+  <arg name="navfn_plan_validation" default="true"/>
+  <arg name="navfn_make_plan_service" default="/move_base/NavfnROS/make_plan"/>
+  <arg name="navfn_make_plan_timeout" default="0.05"/>
+  <!-- The service must validate the exact endpoint that move_base will
+       receive. A nonzero tolerance can certify a nearby cell instead. -->
+  <arg name="navfn_make_plan_tolerance" default="0.0"/>
+  <!-- A registered Navfn service can return empty plans while move_base is
+       still creating its global costmap. Retry these startup responses rather
+       than suppressing otherwise valid frontiers as unreachable. -->
+  <arg name="navfn_empty_warmup_seconds" default="5.0"/>
+  <!-- Before selecting a real frontier, validate the complete online-SLAM
+       navigation chain with a short plan to a connected nearby costmap cell.
+       This prevents /map appearing before map->odom/costmap/Navfn are ready
+       from becoming a permanent bootstrap-empty exploration state. -->
+  <arg name="navfn_startup_probe_distance" default="0.40"/>
+  <arg name="goal_topic" default="/lste/global_frontier_goal"/>
+  <arg name="command_topic" default="/lste/global_frontier/route_command"/>
+  <!-- Lifecycle event consumed by Goal Manager and the TEB action bridge.
+       It releases an invalidated action before the explorer selects another
+       connected branch. -->
+  <arg name="status_topic" default="/lste/global_frontier/status"/>
+  <arg name="replan_request_topic" default="/lste/global_frontier/replan_request"/>
+  <arg name="turn_status_topic" default="/lste/teb_turn_supervisor/status"/>
+  <arg name="terminal_topic" default="/lste/teb_goal_terminal"/>
+  <arg name="terminal_contract_topic" default="/lste/teb_goal_terminal_contract"/>
+  <!-- Promote a TEB/move_base recovery to a map-level frontier replan. -->
+  <arg name="recovery_topic" default="/move_base/recovery_status"/>
+  <arg name="task_done_topic" default="/lste/task_done"/>
+  <!-- Route-safe clearance: 0.30 m robot radius + 0.22 m TEB minimum
+       obstacle distance. Frontier cells themselves may be closer; the node
+       publishes a safe approach point instead of the boundary cell. -->
+  <arg name="clearance" default="0.52"/>
+  <!-- Must match TebLocalPlannerROS/xy_goal_tolerance. Portal endpoints are
+       positioned beyond this success circle, so a TEB SUCCEEDED terminal is
+       still provably on the destination side of the door. Keeping the value
+       in this launch contract avoids depending on process start order. -->
+  <arg name="teb_xy_goal_tolerance" default="0.50"/>
+  <!-- Strict clearance is the normal complete route topology. Recovery may
+       use loose topology only between strict-clearance endpoints; the live
+       costmap and exact Navfn plan remain hard executability gates. -->
+  <arg name="navfn_observation_recovery_enabled" default="true"/>
+  <!-- This is only the loose topology used to detect information boundaries;
+       it never authorizes a wall-adjacent action endpoint. -->
+  <arg name="fallback_clearance" default="0.30"/>
+  <arg name="frontier_approach_distance" default="1.0"/>
+  <arg name="min_path_distance" default="1.2"/>
+  <!-- Retained for launch compatibility; the explorer now publishes the
+       selected frontier endpoint instead of slicing a short lookahead goal. -->
+  <arg name="lookahead_distance" default="2.0"/>
+  <arg name="waypoint_release_radius" default="0.40"/>
+  <!-- Mission-layer contract: publish one validated frontier endpoint per
+       action. Navfn/TEB replan the path online; rolling short waypoints are
+       retained only for isolated legacy experiments. -->
+  <arg name="mission_endpoint_only" default="true"/>
+  <arg name="persistent_execution" default="false"/>
+  <!-- Select the next branch before the current frontier is reached. This is
+       a pending intent only; the TEB bridge still decides when it is safe to
+       replace the active action.  The 2.5 m prefetch gives the explorer two
+       or three map cycles to validate a continuation before the bridge's
+       1.3 m hot-start window opens. -->
+  <arg name="prefetch_distance" default="2.5"/>
+  <!-- Retained for the legacy segmented-waypoint experiment. Production
+       endpoint actions only prefetch at this stage and promote the validated
+       successor from the matching move_base terminal callback. -->
+  <arg name="early_handoff_distance" default="2.0"/>
+  <arg name="active_timeout" default="45.0"/>
+  <arg name="stall_timeout" default="12.0"/>
+  <!-- A completed pre-route alignment proves yaw is no longer the reason an
+       endpoint is stationary. Retire this exact endpoint sooner when it has
+       no subsequent route/goal/odom progress. Set <= 0 to disable. -->
+  <arg name="post_turn_stall_timeout" default="6.0"/>
+  <!-- A newly entered odom cell is secondary evidence that an online-SLAM
+       route is still making physical progress through an S-shaped detour.
+       Revisited cells do not renew the watchdog. -->
+  <arg name="odom_novel_cell_size" default="0.40"/>
+  <arg name="unreachable_grace" default="20.0"/>
+  <arg name="rejected_timeout" default="180.0"/>
+  <arg name="completed_radius" default="1.25"/>
+  <!-- Research method boundary. All values keep the same SLAM, Navfn, TEB,
+       perception and task pipeline; they only change persistent exploration
+       memory: frontier, frontier_distance_dedup, place_portal, or
+       place_portal_workitem. The full method also consumes /lste/task and
+       /lste/detections to choose task-conditioned topological expansion. -->
+  <arg name="exploration_method" default="place_portal_workitem"/>
+  <arg name="target_done_policy" default="visual_target"/>
+  <!-- Region memory sits above point-level frontier completion. The primary
+       identity is a doorway-separated, high-clearance known-free component:
+       it groups far endpoints in one room while a narrow door cuts the room
+       from its corridor neighbor. Unseen regions are selected before revisits.
+       A dormant region stays excluded for this SLAM invocation: boundary
+       jitter alone is not valid evidence that a room became unexplored again. -->
+  <arg name="region_memory_radius" default="2.5"/>
+  <arg name="region_information_delta" default="8"/>
+  <!-- This is a no-information dwell bound, not a route timeout. The normal
+       active/stall watchdog still owns blocked or non-executable paths. -->
+  <arg name="region_stagnation_timeout" default="12.0"/>
+  <arg name="region_failure_limit" default="2"/>
+  <arg name="structure_radius_cells" default="10"/>
+  <arg name="structure_weight" default="0.16"/>
+  <arg name="min_structure_cells" default="3"/>
+  <!-- Soft preference for candidates near the robot's current heading.
+       Larger values reduce abrupt branch U-turns; zero restores the old
+       information/structure/path-only score. -->
+  <arg name="heading_weight" default="2.5"/>
+  <!-- Prefetch candidates above this bearing change only when no connected
+       alternative exists. Set 0 to disable the hard bound. -->
+  <arg name="heading_hard_limit_deg" default="115.0"/>
+  <!-- Reuse the bridge's transition envelopes for successor selection. The
+       selector first searches these tiers in order before accepting a branch
+       that must wait for terminal reorientation. -->
+  <arg name="successor_smooth_heading_limit_deg" default="45.0"/>
+  <arg name="successor_curve_heading_limit_deg" default="65.0"/>
+  <!-- native_teb keeps one local controller through all bends. The legacy
+       connector mode is retained only for experiment reproduction. -->
+  <arg name="turn_execution_mode" default="native_teb"/>
+  <arg name="explicit_turn_connector_threshold_deg" default="135.0"/>
+  <!-- The connector goal is sampled from the verified route beyond TEB's
+       endpoint tolerance, keeping its action alive for the yaw-only phase. -->
+  <arg name="turn_connector_distance" default="0.50"/>
+  <!-- After Navfn rejects a confirmed target ray behind mapped geometry, rank
+       only reachable frontiers by proximity to that ray. This is a soft
+       semantic preference, never an obstacle-clearance or reachability bypass. -->
+  <arg name="semantic_hint_weight" default="0.35"/>
+  <arg name="semantic_hint_max_distance" default="12.0"/>
+  <!-- Dead-end detection: within this distance of the active frontier, if no
+       unknown remains within dead_end_unknown_cells of the frontier cell, the
+       route ends at a resolved wall.  Mark it inspected and pick a passage. -->
+  <arg name="dead_end_check_distance" default="4.0"/>
+  <arg name="dead_end_unknown_cells" default="15"/>
+  <!-- Do not rebuild the expensive map/costmap BFS while a healthy active
+       route is far from its frontier. Near-endpoint and stall checks wake it
+       immediately. -->
+  <arg name="planning_period" default="1.5"/>
+  <!-- Keep SLAM available for controller-only diagnostics while allowing the
+       expensive frontier executive to be omitted from the fast inner loop. -->
+  <arg name="start_frontier" default="true"/>
+
+  <node pkg="gmapping" type="slam_gmapping" name="lste_online_slam" output="screen">
+    <remap from="scan" to="$(arg scan_topic)"/>
+    <remap from="odom" to="$(arg odom_topic)"/>
+    <param name="base_frame" value="base_footprint"/>
+    <param name="odom_frame" value="odom"/>
+    <param name="map_update_interval" value="1.0"/>
+    <param name="linearUpdate" value="0.15"/>
+    <param name="angularUpdate" value="0.15"/>
+    <param name="maxUrange" value="10.0"/>
+    <!-- env04 occupies roughly x=[-2, 25], y=[-15, 7]. At 10 cm this keeps
+         the Python connected-frontier search below 80k cells per cycle. -->
+    <param name="delta" value="0.10"/>
+    <param name="xmin" value="-3.0"/>
+    <param name="xmax" value="27.0"/>
+    <param name="ymin" value="-16.0"/>
+    <param name="ymax" value="9.0"/>
+  </node>
+
+  <node if="$(arg start_frontier)" pkg="lste_topo_access" type="lste_global_frontier_node.py" name="lste_global_frontier" output="screen">
+    <param name="map_topic" value="/map"/>
+    <param name="costmap_topic" value="$(arg costmap_topic)"/>
+    <param name="costmap_updates_topic" value="$(arg costmap_updates_topic)"/>
+    <param name="costmap_max_age" value="$(arg costmap_max_age)"/>
+    <param name="costmap_stationary_pose_epsilon" value="$(arg costmap_stationary_pose_epsilon)"/>
+    <param name="costmap_validation_period" value="$(arg costmap_validation_period)"/>
+    <param name="navfn_plan_validation" value="$(arg navfn_plan_validation)"/>
+    <param name="navfn_make_plan_service" value="$(arg navfn_make_plan_service)"/>
+    <param name="navfn_make_plan_timeout" value="$(arg navfn_make_plan_timeout)"/>
+    <param name="navfn_make_plan_tolerance" value="$(arg navfn_make_plan_tolerance)"/>
+    <param name="navfn_empty_warmup_seconds" value="$(arg navfn_empty_warmup_seconds)"/>
+    <param name="navfn_startup_probe_distance" value="$(arg navfn_startup_probe_distance)"/>
+    <param name="pose_topic" value="$(arg pose_topic)"/>
+    <param name="scan_topic" value="$(arg scan_topic)"/>
+    <param name="task_topic" value="$(arg task_topic)"/>
+    <param name="detections_topic" value="$(arg detections_topic)"/>
+    <param name="goal_topic" value="$(arg goal_topic)"/>
+    <param name="command_topic" value="$(arg command_topic)"/>
+    <param name="status_topic" value="$(arg status_topic)"/>
+    <param name="replan_request_topic" value="$(arg replan_request_topic)"/>
+    <param name="turn_status_topic" value="$(arg turn_status_topic)"/>
+    <param name="terminal_topic" value="$(arg terminal_topic)"/>
+    <param name="terminal_contract_topic" value="$(arg terminal_contract_topic)"/>
+    <param name="recovery_topic" value="$(arg recovery_topic)"/>
+    <param name="task_done_topic" value="$(arg task_done_topic)"/>
+    <param name="clearance" value="$(arg clearance)"/>
+    <param name="teb_xy_goal_tolerance" value="$(arg teb_xy_goal_tolerance)"/>
+    <param name="navfn_observation_recovery_enabled" value="$(arg navfn_observation_recovery_enabled)"/>
+    <param name="fallback_clearance" value="$(arg fallback_clearance)"/>
+    <param name="frontier_approach_distance" value="$(arg frontier_approach_distance)"/>
+    <param name="min_path_distance" value="$(arg min_path_distance)"/>
+    <param name="lookahead_distance" value="$(arg lookahead_distance)"/>
+    <param name="waypoint_release_radius" value="$(arg waypoint_release_radius)"/>
+    <param name="mission_endpoint_only" value="$(arg mission_endpoint_only)"/>
+    <param name="persistent_execution" value="$(arg persistent_execution)"/>
+    <param name="prefetch_distance" value="$(arg prefetch_distance)"/>
+    <param name="early_handoff_distance" value="$(arg early_handoff_distance)"/>
+    <param name="active_timeout" value="$(arg active_timeout)"/>
+    <param name="stall_timeout" value="$(arg stall_timeout)"/>
+    <param name="post_turn_stall_timeout" value="$(arg post_turn_stall_timeout)"/>
+    <param name="odom_novel_cell_size" value="$(arg odom_novel_cell_size)"/>
+    <param name="unreachable_grace" value="$(arg unreachable_grace)"/>
+    <param name="rejected_timeout" value="$(arg rejected_timeout)"/>
+    <param name="completed_radius" value="$(arg completed_radius)"/>
+    <param name="exploration_method" value="$(arg exploration_method)"/>
+    <param name="target_done_policy" value="$(arg target_done_policy)"/>
+    <param name="region_memory_radius" value="$(arg region_memory_radius)"/>
+    <param name="region_information_delta" value="$(arg region_information_delta)"/>
+    <param name="region_stagnation_timeout" value="$(arg region_stagnation_timeout)"/>
+    <param name="region_failure_limit" value="$(arg region_failure_limit)"/>
+    <param name="structure_radius_cells" value="$(arg structure_radius_cells)"/>
+    <param name="structure_weight" value="$(arg structure_weight)"/>
+    <param name="min_structure_cells" value="$(arg min_structure_cells)"/>
+    <param name="heading_weight" value="$(arg heading_weight)"/>
+    <param name="heading_hard_limit_deg" value="$(arg heading_hard_limit_deg)"/>
+    <param name="successor_smooth_heading_limit_deg" value="$(arg successor_smooth_heading_limit_deg)"/>
+    <param name="successor_curve_heading_limit_deg" value="$(arg successor_curve_heading_limit_deg)"/>
+    <param name="turn_execution_mode" value="$(arg turn_execution_mode)"/>
+    <param name="explicit_turn_connector_threshold_deg" value="$(arg explicit_turn_connector_threshold_deg)"/>
+    <param name="turn_connector_distance" value="$(arg turn_connector_distance)"/>
+    <param name="semantic_hint_weight" value="$(arg semantic_hint_weight)"/>
+    <param name="semantic_hint_max_distance" value="$(arg semantic_hint_max_distance)"/>
+    <param name="dead_end_check_distance" value="$(arg dead_end_check_distance)"/>
+    <param name="dead_end_unknown_cells" value="$(arg dead_end_unknown_cells)"/>
+    <param name="planning_period" value="$(arg planning_period)"/>
+  </node>
+</launch>

@@ -1,0 +1,54 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "blue mug",
+      "attributes": [
+        "blue",
+        "ceramic",
+        "handle on the side",
+        "medium-sized drinking mug",
+        "placed on a wooden office desk"
+      ],
+      "typical_locations": [
+        "office desks",
+        "workstations",
+        "break rooms",
+        "near keyboards and monitors"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace",
+        "shared working area"
+      ],
+      "layout_prior": [
+        "long desks arranged in rows",
+        "multiple monitors positioned closely",
+        "office chairs around the workstations"
+      ],
+      "related_structures": [
+        "desk",
+        "computer monitor",
+        "chair"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "computer monitor",
+        "other mugs",
+        "file folder",
+        "chair"
+      ],
+      "search_strategy": "search along work desks near keyboards and monitors for brightly colored handled mugs",
+      "negative_clues": [
+        "door",
+        "fire hydrant",
+        "fire extinguisher"
+      ]
+    },
+    "target_ctx": {
+      "left": "yellow mug",
+      "right": "computer monitor"
+    }
+  }
+}

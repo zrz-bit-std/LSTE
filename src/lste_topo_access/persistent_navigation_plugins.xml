@@ -1,0 +1,12 @@
+<library path="lib/liblste_persistent_navigation_plugins">
+  <class name="lste_topo_access/PersistentTebLocalPlanner"
+         type="lste_topo_access::PersistentTebLocalPlanner"
+         base_class_type="nav_core::BaseLocalPlanner">
+    <description>TEB wrapper that keeps an exploration action alive until task completion.</description>
+  </class>
+  <class name="lste_topo_access/StreamingNavfnPlanner"
+         type="lste_topo_access::StreamingNavfnPlanner"
+         base_class_type="nav_core::BaseGlobalPlanner">
+    <description>Navfn wrapper that rebuilds only when the mission goal changes.</description>
+  </class>
+</library>

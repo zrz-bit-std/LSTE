@@ -1,0 +1,57 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "red soda",
+      "attributes": [
+        "bright red aluminum can with a glossy finish",
+        "standard cylindrical drink can roughly palm height",
+        "standing upright on the wooden desk surface",
+        "positioned between a white book with green and yellow accents and a tall green file folder"
+      ],
+      "typical_locations": [
+        "shared office desks filled with desktop computers",
+        "workstations that have books, folders and cups beside monitors",
+        "areas near keyboards and monitors on long wooden tables"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace",
+        "shared working area"
+      ],
+      "layout_prior": [
+        "long wooden desks arranged in rows with multiple monitors",
+        "dense arrangement of computers, keyboards and swivel chairs",
+        "personal desk items such as books, folders, cans and mugs distributed around the workspace"
+      ],
+      "related_structures": [
+        "desk",
+        "computer monitor",
+        "keyboard",
+        "chair",
+        "green file folder",
+        "white book"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "white book",
+        "green file folder",
+        "mug",
+        "keyboard",
+        "monitor"
+      ],
+      "search_strategy": "look for a bright red cylindrical can on the desk, situated between the white book and the green file folder near the monitors",
+      "negative_clues": [
+        "corridor",
+        "kitchen",
+        "bathroom",
+        "empty floor areas"
+      ]
+    },
+    "target_ctx": {
+      "left": "white book",
+      "right": "green file folder"
+    }
+  }
+}

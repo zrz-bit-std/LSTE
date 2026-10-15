@@ -1,0 +1,60 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "girl in red ",
+      "attributes": [
+        "female",
+        "wearing a red top",
+        "long hair tied back",
+        "sitting on an office chair",
+        "working at a desk with a computer"
+      ],
+      "typical_locations": [
+        "office",
+        "open-plan workspace",
+        "computer lab",
+        "shared working area"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office",
+        "open-plan workspace"
+      ],
+      "layout_prior": [
+        "rows of desks with multiple computer monitors",
+        "rolling office chairs in front of desks",
+        "cables and office supplies on the desks",
+        "large window on one side of the room"
+      ],
+      "related_structures": [
+        "desk",
+        "computer monitor",
+        "keyboard",
+        "mouse",
+        "office chair",
+        "window"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "office chair",
+        "desk",
+        "computer",
+        "keyboard",
+        "mouse"
+      ],
+      "search_strategy": "prioritize checking people sitting on office chairs in front of desks with computers in the office workspace",
+      "negative_clues": [
+        "corridors without desks",
+        "storage rooms",
+        "kitchen or pantry area",
+        "restroom"
+      ]
+    },
+    "target_ctx": {
+      "left": "chair",
+      "right": "fan"
+    }
+  }
+}

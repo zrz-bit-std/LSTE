@@ -1,0 +1,37 @@
+# Isolated SA-PPO fixed-goal validation. This file is deliberately separate
+# from scripts/config/pipeline_defaults.yaml and does not start LSTE brain,
+# detector, GP, mux, or teleoperation nodes. It does start the production Goal
+# Manager in fixed-source mode to validate the real /lste/final_goal interface.
+
+# The same Gazebo world used by the normal system, but started on separate ROS
+# and Gazebo master ports by run_tmux.sh.
+WORLD: worlds/topo3.0_catch_mode/session_test/env04_no_pro3.world
+GUI: true
+
+# Robot initial pose in the Gazebo world. YAW is radians; -pi/2 faces -Y.
+INITIAL_X: 15.79
+INITIAL_Y: -8.45
+INITIAL_Z: 0.1
+INITIAL_YAW: -1.57079632679
+
+# The only navigation target for this test. The production Goal Manager
+# continuously publishes it on /lste/final_goal and never consults the brain.
+GOAL_X: 12.95
+GOAL_Y: -6.51
+
+# Keep the test fully independent of the normal system's ROS and Gazebo masters.
+ROS_PORT: 11312
+GAZEBO_PORT: 11346
+SAPPO_SPEED: 0.50
+# Select the isolated controller experiment:
+# - policy_only: raw SA-PPO output, used to expose checkpoint behavior.
+# - stabilized_recovery: one hysteretic turn for a behind-the-robot goal.
+# - rl_dwa_guard: SA-PPO normally passes through; a test-only DWA safety guard
+#   takes over only for reverse/zero policy output, unsafe predicted motion, or
+#   a large goal-heading error. It never changes the fixed global goal.
+# - rl_mppi_guard: a test-only sampling-MPC safety guard. Unlike DWA, it scores
+#   time-varying turn-then-drive sequences to escape a wall without new goals.
+# - rl_grid_guard: a lidar-only rolling occupancy grid plus A* local planner.
+#   It preserves the fixed global goal while selecting obstacle-free waypoints.
+CONTROLLER_MODE: rl_grid_guard
+LOG_MAX_BYTES: 1000000000

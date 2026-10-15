@@ -1,0 +1,98 @@
+<launch>
+  <!-- Fast physical T-junction benchmark.  This wrapper keeps the exact
+       minimal stack used by the single-door experiment while changing only
+       the world and reproducible starting pose. -->
+  <arg name="gui" default="false"/>
+  <arg name="world_name" default="$(find lste_core)/../../worlds/targeted_navigation/t_junction_small.world"/>
+  <!-- Keep the spawn inside online_slam_frontier's default xmin=-3.0 map
+       window while leaving a full west arm before the junction. -->
+  <arg name="x" default="-2.5"/>
+  <arg name="y" default="0.0"/>
+  <arg name="z" default="0.1"/>
+  <arg name="yaw" default="0.0"/>
+  <arg name="global_frontier_enabled" default="true"/>
+  <arg name="global_frontier_command_enabled" default="true"/>
+  <arg name="start_frontier" default="true"/>
+  <!-- Opt-in persistent Navfn/TEB stream for the fast target-plan diagnostic.
+       Keep false and the standard plugins by default so existing T-junction
+       experiments retain their endpoint-action behavior. -->
+  <arg name="persistent_execution" default="false"/>
+  <arg name="base_global_planner" default="navfn/NavfnROS"/>
+  <arg name="base_local_planner" default="teb_local_planner/TebLocalPlannerROS"/>
+  <!-- Keep the endpoint mode event-driven. The persistent runner overrides
+       this with 20 Hz so a target request is evaluated without an action
+       replacement. -->
+  <arg name="planner_frequency" default="0.0"/>
+  <arg name="teb_costmap_converter_plugin" default="costmap_converter::CostmapToPolygonsDBSMCCH"/>
+  <arg name="teb_include_costmap_obstacles" default="true"/>
+  <arg name="start_goal_manager" default="true"/>
+  <arg name="teb_forward_only" default="true"/>
+  <arg name="teb_frontier_pre_route_alignment" default="true"/>
+
+  <!-- Optional metrics process for a reproducible diagnostic run. Both
+       identity arguments are explicitly strings: passing a date-like value
+       through ``_run_timestamp:=...`` directly lets rospy/PyYAML parse it as
+       an oversized integer before the node starts. -->
+  <arg name="start_metrics" default="false"/>
+  <arg name="metrics_log_dir" default="$(find lste_core)/../../runtime/targeted_navigation/t_junction_small/logs"/>
+  <arg name="metrics_run_directory" default=""/>
+  <arg name="metrics_run_timestamp" default=""/>
+  <arg name="metrics_failure_sample_period" default="0.20"/>
+  <arg name="metrics_failure_pre_window" default="4.0"/>
+  <arg name="metrics_failure_post_window" default="1.5"/>
+  <arg name="metrics_failure_zero_velocity_seconds" default="3.0"/>
+  <arg name="metrics_failure_no_progress_seconds" default="4.0"/>
+  <arg name="metrics_pipeline_config" default=""/>
+  <arg name="metrics_pipeline_config_sha256" default=""/>
+  <arg name="metrics_git_revision" default=""/>
+  <arg name="metrics_git_dirty" default="false"/>
+
+  <include file="$(find lste_core)/../../scripts/tests/targeted_navigation/portal_retry_single_door_nav.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="x" value="$(arg x)"/>
+    <arg name="y" value="$(arg y)"/>
+    <arg name="z" value="$(arg z)"/>
+    <arg name="yaw" value="$(arg yaw)"/>
+    <arg name="global_frontier_enabled" value="$(arg global_frontier_enabled)"/>
+    <arg name="global_frontier_command_enabled" value="$(arg global_frontier_command_enabled)"/>
+    <arg name="start_frontier" value="$(arg start_frontier)"/>
+    <arg name="persistent_execution" value="$(arg persistent_execution)"/>
+    <arg name="base_global_planner" value="$(arg base_global_planner)"/>
+    <arg name="base_local_planner" value="$(arg base_local_planner)"/>
+    <arg name="planner_frequency" value="$(arg planner_frequency)"/>
+    <arg name="teb_costmap_converter_plugin" value="$(arg teb_costmap_converter_plugin)"/>
+    <arg name="teb_include_costmap_obstacles" value="$(arg teb_include_costmap_obstacles)"/>
+    <arg name="start_goal_manager" value="$(arg start_goal_manager)"/>
+    <arg name="teb_forward_only" value="$(arg teb_forward_only)"/>
+    <arg name="teb_frontier_pre_route_alignment" value="$(arg teb_frontier_pre_route_alignment)"/>
+  </include>
+
+  <!-- Keep this opt-in so the original controller/topology composition stays
+       unchanged for runs that do not need telemetry. -->
+  <node if="$(arg start_metrics)" pkg="lste_topo_access" type="lste_navigation_metrics.py" name="lste_navigation_metrics" output="screen">
+    <param name="log_dir" type="str" value="$(arg metrics_log_dir)"/>
+    <param name="run_directory" type="str" value="$(arg metrics_run_directory)"/>
+    <param name="run_timestamp" type="str" value="$(arg metrics_run_timestamp)"/>
+    <param name="retention_days" type="int" value="15"/>
+    <param name="failure_evidence_enabled" type="bool" value="true"/>
+    <param name="failure_evidence_sample_period" type="double" value="$(arg metrics_failure_sample_period)"/>
+    <param name="failure_evidence_pre_window" type="double" value="$(arg metrics_failure_pre_window)"/>
+    <param name="failure_evidence_post_window" type="double" value="$(arg metrics_failure_post_window)"/>
+    <param name="failure_evidence_zero_velocity_seconds" type="double" value="$(arg metrics_failure_zero_velocity_seconds)"/>
+    <param name="failure_evidence_no_progress_seconds" type="double" value="$(arg metrics_failure_no_progress_seconds)"/>
+    <param name="world" type="str" value="$(arg world_name)"/>
+    <param name="pipeline_config" type="str" value="$(arg metrics_pipeline_config)"/>
+    <param name="pipeline_config_sha256" type="str" value="$(arg metrics_pipeline_config_sha256)"/>
+    <param name="git_revision" type="str" value="$(arg metrics_git_revision)"/>
+    <param name="git_dirty" type="bool" value="$(arg metrics_git_dirty)"/>
+    <param name="pro3_spawn_x" type="double" value="$(arg x)"/>
+    <param name="pro3_spawn_y" type="double" value="$(arg y)"/>
+    <param name="pro3_spawn_z" type="double" value="$(arg z)"/>
+    <param name="pro3_spawn_yaw" type="double" value="$(arg yaw)"/>
+    <param name="online_slam_enabled" type="bool" value="true"/>
+    <param name="global_frontier_enabled" type="bool" value="$(arg global_frontier_enabled)"/>
+    <param name="global_goal_source" type="str" value="brain"/>
+    <param name="task_id" type="str" value="t_junction_diagnostic"/>
+  </node>
+</launch>
