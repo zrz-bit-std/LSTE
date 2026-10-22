@@ -109,6 +109,7 @@ class GlobalFrontierPrefetchSelectionMixin:
             else float(steps[selected.row, selected.col])
             * float(message.info.resolution)
         )
+        self.prefetched_branch_id = getattr(selected, "branch_id", None)
         self.prefetched_frontier = (
             selected.row, selected.col, selected.x, selected.y
         )

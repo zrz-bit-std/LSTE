@@ -44,6 +44,9 @@ class ExplorationMethodCapabilities:
 
 
 _METHODS = {
+    "gp_branch_tree": ExplorationMethodCapabilities(
+        "gp_branch_tree", False, False, False, False, False, False, True,
+    ),
     # A conventional online frontier selector: information gain and path cost
     # only.  It intentionally has neither durable completion memory nor a
     # structural room/door interpretation.
@@ -103,7 +106,7 @@ def method_names():
 
 def resolve_exploration_method(value):
     """Return one exact capability contract or raise a useful error."""
-    name = str(value or "place_portal_workitem").strip().lower().replace("-", "_")
+    name = str(value or "gp_branch_tree").strip().lower().replace("-", "_")
     try:
         return _METHODS[name]
     except KeyError as exc:

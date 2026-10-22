@@ -236,6 +236,10 @@ class GlobalFrontierActivationMixin:
         if not self.place_departure.active:
             self._clear_active_place_departure()
         self.active_route_id += 1
+        tree = getattr(self, "gp_exploration_tree", None)
+        branch_id = getattr(selection, "branch_id", None)
+        if tree is not None and branch_id is not None:
+            self.commit_gp_branch_transaction(branch_id, self.active_route_id)
         pending_predecessor = getattr(
             self, "pending_graph_successor_predecessor_contract", None
         )
@@ -313,6 +317,9 @@ class GlobalFrontierActivationMixin:
         self.active_last_waypoint_map = None
         self.active_route_kind = selection.route_kind
         self.active_mission_route_kind = selection.route_kind
+        self.active_portal_authentication_phase = str(
+            getattr(selection, "authentication_phase", "") or ""
+        )
         self.active_portal_probe_phase = ""
         self.active_portal_retry = False
         self.active_terminal_received = False

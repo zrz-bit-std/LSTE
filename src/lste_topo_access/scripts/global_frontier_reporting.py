@@ -947,4 +947,7 @@ class GlobalFrontierReportingMixin:
             # one atomic handoff in the lifecycle log.
             decision_scheduler.observe_status("route_command", payload)
             payload["decision_wake"] = decision_scheduler.report()
+        tree = getattr(self, "gp_exploration_tree", None)
+        if tree is not None and tree.active_branch_id is not None:
+            payload["branch_context"] = dict(tree.branches[tree.active_branch_id])
         self.command_publisher.publish(String(data=json.dumps(payload, sort_keys=True)))

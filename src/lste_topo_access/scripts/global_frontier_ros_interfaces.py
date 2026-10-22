@@ -11,7 +11,7 @@ from lste_topo_access.msg import FrontierExecutionTerminal
 from map_msgs.msg import OccupancyGridUpdate
 from move_base_msgs.msg import RecoveryStatus
 from nav_msgs.msg import OccupancyGrid
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, CameraInfo
 from std_msgs.msg import Bool, String
 from lste_msgs.msg import LsteDetections, LsteTask
 
@@ -43,6 +43,11 @@ class GlobalFrontierRosInterfacesMixin:
         )
         rospy.Subscriber(self.pose_topic, Pose2D, self.on_pose, queue_size=1)
         rospy.Subscriber(self.scan_topic, LaserScan, self.on_scan, queue_size=1)
+        if getattr(self, "exploration_method", "") == "gp_branch_tree":
+            rospy.Subscriber(
+                rospy.get_param("~branch_camera_info_topic", "/kinect/hd/camera_info"),
+                CameraInfo, lambda msg: setattr(self, "gp_branch_camera_info", msg),
+                queue_size=1)
         rospy.Subscriber(self.task_topic, LsteTask, self.on_task, queue_size=1)
         rospy.Subscriber(
             self.detections_topic,

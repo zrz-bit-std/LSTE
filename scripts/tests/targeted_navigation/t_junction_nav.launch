@@ -3,6 +3,7 @@
        minimal stack used by the single-door experiment while changing only
        the world and reproducible starting pose. -->
   <arg name="gui" default="false"/>
+  <arg name="exploration_method" default="place_portal_workitem"/>
   <arg name="world_name" default="$(find lste_core)/../../worlds/targeted_navigation/t_junction_small.world"/>
   <!-- Keep the spawn inside online_slam_frontier's default xmin=-3.0 map
        window while leaving a full west arm before the junction. -->
@@ -49,6 +50,7 @@
 
   <include file="$(find lste_core)/../../scripts/tests/targeted_navigation/portal_retry_single_door_nav.launch">
     <arg name="gui" value="$(arg gui)"/>
+    <arg name="exploration_method" value="$(arg exploration_method)"/>
     <arg name="world_name" value="$(arg world_name)"/>
     <arg name="x" value="$(arg x)"/>
     <arg name="y" value="$(arg y)"/>

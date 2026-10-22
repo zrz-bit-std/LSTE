@@ -45,6 +45,13 @@ _resolve() {
 }
 
 WORLD=${WORLD:-$(_resolve "${CFG_WORLD:-worlds/place1.world}")}
+# Software rendering remains the portable default; a local display with a
+# working hardware GL context can opt out without changing the experiment.
+GAZEBO_SOFTWARE_RENDERING=${GAZEBO_SOFTWARE_RENDERING:-${CFG_GAZEBO_SOFTWARE_RENDERING:-1}}
+if [[ "$GAZEBO_SOFTWARE_RENDERING" != "0" && "$GAZEBO_SOFTWARE_RENDERING" != "1" ]]; then
+  echo "[error] GAZEBO_SOFTWARE_RENDERING must be 0 or 1." >&2
+  exit 1
+fi
 GAZEBO_RANDOM_SEED=${GAZEBO_RANDOM_SEED:-${CFG_GAZEBO_RANDOM_SEED:-}}
 GAZEBO_EXTRA_ARGS=""
 if [[ -n "$GAZEBO_RANDOM_SEED" ]]; then
@@ -130,7 +137,7 @@ WAIT_ROSCORE='until rostopic list >/dev/null 2>&1; do echo \"waiting for roscore
 printf -v WORLD_QUOTED '%q' "$WORLD"
 printf -v PIPELINE_ENV_QUOTED '%q' "$WS/scripts/config/pipeline_env.sh"
 printf -v GAZEBO_ARGS_QUOTED '%q' "$GAZEBO_EXTRA_ARGS"
-WORLD_COMMAND="WS=$(printf '%q' "$WS"); source $PIPELINE_ENV_QUOTED; $WAIT_ROSCORE; export LIBGL_ALWAYS_SOFTWARE=1; lste_gazebo_exec roslaunch lste_core lab_with_pro3.launch world_name:=$WORLD_QUOTED spawn_pro3:=false gui:=$GUI extra_gazebo_args:=$GAZEBO_ARGS_QUOTED"
+WORLD_COMMAND="WS=$(printf '%q' "$WS"); source $PIPELINE_ENV_QUOTED; $WAIT_ROSCORE; export LIBGL_ALWAYS_SOFTWARE=$GAZEBO_SOFTWARE_RENDERING; lste_gazebo_exec roslaunch lste_core lab_with_pro3.launch world_name:=$WORLD_QUOTED spawn_pro3:=false gui:=$GUI extra_gazebo_args:=$GAZEBO_ARGS_QUOTED"
 printf -v WORLD_COMMAND_QUOTED '%q' "$WORLD_COMMAND"
 tmux new-window -d -t "=$SESSION" -n "world" -c "$WS" \
   "bash -lc $WORLD_COMMAND_QUOTED"

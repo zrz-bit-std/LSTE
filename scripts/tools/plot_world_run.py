@@ -154,18 +154,68 @@ def read_scene(world_path, model_roots):
                 for v in vertices:
                     polygon = hull(transform(v, matrix))
                     if polygon is not None:
-                        shapes.append({'model': name, 'link': link.get('name'), 'kind': 'wall' if name == 'env04' else 'object', 'xy': polygon.tolist()})
+                        shapes.append({'model': name, 'link': link.get('name'), 'kind': 'wall' if name in ('env04', 'semantic_room_structure') else 'object', 'xy': polygon.tolist()})
     return shapes, target, missing
 
 
 def read_records(log):
     records = []
+    if not log.exists():
+        return records
     for line in log.open(encoding='utf-8'):
         if ' event=' not in line or ' data=' not in line:
             continue
         event = line.split(' event=', 1)[1].split(' data=', 1)[0]
         records.append((event, json.loads(line.split(' data=', 1)[1])))
     return records
+
+
+def extract_run(records, attempt=None):
+    """Keep absent success/detection evidence absent when plotting a failure."""
+    attempt = attempt or {}
+    def event(name, default=None):
+        return next((d for e, d in records if e == name), default)
+    start = event('run_start', {})
+    observed_done = next((d for e, d in records if e == 'task_done' and d.get('value') is True), None)
+    done = None if attempt.get('status') in {'failed','infrastructure_failure'} else observed_done
+    stop = event('run_stop', {})
+    completion_event = event('task_completed', {})
+    completion = completion_event.get('completion_snapshot', {})
+    periodic = [d for e, d in records if e == 'sample' and d.get('pose')]
+    final = completion.get('metrics', {}) if done else stop.get('summary', {})
+    if not final:
+        final = periodic[-1] if periodic else {}
+    t0 = start.get('ros_time', periodic[0]['ros_time'] if periodic else 0.0)
+    time_origin = 'run_start'
+    if t0 == 0 and periodic and periodic[0]['ros_time'] > 5:
+        # Gazebo loads a saved simulation clock after metrics has registered.
+        # The unready ROS clock at run_start is not elapsed exploration time.
+        t0 = periodic[0]['ros_time']
+        time_origin = 'first_pose_sample_run_start_clock_unready'
+    end = done['ros_time'] if done else final.get('ros_time', t0)
+    samples = [d for d in periodic if d['ros_time'] <= end]
+    if final.get('pose'):
+        final = dict(final)
+        final['ros_time'] = completion.get('boundary_ros_time', end) if done else end
+        samples.append(final)
+    first = event('target_acquired')
+    decisions = [d for e, d in records if e == 'perception_decision' and d.get('metrics_pose')]
+    first_pose = None
+    if first and decisions:
+        first_pose = min(decisions, key=lambda d: abs(d['ros_time']-first['ros_time']))['metrics_pose'][:2]
+    exposures = [d for e, d in records if e == 'target_exposure_ended']
+    exposure = exposures[-1] if exposures else {}
+    return dict(start=start, done=done, stop=stop, completion=completion,
+                samples=samples, t0=t0, duration=max(0.0, end-t0), first=first,
+                time_origin=time_origin,
+                first_pose=first_pose, confirmed=event('target_follow_confirmed'),
+                matched=exposure.get('matched_detector_frames'),
+                exposed=exposure.get('exposed_detector_frames'),
+                final=final, wall=completion.get('boundary_wall_elapsed_seconds') if done
+                else stop.get('wall_duration_seconds'),
+                evidence=done.get('completion_evidence') if done else None,
+                recorded_task_done_true=observed_done is not None,
+                outcome='success' if done else attempt.get('status', 'not_completed'))
 
 
 def draw_scene(ax, shapes):
@@ -184,6 +234,60 @@ def draw_scene(ax, shapes):
     ax.set_xlabel('World x (m)'); ax.set_ylabel('World y (m)')
 
 
+def failure_caption(attempt, final, stop, failure, simulation_seconds, wall_seconds):
+    """Summarize only recorded failure cause and terminal-state evidence."""
+    reason = attempt.get('reason') or 'task_done was not observed'
+    if reason.startswith('stationary_over_'):
+        limit = reason[len('stationary_over_'):].replace('_wall_seconds', '')
+        cause = f'No translation >{limit} s (radius {attempt.get("stationary_radius_m", "?")} m)'
+    elif reason.startswith('exploration_over_'):
+        limit = reason[len('exploration_over_'):].replace('_wall_seconds', '')
+        cause = f'Exploration exceeded {limit} s wall-time limit'
+    elif attempt.get('status') == 'infrastructure_failure':
+        cause = 'Experiment infrastructure failed'
+    else:
+        cause = reason.replace('_', ' ')
+
+    position = attempt.get('stall_pose') or stop.get('summary', {}).get('pose') or final.get('pose')
+    details = []
+    if position and len(position) >= 2:
+        details.append(f'stopped near ({position[0]:.2f}, {position[1]:.2f}) m')
+    if wall_seconds is not None:
+        details.append(f'{wall_seconds:.1f} s wall')
+    if simulation_seconds is not None:
+        if simulation_seconds > 0 or final:
+            details.append(f'{simulation_seconds:.1f} s simulation')
+    path = final.get('path_length')
+    if path is not None:
+        details.append(f'{path:.1f} m traveled')
+    elif attempt.get('status') == 'infrastructure_failure':
+        details.append('no odometry recorded')
+
+    diagnosis = failure.get('diagnosis', {}) if failure else {}
+    primary = diagnosis.get('primary_cause')
+    if primary:
+        details.append('log diagnosis: ' + primary.replace('_', ' '))
+    if attempt.get('startup_diagnostic'):
+        details.append(attempt['startup_diagnostic'])
+    return 'FAILURE  |  ' + cause + ('  ·  ' + '  ·  '.join(details) if details else '')
+
+
+def startup_failure_diagnostic(run_directory):
+    """Translate explicit startup log errors into a short, evidence-based label."""
+    logs = list(run_directory.glob('*_world.log')) + list(run_directory.glob('*_pro3.log'))
+    contents = '\n'.join(path.read_text(errors='replace') for path in logs)
+    details = []
+    if 'malloc(): smallbin double linked list corrupted' in contents:
+        details.append('Gazebo aborted after heap-corruption error')
+    elif 'process has died' in contents and 'gzserver' in contents:
+        details.append('Gazebo server exited unexpectedly')
+    if 'Spawn service failed' in contents:
+        details.append('Pro3 spawn service unavailable')
+    elif 'did not publish /pro3/wheel_odom' in contents:
+        details.append('Pro3 odometry did not start')
+    return '; '.join(details) or None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('log', type=Path)
@@ -194,68 +298,81 @@ def main():
     roots = args.model_root or [Path.home()/'.gazebo/models']
     shapes, target, missing = read_scene(args.world, roots)
     records = read_records(args.log)
-    def event(name):
-        return next(d for e,d in records if e == name)
-    start = event('run_start'); done = event('task_done'); stop = event('run_stop')
-    t0 = start['ros_time']; td = done['ros_time']-t0
-    completion = event('task_completed')['completion_snapshot']
-    samples = [d for e,d in records if e == 'sample' and d.get('pose') and d['ros_time'] <= done['ros_time']]
-    cp = dict(completion['metrics']); cp['ros_time'] = completion['boundary_ros_time']
-    samples.append(cp)
-    xy = np.array([d['pose'][:2] for d in samples])
+    result_path = args.log.parent/'attempt_result.json'
+    attempt = json.loads(result_path.read_text()) if result_path.exists() else {}
+    data = extract_run(records, attempt)
+    start, done, stop = data['start'], data['done'], data['stop']
+    t0, td, samples = data['t0'], data['duration'], data['samples']
+    xy = np.asarray([d['pose'][:2] for d in samples]).reshape(-1, 2)
     times = np.array([d['ros_time']-t0 for d in samples])
-    first = event('target_acquired')
-    decisions = [d for e,d in records if e == 'perception_decision' and d.get('metrics_pose')]
-    first_decision = min(decisions, key=lambda d: abs(d['ros_time']-first['ros_time']))
-    first_pose = first_decision['metrics_pose'][:2]
-    final_exposure = [d for e,d in records if e == 'target_exposure_ended'][-1]
-    matched = final_exposure['matched_detector_frames']; exposed = final_exposure['exposed_detector_frames']
-    run = start['run_timestamp']
+    first, first_pose = data['first'], data['first_pose']
+    matched, exposed = data['matched'], data['exposed']
+    run = start.get('run_timestamp', args.log.parent.name)
     artifact = next(args.log.parent.glob('*_failure_0001.json'), None)
     failure = json.loads(artifact.read_text()) if artifact else None
-    stall = failure.get('trigger_sample', {}).get('pose', []) if failure else []
+    stall = attempt.get('stall_pose') or (failure.get('trigger_sample', {}).get('pose', []) if failure else [])
     if not stall and failure:
-        stall = stop['summary']['failure_evidence']['last_failure']['trigger_pose']
+        stall = stop.get('summary', {}).get('failure_evidence', {}).get('last_failure', {}).get('trigger_pose', [])
+    successful = done is not None
+    end_color = '#209383' if successful else '#aa4339'
 
     plt.rcParams.update({'font.family':'DejaVu Sans', 'font.size':9, 'axes.labelsize':9,
                          'axes.titlesize':11, 'text.color':'#172b40', 'axes.labelcolor':'#475569',
                          'pdf.fonttype':42, 'ps.fonttype':42, 'svg.fonttype':'none'})
     fig = plt.figure(figsize=(15.5, 10.5), facecolor='white')
     gs = fig.add_gridspec(3, 2, width_ratios=[1.65, 1], height_ratios=[1, .65, .38],
-                         left=.06, right=.965, top=.865, bottom=.215, wspace=.21, hspace=.55)
+                         left=.06, right=.965, top=.865, bottom=.28, wspace=.21, hspace=.55)
     ax = fig.add_subplot(gs[:2,0]); zoom = fig.add_subplot(gs[0,1]); info = fig.add_subplot(gs[1,1]); timeline = fig.add_subplot(gs[2,:])
     fig.text(.06,.952,'ENV04  /  VISUAL OBJECT SEARCH',fontsize=11,weight='bold',color='#147d92')
-    fig.text(.06,.913,'Successful yellow-cup search',fontsize=26,weight='bold')
+    fig.text(.06,.913,('Successful' if successful else 'Unsuccessful')+' yellow-cup search',fontsize=26,weight='bold')
     fig.text(.965,.935,'RUN '+run+'\nTEB navigation · online SLAM',ha='right',va='center',fontsize=10,color='#64748b')
     cmap = matplotlib.colors.LinearSegmentedColormap.from_list('route',['#263e78','#247fa0','#31a997','#c5b948'])
-    norm = matplotlib.colors.Normalize(0,td)
+    norm = matplotlib.colors.Normalize(0,max(td, 1))
+    gaps = np.diff(times)
+    gap_limit = max(2.0, 3*float(np.median(gaps[gaps > 0]))) if np.any(gaps > 0) else 2.0
+    valid = (gaps >= 0) & (gaps <= gap_limit)
     for a in [ax,zoom]:
         draw_scene(a, shapes)
-        segments = np.stack([xy[:-1],xy[1:]], axis=1)
+        segments = np.stack([xy[:-1],xy[1:]], axis=1)[valid]
         a.add_collection(LineCollection(segments,colors='white',linewidths=4.5,zorder=4))
         lc = LineCollection(segments,cmap=cmap,norm=norm,linewidths=2.4,zorder=5)
-        lc.set_array(times[:-1]); a.add_collection(lc)
-        a.scatter(*xy[0],s=80,facecolor='#263e78',edgecolor='white',linewidth=1.4,zorder=8)
-        a.scatter(*xy[-1],s=90,marker='s',facecolor='#209383',edgecolor='white',linewidth=1.4,zorder=8)
-        a.scatter(*first_pose,s=65,marker='D',facecolor='#4d8cbc',edgecolor='white',linewidth=1,zorder=8)
-        a.scatter(*target,s=170,marker='*',facecolor='#e2ad25',edgecolor='#8c6517',linewidth=.7,zorder=9)
+        lc.set_array(times[:-1][valid]); a.add_collection(lc)
+        if len(xy):
+            a.scatter(*xy[0],s=80,facecolor='#263e78',edgecolor='white',linewidth=1.4,zorder=8)
+            a.scatter(*xy[-1],s=90,marker='s',facecolor=end_color,edgecolor='white',linewidth=1.4,zorder=8)
+        if first_pose:
+            a.scatter(*first_pose,s=65,marker='D',facecolor='#4d8cbc',edgecolor='white',linewidth=1,zorder=8)
+        if target:
+            a.scatter(*target,s=170,marker='*',facecolor='#e2ad25',edgecolor='#8c6517',linewidth=.7,zorder=9)
         if stall:
             a.scatter(*stall[:2],s=65,marker='X',facecolor='#c67450',edgecolor='white',linewidth=1,zorder=8)
     bounds = np.vstack([np.asarray(s['xy']) for s in shapes if s['kind']=='wall'])
     lo,hi = bounds.min(axis=0),bounds.max(axis=0)
     ax.set_xlim(lo[0]-1.1,hi[0]+1.1);ax.set_ylim(lo[1]-1.2,hi[1]+1.2)
     ax.set_title('a   Scene geometry and measured trajectory',loc='left',pad=14,weight='bold')
-    zoom.set_xlim(14.5,25.5); zoom.set_ylim(-13.6,-1.8)
-    zoom.set_title('b   Target-area detail',loc='left',pad=14,weight='bold')
+    if not successful and len(xy):
+        center = attempt.get('stall_pose') or xy[-1]
+        zoom.set_xlim(center[0]-4,center[0]+4); zoom.set_ylim(center[1]-4,center[1]+4)
+        detail_title = 'Failure-area detail'
+    elif not successful:
+        zoom.set_xlim(14.5,25.5); zoom.set_ylim(-13.6,-1.8)
+        detail_title = 'Target-area context · no pose recorded'
+    else:
+        zoom.set_xlim(14.5,25.5); zoom.set_ylim(-13.6,-1.8)
+        detail_title = 'Target-area detail'
+    zoom.set_title('b   '+detail_title,loc='left',pad=14,weight='bold')
     def label(a, point, text, offset):
         a.annotate(text,xy=point,xytext=offset,textcoords='offset points',fontsize=8,
                    color='#334155',bbox=dict(boxstyle='round,pad=.3',fc='white',ec='none',alpha=.94),
                    arrowprops=dict(arrowstyle='-',color='#94a3b8',lw=.7),zorder=10)
-    label(ax,xy[0],'Start',(10,12))
-    label(zoom,target,'Yellow cup\n(saved world state)',(-77,13))
-    label(zoom,xy[-1],'Task complete',(-89,12))
-    label(zoom,first_pose,'First target detection',(-109,15))
-    if stall: label(ax,stall[:2],'Transient planning stall',(15,-20))
+    if len(xy):
+        label(ax,xy[0],'First sample' if data['time_origin'] != 'run_start' else 'Start',(10,12))
+        label(zoom,xy[-1],'Task complete' if successful else 'Run stopped',(-89,12))
+    else:
+        ax.text(.5,.5,'No recorded odometry',transform=ax.transAxes,ha='center')
+    if target: label(zoom,target,'Yellow cup\n(saved world state)',(-65,-38))
+    if first_pose: label(zoom,first_pose,'First target detection',(-109,15))
+    if stall: label(ax,stall[:2],'Stationary failure' if attempt.get('stall_pose') else 'Recorded planning episode',(15,-20))
     for i in range(8,len(xy)-1,23):
         delta = xy[i+1]-xy[i]
         if np.linalg.norm(delta) > .07:
@@ -263,31 +380,46 @@ def main():
     ax.plot([lo[0]+1,lo[0]+6],[lo[1]+.65]*2,color='#334155',lw=2)
     ax.text(lo[0]+3.5,lo[1]+1.05,'5 m',ha='center',fontsize=8)
     handles = [Line2D([],[],marker=m,color='none',markerfacecolor=c,markeredgecolor='white',markersize=8,label=l)
-               for m,c,l in [('o','#263e78','Start'),('D','#4d8cbc','First detection'),('s','#209383','Task complete'),('*','#e2ad25','Target truth'),('X','#c67450','Transient stall')]]
+               for m,c,l in [('o','#263e78','Start'),('D','#4d8cbc','First detection'),('s',end_color,'Task complete' if successful else 'Run stop'),('*','#e2ad25','Saved target'),('X','#c67450','Recorded stall')]]
     fig.legend(handles=handles,loc='lower left',bbox_to_anchor=(.055,.072),ncol=5,frameon=False,columnspacing=2)
     cax = fig.add_axes([.06,.133,.50,.011])
     cb = fig.colorbar(lc,cax=cax,orientation='horizontal');cb.outline.set_visible(False)
     cb.ax.tick_params(length=0,labelsize=8);cb.set_label('Elapsed simulation time (s)',fontsize=8,labelpad=2)
 
-    info.axis('off');info.set_title('c   Completion evidence',loc='left',weight='bold',pad=10)
-    wall = completion['boundary_wall_elapsed_seconds']
-    total_path = completion['metrics']['path_length']
-    info.text(0,.84,'SUCCESS',fontsize=21,weight='bold',color='#209383')
-    info.text(0,.67,'/lste/task_done = true',fontsize=11,family='DejaVu Sans Mono')
-    rows = [('Path length',f'{total_path:.2f} m'),('Time to completion',f'{td:.2f} s simulation / {wall:.1f} s wall'),
-            ('First target detection',f'{first["ros_time"]-t0:.2f} s simulation'),
-            ('Target approach terminals',str(completion['metrics']['target_approach_terminals'])),
-            ('Final exposure matched',f'{matched} / {exposed} frames ({100*matched/exposed:.1f}%)'),
-            ('Completion evidence','terminal_track_continuity')]
+    info.axis('off');info.set_title('c   Outcome evidence',loc='left',weight='bold',pad=10)
+    wall = data['wall']
+    total_path = data['final'].get('path_length')
+    info.text(0,.84,'SUCCESS' if successful else 'NOT COMPLETED',fontsize=21,weight='bold',color=end_color)
+    signal = 'true' if successful else ('true, outside trial limit' if data['recorded_task_done_true'] else 'not observed true')
+    info.text(0,.67,'/lste/task_done = '+signal,fontsize=10,family='DejaVu Sans Mono')
+    rows = [('Path length',f'{total_path:.2f} m' if total_path is not None else 'Not recorded'),
+            ('Observed duration',f'{td:.2f} s simulation / '+(f'{wall:.1f} s wall' if wall is not None else 'wall unavailable')),
+            ('First target detection',f'{first["ros_time"]-t0:.2f} s simulation' if first else 'Not recorded'),
+            ('Target approach terminals',str(data['final'].get('target_approach_terminals','Not recorded'))),
+            ('Final exposure matched',f'{matched} / {exposed} frames ({100*matched/exposed:.1f}%)' if exposed else 'Not recorded'),
+            ('Evidence / stop reason',data['evidence'] or attempt.get('reason','No success evidence'))]
     for i,(key,value) in enumerate(rows):
         y=.51-i*.105
         info.text(0,y,key,color='#64748b',fontsize=8.5)
-        info.text(1,y,value,ha='right',fontsize=8.5)
+        if value.startswith('stationary_over_'):
+            value = 'Stationary >'+value.split('_')[2]+' s wall'
+        if value.startswith('exploration_over_'):
+            value = 'Exploration >'+value.split('_')[2]+' s wall'
+        info.text(1,y,value,ha='right',fontsize=8)
     timeline.set_title('d   Search progression',loc='left',pad=12,weight='bold')
-    tf = first['ros_time']-t0;tc = event('target_follow_confirmed')['ros_time']-t0
-    timeline.axvspan(0,tf,color='#edf2f8');timeline.axvspan(tf,td,color='#e5f3ef')
-    timeline.plot(times,[d['path_length'] for d in samples],color='#247fa0',lw=1.8)
-    for t,c,text,y in [(tf,'#4d8cbc','First detection',.93),(tc,'#147d92','Track confirmed',.56),(td,'#209383','Complete',.93)]:
+    tf = first['ros_time']-t0 if first else td
+    timeline.axvspan(0,tf,color='#edf2f8');timeline.axvspan(tf,td,color='#e5f3ef' if successful else '#faedeb')
+    distances = np.array([d.get('path_length',np.nan) for d in samples])
+    timeline_x, timeline_y = [], []
+    for i in range(len(times)):
+        if i and not valid[i-1]:
+            timeline_x.append(np.nan); timeline_y.append(np.nan)
+        timeline_x.append(times[i]); timeline_y.append(distances[i])
+    timeline.plot(timeline_x,timeline_y,color='#247fa0',lw=1.8)
+    milestones = [(td,end_color,'Complete' if successful else 'Stopped',.93)]
+    if first: milestones.append((tf,'#4d8cbc','First detection',.93))
+    if data['confirmed']: milestones.append((data['confirmed']['ros_time']-t0,'#147d92','Track confirmed',.56))
+    for t,c,text,y in milestones:
         timeline.axvline(t,color=c,lw=.9,ls='--')
         timeline.text(t-1,y,text,ha='right',va='top',transform=timeline.get_xaxis_transform(),fontsize=8,color=c,
                       bbox=dict(facecolor='white',edgecolor='none',alpha=.85,pad=2))
@@ -296,14 +428,24 @@ def main():
         end_time = failure.get('end_sample',{}).get('ros_time')
         if trigger_time is not None and end_time is not None:
             timeline.axvspan(trigger_time-t0,end_time-t0,color='#c67450',alpha=.13)
-    timeline.set_xlim(0,td+3);timeline.set_ylim(0,total_path*1.15)
+    timeline.set_xlim(0,td+3);timeline.set_ylim(0,max(1,(total_path or 0)*1.15))
     timeline.set_xlabel('Elapsed simulation time (s)');timeline.set_ylabel('Distance (m)')
     timeline.spines['top'].set_visible(False);timeline.spines['right'].set_visible(False)
     timeline.grid(axis='y',color='#e9edf1',lw=.5)
+    if not successful:
+        attempt['startup_diagnostic'] = startup_failure_diagnostic(args.log.parent)
+        caption = failure_caption(attempt, data['final'], stop, failure, td, wall)
+        fig.text(.06,.217,caption,fontsize=8.4,color='#8b3029',weight='medium',
+                 bbox=dict(boxstyle='round,pad=.55',facecolor='#fbf1ef',edgecolor='#e5c4bd',linewidth=.7))
+        if not len(xy):
+            timeline.text(.5,.52,'No odometry samples recorded; search did not start',
+                          transform=timeline.transAxes,ha='center',va='center',fontsize=9,color='#64748b')
     fig.text(.06,.031,'Scene: SDF collision footprints + saved model/link poses. Trajectory: logged odometry; world overlay assumes aligned odom/world axes.\n'
-             'Straight segments connect measured samples; no trajectory smoothing. No saved camera image or depth evidence is synthesized.',fontsize=7.5,color='#64748b')
+             'Segments join measured samples; large logging gaps are left open. No trajectory smoothing or synthesized camera/depth evidence.',fontsize=7.5,color='#64748b')
+    if data['time_origin'] != 'run_start':
+        fig.text(.06,.012,'Time origin: first recorded pose sample; run_start ROS clock was not ready (0 before saved-world clock loaded).',fontsize=7,color='#64748b')
     output = args.output_dir;output.mkdir(parents=True,exist_ok=True)
-    stem = output/(run+'_env04_success_trajectory')
+    stem = output/(run+'_env04_'+('success' if successful else 'failure')+'_trajectory')
     for suffix in ['png','pdf','svg']:
         fig.savefig(str(stem)+'.'+suffix,dpi=350,facecolor='white')
     plt.close(fig)
@@ -316,10 +458,18 @@ def main():
               'footprint_method':'per-mesh projected convex hull; furniture footprint is not a SLAM occupancy map',
               'missing_meshes':missing,'shapes':shapes}
     (output/'env04_scene_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    report={'run':run,'task_done':done['value'],'completion_evidence':done['completion_evidence'],
-            'simulation_seconds_to_done':td,'wall_seconds_to_done':wall,'path_length_m':total_path,
+    report={'run':run,'outcome':data['outcome'],'task_done':data['recorded_task_done_true'],
+            'within_trial_success':successful,
+            'recorded_task_done_true':data['recorded_task_done_true'],'completion_evidence':data['evidence'],
+            'simulation_seconds_to_done':td if successful else None,'wall_seconds_to_done':wall if successful else None,
+            'observed_simulation_seconds':td,'observed_wall_seconds':wall,'path_length_m':total_path,
+            'simulation_time_origin':data['time_origin'],'time_origin_ros_s':t0,
+            'run_start_ros_s':start.get('ros_time'),
             'trajectory_rows':len(samples),'target_truth_xy':target,'first_detection_xy':first_pose,
-            'completion_pose':cp['pose'],'run_stop_pose':stop['summary']['pose'],
+            'completion_pose':data['final'].get('pose') if successful else None,
+            'run_stop_pose':stop.get('summary',{}).get('pose'),
+            'stop_reason':attempt.get('reason'),'stall_pose':attempt.get('stall_pose'),
+            'omitted_gap_segments':int(np.count_nonzero(~valid)),'gap_limit_sim_s':gap_limit,
             'final_exposure_frames':{'matched':matched,'exposed':exposed},
             'missing_meshes':missing,'figures':[str(stem)+'.'+s for s in ['png','pdf','svg']]}
     (output/'visualization_summary.json').write_text(json.dumps(report,indent=2)+'\n')

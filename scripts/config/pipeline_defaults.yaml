@@ -471,7 +471,7 @@ GLOBAL_FRONTIER_COMPLETED_RADIUS: 1.25
 #                             rehydratable WorkItems close the Place first.
 #                             This is a discrete policy, not an extra
 #                             score/timeout parameter.
-GLOBAL_FRONTIER_METHOD: place_portal_workitem
+GLOBAL_FRONTIER_METHOD: gp_branch_tree
 # Optional actual Gazebo Classic random seed. The office experiment launcher
 # forwards a non-empty value as gzserver's `--seed` and logs it per trial.
 GAZEBO_RANDOM_SEED: ""

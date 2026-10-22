@@ -256,6 +256,9 @@ class SelectedFrontier:
     # pretending that the crossing started on the source side.
     portal_crossing_preobserved: bool = False
 
+    branch_id: object = None
+    authentication_phase: object = None
+
     @classmethod
     def from_candidate(cls, candidate):
         """Convert the internal candidate tuple into a stable named contract.
@@ -286,6 +289,8 @@ class SelectedFrontier:
             viewpoint_retry=bool(candidate[16]) if len(candidate) > 16 else False,
             graph_action=candidate[17] if len(candidate) > 17 else None,
             graph_action_reason=(candidate[18] if len(candidate) > 18 else ""),
+            branch_id=candidate[21] if len(candidate) > 21 else None,
+            authentication_phase=(candidate[22] if len(candidate) > 22 else None),
             portal_crossing_preobserved=(
                 bool(candidate[20]) if len(candidate) > 20 else False
             ),

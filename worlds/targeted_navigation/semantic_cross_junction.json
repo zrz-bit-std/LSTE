@@ -1,0 +1,625 @@
+{
+  "scene_version": 2,
+  "world": "semantic_cross_junction",
+  "central_junction": [
+    0,
+    0
+  ],
+  "spawn": [
+    -3.5,
+    0,
+    0
+  ],
+  "corridor_width": 3,
+  "arm_corridor_lengths": {
+    "west": 14,
+    "east": 12,
+    "north": 12,
+    "south": 12
+  },
+  "rooms": [
+    {
+      "arm": "west",
+      "theme": "lounge",
+      "bounds": [
+        -22,
+        -14,
+        -4,
+        4
+      ],
+      "door_width": 2.2
+    },
+    {
+      "arm": "east",
+      "theme": "office",
+      "bounds": [
+        12,
+        20,
+        -4,
+        4
+      ],
+      "door_width": 2.2
+    },
+    {
+      "arm": "north",
+      "theme": "meeting",
+      "bounds": [
+        -4,
+        4,
+        12,
+        20
+      ],
+      "door_width": 2.2
+    },
+    {
+      "arm": "south",
+      "theme": "breakroom",
+      "bounds": [
+        -4,
+        4,
+        -20,
+        -12
+      ],
+      "door_width": 2.2
+    }
+  ],
+  "objects": [
+    {
+      "name": "west_lounge_sofa_set_1_0",
+      "model": "sofa_set_1",
+      "room": "west",
+      "xy": [
+        -18.0,
+        2.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_lounge_coffee_table_1_1",
+      "model": "coffee_table_1",
+      "room": "west",
+      "xy": [
+        -18.0,
+        0.5
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_lounge_cup_green_2",
+      "model": "cup_green",
+      "room": "west",
+      "xy": [
+        -18.0,
+        0.5
+      ],
+      "z": 0.5
+    },
+    {
+      "name": "west_lounge_cup_yellow_3",
+      "model": "cup_yellow",
+      "room": "west",
+      "xy": [
+        -17.6,
+        0.5
+      ],
+      "z": 0.5
+    },
+    {
+      "name": "west_lounge_book_blue_4",
+      "model": "book_blue",
+      "room": "west",
+      "xy": [
+        -18.4,
+        0.5
+      ],
+      "z": 0.5
+    },
+    {
+      "name": "west_lounge_bookshelf_5",
+      "model": "bookshelf",
+      "room": "west",
+      "xy": [
+        -20.8,
+        -2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_lounge_office_chair_6",
+      "model": "office_chair",
+      "room": "west",
+      "xy": [
+        -15.5,
+        -1.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_lounge_plant_1_single_7",
+      "model": "plant_1_single",
+      "room": "west",
+      "xy": [
+        -15.2,
+        2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_lounge_plant_1_single_8",
+      "model": "plant_1_single",
+      "room": "west",
+      "xy": [
+        -20.8,
+        2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_lounge_file_box_2_9",
+      "model": "file_box_2",
+      "room": "west",
+      "xy": [
+        -15.2,
+        -2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_desk_brown_0",
+      "model": "desk_brown",
+      "room": "east",
+      "xy": [
+        14.0,
+        2.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_desk_brown_1",
+      "model": "desk_brown",
+      "room": "east",
+      "xy": [
+        18.0,
+        2.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_office_chair_2",
+      "model": "office_chair",
+      "room": "east",
+      "xy": [
+        14.0,
+        0.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_office_chair_3",
+      "model": "office_chair",
+      "room": "east",
+      "xy": [
+        18.0,
+        0.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_monitor_3_4",
+      "model": "monitor_3",
+      "room": "east",
+      "xy": [
+        14.0,
+        2.2
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "east_office_monitor_2_5",
+      "model": "monitor_2",
+      "room": "east",
+      "xy": [
+        18.0,
+        2.2
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "east_office_keyboard_6",
+      "model": "keyboard",
+      "room": "east",
+      "xy": [
+        14.0,
+        1.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "east_office_keyboard_7",
+      "model": "keyboard",
+      "room": "east",
+      "xy": [
+        18.0,
+        1.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "east_office_mouse_8",
+      "model": "mouse",
+      "room": "east",
+      "xy": [
+        14.5,
+        1.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "east_office_computer_case_9",
+      "model": "computer_case",
+      "room": "east",
+      "xy": [
+        18.8,
+        2.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_cup_yellow_10",
+      "model": "cup_yellow",
+      "room": "east",
+      "xy": [
+        13.5,
+        2.0
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "east_office_cup_blue_11",
+      "model": "cup_blue",
+      "room": "east",
+      "xy": [
+        18.5,
+        2.0
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "east_office_bookshelf_12",
+      "model": "bookshelf",
+      "room": "east",
+      "xy": [
+        13.2,
+        -2.6
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_file_cabinet_large_13",
+      "model": "file_cabinet_large",
+      "room": "east",
+      "xy": [
+        18.8,
+        -2.6
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_file_box_1_14",
+      "model": "file_box_1",
+      "room": "east",
+      "xy": [
+        14.2,
+        -2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "east_office_plant_1_single_15",
+      "model": "plant_1_single",
+      "room": "east",
+      "xy": [
+        18.8,
+        2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_table_conference_2_0",
+      "model": "table_conference_2",
+      "room": "north",
+      "xy": [
+        0.0,
+        16.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_office_chair_1",
+      "model": "office_chair",
+      "room": "north",
+      "xy": [
+        -1.6,
+        15.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_office_chair_2",
+      "model": "office_chair",
+      "room": "north",
+      "xy": [
+        -1.6,
+        17.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_office_chair_3",
+      "model": "office_chair",
+      "room": "north",
+      "xy": [
+        1.6,
+        15.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_office_chair_4",
+      "model": "office_chair",
+      "room": "north",
+      "xy": [
+        1.6,
+        17.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_office_chair_5",
+      "model": "office_chair",
+      "room": "north",
+      "xy": [
+        0.0,
+        18.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_office_chair_6",
+      "model": "office_chair",
+      "room": "north",
+      "xy": [
+        0.0,
+        13.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_cup_yellow_7",
+      "model": "cup_yellow",
+      "room": "north",
+      "xy": [
+        -0.5,
+        16.5
+      ],
+      "z": 0.85
+    },
+    {
+      "name": "north_meeting_cup_blue_8",
+      "model": "cup_blue",
+      "room": "north",
+      "xy": [
+        0.5,
+        15.5
+      ],
+      "z": 0.85
+    },
+    {
+      "name": "north_meeting_file_1_9",
+      "model": "file_1",
+      "room": "north",
+      "xy": [
+        0.0,
+        16.0
+      ],
+      "z": 0.85
+    },
+    {
+      "name": "north_meeting_file_box_1_10",
+      "model": "file_box_1",
+      "room": "north",
+      "xy": [
+        2.8,
+        18.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_bookshelf_11",
+      "model": "bookshelf",
+      "room": "north",
+      "xy": [
+        -2.8,
+        18.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_meeting_plant_1_single_12",
+      "model": "plant_1_single",
+      "room": "north",
+      "xy": [
+        2.8,
+        13.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_cafe_table_0",
+      "model": "cafe_table",
+      "room": "south",
+      "xy": [
+        -1.7,
+        -14.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_cafe_table_1",
+      "model": "cafe_table",
+      "room": "south",
+      "xy": [
+        1.7,
+        -14.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_kitchen_chair_2",
+      "model": "kitchen_chair",
+      "room": "south",
+      "xy": [
+        -2.5,
+        -14.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_kitchen_chair_3",
+      "model": "kitchen_chair",
+      "room": "south",
+      "xy": [
+        -0.8,
+        -14.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_kitchen_chair_4",
+      "model": "kitchen_chair",
+      "room": "south",
+      "xy": [
+        0.8,
+        -14.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_kitchen_chair_5",
+      "model": "kitchen_chair",
+      "room": "south",
+      "xy": [
+        2.5,
+        -14.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_cup_green_6",
+      "model": "cup_green",
+      "room": "south",
+      "xy": [
+        -1.7,
+        -14.2
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "south_breakroom_cup_blue_7",
+      "model": "cup_blue",
+      "room": "south",
+      "xy": [
+        1.7,
+        -14.2
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "south_breakroom_file_cabinet_large_8",
+      "model": "file_cabinet_large",
+      "room": "south",
+      "xy": [
+        -2.8,
+        -18.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_file_box_2_9",
+      "model": "file_box_2",
+      "room": "south",
+      "xy": [
+        2.8,
+        -18.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "south_breakroom_plant_1_single_10",
+      "model": "plant_1_single",
+      "room": "south",
+      "xy": [
+        2.8,
+        -13.2
+      ],
+      "z": 0
+    }
+  ],
+  "physical_furniture_collisions": true,
+  "floor_rectangles": [
+    [
+      -1.5,
+      1.5,
+      -1.5,
+      1.5
+    ],
+    [
+      -14,
+      0,
+      -1.5,
+      1.5
+    ],
+    [
+      0,
+      12,
+      -1.5,
+      1.5
+    ],
+    [
+      -1.5,
+      1.5,
+      0,
+      12
+    ],
+    [
+      -1.5,
+      1.5,
+      -12,
+      0
+    ],
+    [
+      -22,
+      -14,
+      -4,
+      4
+    ],
+    [
+      12,
+      20,
+      -4,
+      4
+    ],
+    [
+      -4,
+      4,
+      12,
+      20
+    ],
+    [
+      -4,
+      4,
+      -20,
+      -12
+    ]
+  ]
+}

@@ -23,6 +23,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+from gp_branch_frontier import GPBranchFrontierMixin
 from global_frontier_execution import GlobalFrontierExecutionMixin
 from global_frontier_event_callbacks import GlobalFrontierEventCallbacksMixin
 from global_frontier_lifecycle import GlobalFrontierLifecycleMixin
@@ -36,6 +37,7 @@ from global_frontier_activation import GlobalFrontierActivationMixin
 from global_frontier_config import GlobalFrontierConfigurationMixin
 from global_frontier_planning import GlobalFrontierPlanningMixin
 from global_frontier_portal_lifecycle import GlobalFrontierPortalLifecycleMixin
+from global_frontier_portal_authentication import GlobalFrontierPortalAuthenticationMixin
 from global_frontier_portal_probe_lifecycle import (
     GlobalFrontierPortalProbeLifecycleMixin,
 )
@@ -62,6 +64,8 @@ from global_frontier_terminal_observation import GlobalFrontierTerminalObservati
 
 
 class GlobalFrontierExplorer(
+    GPBranchFrontierMixin,
+    GlobalFrontierPortalAuthenticationMixin,
     GlobalFrontierLifecycleMixin,
     GlobalFrontierTerminalLifecycleMixin,
     GlobalFrontierTerminalObservationMixin,
@@ -88,6 +92,7 @@ class GlobalFrontierExplorer(
         rospy.init_node("lste_global_frontier")
         self._load_parameters(rospy.get_param)
         self._initialize_runtime_state()
+        self.initialize_portal_authentication()
         self._initialize_lifecycle_manager()
         self._setup_ros_interfaces()
 

@@ -1,0 +1,347 @@
+{
+  "scene_version": 2,
+  "world": "semantic_l_junction",
+  "central_junction": [
+    0,
+    0
+  ],
+  "spawn": [
+    -3.5,
+    0,
+    0
+  ],
+  "corridor_width": 3,
+  "arm_corridor_lengths": {
+    "west": 14,
+    "north": 12
+  },
+  "rooms": [
+    {
+      "arm": "west",
+      "theme": "office",
+      "bounds": [
+        -22,
+        -14,
+        -4,
+        4
+      ],
+      "door_width": 2.2
+    },
+    {
+      "arm": "north",
+      "theme": "breakroom",
+      "bounds": [
+        -4,
+        4,
+        12,
+        20
+      ],
+      "door_width": 2.2
+    }
+  ],
+  "objects": [
+    {
+      "name": "west_office_desk_brown_0",
+      "model": "desk_brown",
+      "room": "west",
+      "xy": [
+        -20.0,
+        2.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_desk_brown_1",
+      "model": "desk_brown",
+      "room": "west",
+      "xy": [
+        -16.0,
+        2.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_office_chair_2",
+      "model": "office_chair",
+      "room": "west",
+      "xy": [
+        -20.0,
+        0.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_office_chair_3",
+      "model": "office_chair",
+      "room": "west",
+      "xy": [
+        -16.0,
+        0.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_monitor_3_4",
+      "model": "monitor_3",
+      "room": "west",
+      "xy": [
+        -20.0,
+        2.2
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "west_office_monitor_2_5",
+      "model": "monitor_2",
+      "room": "west",
+      "xy": [
+        -16.0,
+        2.2
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "west_office_keyboard_6",
+      "model": "keyboard",
+      "room": "west",
+      "xy": [
+        -20.0,
+        1.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "west_office_keyboard_7",
+      "model": "keyboard",
+      "room": "west",
+      "xy": [
+        -16.0,
+        1.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "west_office_mouse_8",
+      "model": "mouse",
+      "room": "west",
+      "xy": [
+        -19.5,
+        1.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "west_office_computer_case_9",
+      "model": "computer_case",
+      "room": "west",
+      "xy": [
+        -15.2,
+        2.0
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_cup_yellow_10",
+      "model": "cup_yellow",
+      "room": "west",
+      "xy": [
+        -20.5,
+        2.0
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "west_office_cup_blue_11",
+      "model": "cup_blue",
+      "room": "west",
+      "xy": [
+        -15.5,
+        2.0
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "west_office_bookshelf_12",
+      "model": "bookshelf",
+      "room": "west",
+      "xy": [
+        -20.8,
+        -2.6
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_file_cabinet_large_13",
+      "model": "file_cabinet_large",
+      "room": "west",
+      "xy": [
+        -15.2,
+        -2.6
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_file_box_1_14",
+      "model": "file_box_1",
+      "room": "west",
+      "xy": [
+        -19.8,
+        -2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "west_office_plant_1_single_15",
+      "model": "plant_1_single",
+      "room": "west",
+      "xy": [
+        -15.2,
+        2.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_cafe_table_0",
+      "model": "cafe_table",
+      "room": "north",
+      "xy": [
+        -1.7,
+        17.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_cafe_table_1",
+      "model": "cafe_table",
+      "room": "north",
+      "xy": [
+        1.7,
+        17.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_kitchen_chair_2",
+      "model": "kitchen_chair",
+      "room": "north",
+      "xy": [
+        -2.5,
+        17.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_kitchen_chair_3",
+      "model": "kitchen_chair",
+      "room": "north",
+      "xy": [
+        -0.8,
+        17.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_kitchen_chair_4",
+      "model": "kitchen_chair",
+      "room": "north",
+      "xy": [
+        0.8,
+        17.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_kitchen_chair_5",
+      "model": "kitchen_chair",
+      "room": "north",
+      "xy": [
+        2.5,
+        17.8
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_cup_green_6",
+      "model": "cup_green",
+      "room": "north",
+      "xy": [
+        -1.7,
+        17.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "north_breakroom_cup_blue_7",
+      "model": "cup_blue",
+      "room": "north",
+      "xy": [
+        1.7,
+        17.8
+      ],
+      "z": 0.8
+    },
+    {
+      "name": "north_breakroom_file_cabinet_large_8",
+      "model": "file_cabinet_large",
+      "room": "north",
+      "xy": [
+        -2.8,
+        13.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_file_box_2_9",
+      "model": "file_box_2",
+      "room": "north",
+      "xy": [
+        2.8,
+        13.2
+      ],
+      "z": 0
+    },
+    {
+      "name": "north_breakroom_plant_1_single_10",
+      "model": "plant_1_single",
+      "room": "north",
+      "xy": [
+        2.8,
+        18.8
+      ],
+      "z": 0
+    }
+  ],
+  "physical_furniture_collisions": true,
+  "floor_rectangles": [
+    [
+      -1.5,
+      1.5,
+      -1.5,
+      1.5
+    ],
+    [
+      -14,
+      0,
+      -1.5,
+      1.5
+    ],
+    [
+      -1.5,
+      1.5,
+      0,
+      12
+    ],
+    [
+      -22,
+      -14,
+      -4,
+      4
+    ],
+    [
+      -4,
+      4,
+      12,
+      20
+    ]
+  ]
+}

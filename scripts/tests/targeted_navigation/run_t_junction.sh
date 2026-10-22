@@ -180,8 +180,12 @@ fi
 # inherits "$@"; passing ``--help`` or an option into catkin's setup util makes
 # it interpret the option as its own and can produce a misleading startup
 # error before this runner has done any work.
+# Catkin setup scripts reference optional environment variables directly.
+# Load them without nounset, then restore the runner's strict mode.
+set +u
 source "$WS/scripts/config/pipeline_env.sh"
 source "$WS/scripts/tests/targeted_navigation/readiness.sh"
+set -u
 
 PIPELINE_CONFIG_PATH="${PIPELINE_CONFIG:-$WS/scripts/config/pipeline_defaults.yaml}"
 if [[ -f "$PIPELINE_CONFIG_PATH" ]]; then
@@ -215,8 +219,11 @@ STARTUP_ARTIFACT="$RUN_DIRECTORY/${RUN_TIMESTAMP}_startup_failure.json"
 TRIAL_END_ARTIFACT="$RUN_DIRECTORY/${RUN_TIMESTAMP}_trial_end_diagnostic.json"
 REPORT_JSON="$RUN_DIRECTORY/${RUN_TIMESTAMP}_failure_report.json"
 REPORT_MARKDOWN="$RUN_DIRECTORY/${RUN_TIMESTAMP}_failure_report.md"
-WORLD="$WS/worlds/targeted_navigation/t_junction_small.world"
-RUN_CONFIG="world=$WORLD initial_pose=[-2.5,0.0,0.1,0.0] max_seconds=$MAX_SECONDS startup_seconds=$STARTUP_SECONDS stop_on_failure=$STOP_ON_FAILURE persistent_execution=$PERSISTENT_EXECUTION planner_frequency=$PLANNER_FREQUENCY base_global_planner=$BASE_GLOBAL_PLANNER base_local_planner=$BASE_LOCAL_PLANNER target_probe=$TARGET_PROBE target_probe_goal=[$TARGET_PROBE_X,$TARGET_PROBE_Y] target_probe_transaction_id=$TARGET_PROBE_TRANSACTION_ID target_probe_epoch=$TARGET_PROBE_EPOCH target_probe_track_id=$TARGET_PROBE_TRACK_ID target_probe_require_frontier=$TARGET_PROBE_REQUIRE_FRONTIER pre_route_alignment=$ALIGNMENT converter=$CONVERTER include_costmap_obstacles=$INCLUDE_COSTMAP_OBSTACLES"
+WORLD="${T_JUNCTION_WORLD:-$WS/worlds/targeted_navigation/t_junction_small.world}"
+SPAWN_X="${T_JUNCTION_X:--2.5}"
+SPAWN_Y="${T_JUNCTION_Y:-0.0}"
+SPAWN_YAW="${T_JUNCTION_YAW:-0.0}"
+RUN_CONFIG="world=$WORLD initial_pose=[$SPAWN_X,$SPAWN_Y,0.1,$SPAWN_YAW] max_seconds=$MAX_SECONDS startup_seconds=$STARTUP_SECONDS stop_on_failure=$STOP_ON_FAILURE persistent_execution=$PERSISTENT_EXECUTION planner_frequency=$PLANNER_FREQUENCY base_global_planner=$BASE_GLOBAL_PLANNER base_local_planner=$BASE_LOCAL_PLANNER target_probe=$TARGET_PROBE target_probe_goal=[$TARGET_PROBE_X,$TARGET_PROBE_Y] target_probe_transaction_id=$TARGET_PROBE_TRANSACTION_ID target_probe_epoch=$TARGET_PROBE_EPOCH target_probe_track_id=$TARGET_PROBE_TRACK_ID target_probe_require_frontier=$TARGET_PROBE_REQUIRE_FRONTIER pre_route_alignment=$ALIGNMENT converter=$CONVERTER include_costmap_obstacles=$INCLUDE_COSTMAP_OBSTACLES"
 
 log_lifecycle() {
   local level="$1"
@@ -228,6 +235,27 @@ log_lifecycle() {
 }
 
 log_lifecycle INFO run_start "$RUN_CONFIG"
+
+# Preserve the actual dirty source used by a diagnostic, not just HEAD.
+python3 - "$WS" "$RUN_DIRECTORY" <<'SOURCE_SNAPSHOT'
+import hashlib,json,sys
+from pathlib import Path
+ws,run=map(Path,sys.argv[1:])
+files=list((ws/'src/lste_topo_access/scripts').glob('*.py'))
+files.extend((ws/'src/lste_topo_access/launch').glob('*.launch'))
+files.append(ws/'src/lste_topo_access/scripts/gp_exploration_tree.py')
+files.extend((ws/'scripts/tests/targeted_navigation').glob('*junction*'))
+files.extend((ws/'worlds/targeted_navigation').glob('*junction*.world'))
+manifest={}
+for path in files:
+    if not path.is_file():continue
+    relative=path.relative_to(ws)
+    destination=run/'source'/relative
+    destination.parent.mkdir(parents=True,exist_ok=True)
+    data=path.read_bytes();destination.write_bytes(data)
+    manifest[str(relative)]=hashlib.sha256(data).hexdigest()
+(run/'source_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+SOURCE_SNAPSHOT
 
 LAUNCH_PID=""
 TARGET_PROBE_PID=""
@@ -362,6 +390,11 @@ trap cleanup EXIT INT TERM
 LAUNCH_ARGS=(
   "$WS/scripts/tests/targeted_navigation/t_junction_nav.launch"
   "gui:=$GUI"
+  "world_name:=$WORLD"
+  "x:=$SPAWN_X"
+  "y:=$SPAWN_Y"
+  "yaw:=$SPAWN_YAW"
+  "exploration_method:=${T_JUNCTION_EXPLORATION_METHOD:-place_portal_workitem}"
   start_metrics:=true
   "metrics_log_dir:=$LOG_ROOT"
   "metrics_run_directory:=$RUN_DIRECTORY"
@@ -451,7 +484,7 @@ fi
 navigation_deadline=$((SECONDS + MAX_SECONDS))
 while ((SECONDS < navigation_deadline)); do
   if [[ "$TARGET_PROBE" == "true" && -f "$TARGET_PROBE_RESULT" ]]; then
-    if rg -q '"passed": true' "$TARGET_PROBE_RESULT"; then
+    if grep -q '"passed": true' "$TARGET_PROBE_RESULT"; then
       STOP_REASON="target_probe_complete"
       log_lifecycle INFO target_probe_complete result="$TARGET_PROBE_RESULT"
       break
@@ -464,7 +497,7 @@ while ((SECONDS < navigation_deadline)); do
   # let its three-stage ownership result decide when this diagnostic ends.
   if [[ "$TARGET_PROBE" != "true" ]] \
     && [[ "$STOP_ON_FAILURE" == "true" ]] \
-    && rg -q 'event=failure_snapshot_ready' "$METRICS_LOG"; then
+    && grep -q 'event=failure_snapshot_ready' "$METRICS_LOG"; then
     STOP_REASON="failure_snapshot_ready"
     log_lifecycle WARN failure_stop_requested
     break

@@ -4,6 +4,7 @@
        doorway experiment must not start MiniCPM, detectors, or the full
        semantic mission stack. -->
   <arg name="gui" default="false"/>
+  <arg name="exploration_method" default="place_portal_workitem"/>
   <arg name="world_name" default="$(find lste_core)/../../worlds/targeted_navigation/portal_retry_single_door.world"/>
   <!-- Disable the frontier-to-goal handoff for a controller-only replay. The
        frontier node may still publish diagnostics, but Goal Manager will not
@@ -78,7 +79,7 @@
     <arg name="post_turn_stall_timeout" value="3.0"/>
     <arg name="unreachable_grace" value="5.0"/>
     <arg name="rejected_timeout" value="20.0"/>
-    <arg name="exploration_method" value="place_portal_workitem"/>
+    <arg name="exploration_method" value="$(arg exploration_method)"/>
   </include>
 
   <include file="$(find lste_topo_access)/launch/teb_navigation.launch">

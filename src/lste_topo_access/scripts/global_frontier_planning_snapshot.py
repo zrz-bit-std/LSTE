@@ -107,6 +107,9 @@ class GlobalFrontierPlanningSnapshotMixin:
         )
         if route_steps is None:
             return None
+        update_branches = getattr(self, "update_gp_branch_tree", None)
+        if update_branches is not None:
+            update_branches(message, map_context, robot_map, None, now)
         return FrontierRouteGraph(
             strict_free=strict_free,
             strict_steps=strict_steps,
@@ -203,6 +206,23 @@ class GlobalFrontierPlanningSnapshotMixin:
 
     def _report_no_frontier_selection(self):
         """Record why this cycle cannot create a new execution action."""
+        if getattr(self, "exploration_method", "") == "gp_branch_tree":
+            tree = getattr(self, "gp_exploration_tree", None)
+            pending = [] if tree is None else [
+                b["id"] for b in tree.branches.values()
+                if b["state"] in ("pending", "retry", "active")
+                or (b["state"] == "entered" and b.get("destination_node_id") is None)
+            ]
+            if tree is None or not tree.branches or pending:
+                # An unstable GP direction or map-admission wait is not
+                # exploration exhaustion. Publishing frontier_exhausted here
+                # cancels the persistent executor and strands its release
+                # handshake before the next branch can dispatch.
+                self.frontier_exhausted = False
+                self.publish_status(
+                    "gp_branch_waiting", pending_branch_ids=pending,
+                    reason="awaiting_sensor_stability_or_safe_map_projection")
+                return
         completion_gate = evaluate_completion(
             graph_ready=(
                 not getattr(self, "place_memory_enabled", True)

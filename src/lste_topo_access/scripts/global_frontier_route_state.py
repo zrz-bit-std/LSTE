@@ -365,6 +365,7 @@ class GlobalFrontierRouteStateMixin:
 
     def clear_prefetched_frontier(self):
         """Discard the cached successor and all metadata bound to it."""
+        self.prefetched_branch_id = None
         self.prefetched_frontier = None
         self.prefetched_goal_map = None
         self.prefetched_frontier_information = None

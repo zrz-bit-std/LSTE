@@ -37,6 +37,9 @@ export PYTHONPATH="$WS/src/lste_core/scripts:$WS/devel/lib/python3/dist-packages
 # model database before the world can begin publishing /clock.
 export GAZEBO_MODEL_DATABASE_URI="${GAZEBO_MODEL_DATABASE_URI:-file://$WS/worlds/.gazebo_model_database}"
 
+# Generated catkin setup files read optional ROS variables directly. Load
+# overlays with nounset disabled, then restore this script's strict mode.
+set +u
 if [ -f /opt/ros/noetic/setup.bash ]; then
   # shellcheck disable=SC1091
   source /opt/ros/noetic/setup.bash
@@ -54,6 +57,7 @@ if [ -f "$WS/devel/setup.bash" ]; then
   # shellcheck disable=SC1090
   source "$WS/devel/setup.bash"
 fi
+set -u
 
 if command -v conda >/dev/null 2>&1; then
   CONDA_BASE="$(conda info --base 2>/dev/null || true)"
@@ -108,3 +112,35 @@ lste_gazebo_exec() {
 
 # 统一 ROS master URI，避免 lste-env 和 lste session 各连不同的 roscore
 export ROS_MASTER_URI=${ROS_MASTER_URI:-http://localhost:11311/}
+
+# The current workspace was built against /opt/ros rather than the supporting
+# robot-model workspace. Preserve both source overlays explicitly after the
+# generated setup scripts have run; sourcing pre_ws first is otherwise erased
+# when lste_ws/setup.bash resets ROS_PACKAGE_PATH.
+if [ -n "${LSTE_PRE_WS:-}" ] && [ -d "$LSTE_PRE_WS/src" ]; then
+  for overlay_path in "$LSTE_PRE_WS/src"; do
+    case ":${ROS_PACKAGE_PATH:-}:" in
+      *":$overlay_path:"*) ;;
+      *) ROS_PACKAGE_PATH="${ROS_PACKAGE_PATH:+$ROS_PACKAGE_PATH:}$overlay_path" ;;
+    esac
+  done
+  for overlay_path in "$LSTE_PRE_WS/devel/lib"; do
+    case ":${LD_LIBRARY_PATH:-}:" in
+      *":$overlay_path:"*) ;;
+      *) LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$overlay_path" ;;
+    esac
+  done
+  for overlay_path in "$LSTE_PRE_WS/devel/lib/python3/dist-packages"; do
+    case ":${PYTHONPATH:-}:" in
+      *":$overlay_path:"*) ;;
+      *) PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$overlay_path" ;;
+    esac
+  done
+  for overlay_path in "$LSTE_PRE_WS/devel"; do
+    case ":${CMAKE_PREFIX_PATH:-}:" in
+      *":$overlay_path:"*) ;;
+      *) CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:+$CMAKE_PREFIX_PATH:}$overlay_path" ;;
+    esac
+  done
+  export ROS_PACKAGE_PATH LD_LIBRARY_PATH PYTHONPATH CMAKE_PREFIX_PATH
+fi

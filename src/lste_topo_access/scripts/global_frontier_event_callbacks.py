@@ -287,6 +287,9 @@ class GlobalFrontierEventCallbacksMixin:
         current_task_id = str(getattr(self, "current_task_id", "") or "").strip()
         if current_task_id and task_id and task_id != current_task_id:
             return
+        branch_semantics = getattr(self, "observe_gp_branch_semantics", None)
+        if branch_semantics is not None:
+            branch_semantics(message)
         labels, target_labels = self._detection_labels(message)
         if not labels:
             return
@@ -903,6 +906,11 @@ class GlobalFrontierEventCallbacksMixin:
         # it will still perform map, costmap, and Navfn validation before
         # publishing a replacement endpoint.
         self.last_planning_wall = 0.0
+        tree = getattr(self, "gp_exploration_tree", None)
+        if tree is not None and not released_after_logical_terminal:
+            for branch in tree.branches.values():
+                if branch.get("route_id") == route_id and branch["state"] == "active":
+                    tree.fail(branch["id"], status_name)
         self.publish_status(
             "execution_terminal_failure",
             route_id=route_id,
@@ -931,6 +939,7 @@ class GlobalFrontierEventCallbacksMixin:
 
     def on_scan(self, message):
         """Retain recovery clearance and the current physical observation horizon."""
+        self.gp_branch_scan = message
         ranges = []
         observed_ranges = []
         for index, value in enumerate(message.ranges):

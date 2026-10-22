@@ -78,6 +78,11 @@ class GlobalFrontierSelectionPlannerMixin:
     ):
         """Select a local endpoint or one deliberate doorway transition."""
         self.last_frontier_decision = None
+        if getattr(self, "exploration_method", "") == "gp_branch_tree":
+            self._reset_frontier_selection_metrics()
+            return self.choose_gp_branch_frontier(
+                message, preferred_steps if preferred_steps is not None else steps,
+                now, robot_map, semantic_hint, excluded)
         # Keep the named candidate alongside the legacy route tuple until the
         # outer lifecycle commits it.  The tuple is the public compatibility
         # boundary, but it cannot carry the candidate's physical Place ID;

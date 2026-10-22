@@ -24,7 +24,7 @@ readiness_refresh_inventory() {
 
 readiness_metrics_started() {
   local metrics_log="$1"
-  [[ -f "$metrics_log" ]] && rg -q 'event=run_start' "$metrics_log"
+  [[ -f "$metrics_log" ]] && grep -q 'event=run_start' "$metrics_log"
 }
 
 readiness_check() {

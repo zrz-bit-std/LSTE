@@ -14,6 +14,18 @@ class GlobalFrontierPrefetchActivationMixin:
         preserve_route_id,
     ):
         """Turn one validated cache entry into the next active route lease."""
+        branch_id = getattr(self, "prefetched_branch_id", None)
+        tree = getattr(self, "gp_exploration_tree", None)
+        if branch_id is not None and tree is not None:
+            branch = tree.branches.get(branch_id)
+            if branch is None or branch["state"] in ("superseded", "return", "explored"):
+                self.clear_prefetched_frontier()
+                return None
+        if (preserve_route_id and branch_id is not None and tree is not None
+            and tree.active_branch_id != branch_id):
+            # Different branch ownership requires a new route transaction,
+            # even when the geometric paths happen to share a prefix.
+            return None
         predecessor_route_id = int(self.active_route_id)
         previous_frontier = self.active_frontier
         previous_component = self.active_frontier_component
@@ -25,6 +37,8 @@ class GlobalFrontierPrefetchActivationMixin:
         self.active_frontier_region_id = None
         if not preserve_route_id:
             self.active_route_id += 1
+            if branch_id is not None and tree is not None:
+                self.commit_gp_branch_transaction(branch_id, self.active_route_id)
         region = None
         if getattr(self, "place_memory_enabled", True):
             region = self.activate_frontier_region(

@@ -333,6 +333,10 @@ install(FILES
   scripts/global_frontier_selection_planner.py
   scripts/global_frontier_selection_validation.py
   scripts/global_frontier_selection.py
+  scripts/gp_branch_discovery.py
+  scripts/gp_branch_frontier.py
+  scripts/gp_exploration_tree.py
+  scripts/global_frontier_portal_authentication.py
   scripts/global_frontier_terminal_lifecycle.py
   scripts/global_frontier_terminal_connector.py
   scripts/global_frontier_terminal_validation.py

@@ -14,7 +14,7 @@ class GlobalFrontierExplorationConfigurationMixin:
 
     def _load_exploration_parameters(self, gp):
         """Resolve settings for coverage, structural places, and planning rate."""
-        requested_method = gp("~exploration_method", "place_portal_workitem")
+        requested_method = gp("~exploration_method", "gp_branch_tree")
         try:
             self.exploration_capabilities = resolve_exploration_method(
                 requested_method

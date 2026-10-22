@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.6">
+  <model name="lste_semantic_desk_brown">
+    <link name="link_22">
+	<pose frame="">-0.937597 -0.312704 0 0 -0 0</pose>
+         <visual name="visual">
+         <geometry>
+          <mesh>
+            <uri>model://desk_brown/meshes/table.dae</uri>
+            <scale>0.98 1 1</scale>
+          </mesh>
+        </geometry>
+        
+        <material>
+          <script>
+            <uri>model://desk_brown/materials/scripts</uri>
+            <uri>model://desk_brown/materials/textures</uri>
+            <name>desk_brown</name>
+          </script>
+        </material>
+        <cast_shadows>1</cast_shadows>
+        <transparency>0</transparency>
+      </visual>
+      </link>
+    <static>1</static>
+    <allow_auto_disable>1</allow_auto_disable>
+  </model>
+</sdf>

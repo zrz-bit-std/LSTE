@@ -23,6 +23,7 @@ class ExplorationMethodPolicyTest(unittest.TestCase):
         self.assertEqual(
             method_names(),
             (
+                "gp_branch_tree",
                 "frontier",
                 "frontier_distance_dedup",
                 "place_portal",
@@ -31,6 +32,10 @@ class ExplorationMethodPolicyTest(unittest.TestCase):
                 "place_portal_workitem_strict",
             ),
         )
+        tree = resolve_exploration_method("gp_branch_tree")
+        self.assertFalse(tree.certified_portals)
+        self.assertFalse(tree.graph_route_planner)
+        self.assertTrue(tree.semantic_hint)
         ordinary = resolve_exploration_method("frontier")
         dedup = resolve_exploration_method("frontier-distance-dedup")
         full = resolve_exploration_method("place_portal_workitem")

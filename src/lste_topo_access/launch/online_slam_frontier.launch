@@ -101,7 +101,7 @@
        memory: frontier, frontier_distance_dedup, place_portal, or
        place_portal_workitem. The full method also consumes /lste/task and
        /lste/detections to choose task-conditioned topological expansion. -->
-  <arg name="exploration_method" default="place_portal_workitem"/>
+  <arg name="exploration_method" default="gp_branch_tree"/>
   <arg name="target_done_policy" default="visual_target"/>
   <!-- Region memory sits above point-level frontier completion. The primary
        identity is a doorway-separated, high-clearance known-free component:

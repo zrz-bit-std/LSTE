@@ -162,6 +162,34 @@ class GlobalFrontierRouteCommandResolutionMixin(
             )
         else:
             inserted_turn_connector = False
+        if getattr(self, "active_portal_authentication_phase", "") == "turning":
+            auth = getattr(self, "active_portal_authentication", lambda: None)()
+            if auth is not None and auth.target_yaw is not None:
+                frame = message.header.frame_id or "map"
+                inside = auth.inside_xy
+                target_odom = (
+                    inside[0] + math.cos(auth.target_yaw),
+                    inside[1] + math.sin(auth.target_yaw),
+                )
+                inside_map = self.transform_xy(frame, "odom", *inside)
+                target_map = self.transform_xy(frame, "odom", *target_odom)
+                if inside_map is not None and target_map is not None:
+                    # Convert the locked odom heading into the current map
+                    # frame; SLAM may rotate map->odom between snapshots.
+                    # Observe in place. Reusing the frontier XY can leave a
+                    # small SLAM/odom offset that is outside the waypoint
+                    # release radius while already inside TEB's goal tolerance,
+                    # freezing the robot before it turns.
+                    pose = getattr(self, "pose_odom", None)
+                    current_map = (None if pose is None else self.transform_xy(
+                        frame, "odom", float(pose.x), float(pose.y)))
+                    command_xy = mission_xy if current_map is None else current_map
+                    command_yaw = math.atan2(
+                        target_map[1] - inside_map[1],
+                        target_map[0] - inside_map[0],
+                    )
+                    route_kind = "frontier_turn_connector"
+                    inserted_turn_connector = False
         self.active_last_waypoint_map = command_xy
         self.active_last_waypoint_yaw = command_yaw
         self.active_route_kind = route_kind

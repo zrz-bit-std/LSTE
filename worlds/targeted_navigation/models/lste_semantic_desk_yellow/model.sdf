@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.6">
+  <model name="lste_semantic_desk_yellow">
+    <link name="link_22">
+      <pose frame="">-0.906434 -0.345717 0 0 -0 0</pose>
+        <visual name="visual">
+        <pose frame="">0 0 0 0 -0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://desk_yellow/meshes/table.dae</uri>
+            <scale>0.98 1 1</scale>
+          </mesh>
+        </geometry>
+        
+       <material>
+          <script>
+            <uri>model://desk_yellow/materials/scripts</uri>
+            <uri>model://desk_yellow/materials/textures</uri>
+            <name>desk_yellow</name>
+          </script>
+        </material>
+        <cast_shadows>1</cast_shadows>
+        <transparency>0</transparency>
+      </visual>
+      </link>
+    <static>1</static>
+    <allow_auto_disable>1</allow_auto_disable>
+  </model>
+</sdf>

@@ -21,6 +21,10 @@ class GlobalFrontierExecutionResolutionMixin:
         """
         if portal_transition:
             return False
+        # Authentication entry/turn/return routes share the ordinary endpoint
+        # kind, but their terminal contract belongs to the doorway state machine.
+        if str(getattr(self, "active_portal_authentication_phase", "") or ""):
+            return False
         if str(getattr(self, "active_route_kind", "")) != "frontier_endpoint":
             return False
         if str(
@@ -169,14 +173,61 @@ class GlobalFrontierExecutionResolutionMixin:
         watchdog,
     ):
         """Handle terminal ownership, endpoint failure, and lifecycle logs."""
+        auth_phase = str(getattr(
+            self, "active_portal_authentication_phase", "") or "")
+        auth = getattr(self, "active_portal_authentication", lambda: None)()
+        auth_turn_watchdog_grace = False
+        auth_turning = auth is not None and auth.state == "turning"
+        if auth_turning:
+            pose = getattr(self, "pose_odom", None)
+            if pose is not None:
+                auth.update_rotation(float(pose.theta))
+            stage_key = (int(auth.branch_id), "turning")
+            if getattr(self, "portal_auth_watchdog_stage_key", None) != stage_key:
+                # Entry and turn share the junction transaction, but rotation
+                # is a fresh controller stage with almost no XY progress.
+                # Reset its route deadline rather than inheriting the entry
+                # lease's elapsed time.
+                self.portal_auth_watchdog_stage_key = stage_key
+                self.portal_auth_watchdog_turn_started_at = now
+                self.active_since = now
+                self.active_progress_time = now
+                self.active_best_distance = float(distance)
+                self.active_best_goal_distance = float(distance)
+            turn_started = float(getattr(
+                self, "portal_auth_watchdog_turn_started_at", now))
+            auth_turn_watchdog_grace = (
+                float(now) - turn_started < max(60.0, 2.0 * float(self.active_timeout))
+            )
+        elif getattr(self, "portal_auth_watchdog_stage_key", None) is not None:
+            self.portal_auth_watchdog_stage_key = None
+            self.portal_auth_watchdog_turn_started_at = None
         endpoint_reached = (
             distance <= self.endpoint_terminal_wait_radius and waypoint_reached
         )
+        if auth_turning:
+            # XY arrival alone is not a completed turn connector. Keep the
+            # locked-yaw route live until the authentication pose samples are
+            # stable inside the angular tolerance.
+            endpoint_reached = endpoint_reached and bool(auth.rotation_ready)
+        auth_return_contract = bool(
+            auth_phase == "returning" and auth is not None
+            and auth.state in ("completed", "failed")
+        )
+        if auth_return_contract:
+            # update_return commits only inside the source node's return radius.
+            # That physical contract is wider than the generic waypoint radius.
+            endpoint_reached = True
         terminal_required = self.mission_endpoint_only or self.persistent_execution
+        # The turn contract is established by stable measured yaw at the
+        # locked target. Persistent MoveBase may omit a terminal for the
+        # stationary connector, so do not hold the doorway ledger on it.
+        auth_turn_contract = bool(auth_turning and auth is not None
+                                  and auth.rotation_ready)
         # A failed MoveBase terminal is stronger evidence than geometric
         # proximity. The base can stop inside the wait envelope after local
         # recovery, but it cannot later emit the terminal for this lease.
-        if watchdog.recovery_pending:
+        if watchdog.recovery_pending and not auth_turn_watchdog_grace:
             reason = self.active_route_failure_reason(watchdog)
             self.deactivate_failed_active_frontier(
                 x,
@@ -210,7 +261,8 @@ class GlobalFrontierExecutionResolutionMixin:
         ):
             return None
 
-        if watchdog.post_turn_stalled or watchdog.expired:
+        if ((watchdog.post_turn_stalled or watchdog.expired)
+                and not auth_turn_watchdog_grace):
             reason = self.active_route_failure_reason(watchdog)
             self.deactivate_failed_active_frontier(
                 x,
@@ -226,8 +278,59 @@ class GlobalFrontierExecutionResolutionMixin:
             return None
         if endpoint_reached and (
             not terminal_required or self.active_terminal_received
+            or auth_turn_contract or auth_return_contract
         ):
-            if not portal_transition:
+            auth_phase = str(getattr(
+                self, "active_portal_authentication_phase", "") or ""
+            )
+            auth_stage_only = bool(auth_phase)
+            if auth_phase:
+                auth = getattr(self, "active_portal_authentication", lambda: None)()
+                if auth is None:
+                    self.active_portal_authentication_phase = ""
+                    auth_stage_only = False
+                else:
+                    pose = getattr(self, "pose_odom", None)
+                    pose_xy = None if pose is None else (float(pose.x), float(pose.y))
+                    pose_yaw = None if pose is None else float(pose.theta)
+                    if auth.state == "failed":
+                        stage_complete = True
+                    elif auth_phase == "entering":
+                        if auth.state == "entering":
+                            auth.update_entry(pose_xy)
+                            if auth.state != "inside":
+                                auth.request_failure_return(
+                                    "entry_terminal_before_fully_inside",
+                                    pose_xy=pose_xy,
+                                )
+                        # After full entry, wait for a fresh SLAM frontier scan
+                        # before releasing the goal or accepting the branch.
+                        stage_complete = auth.state in ("turning", "returning", "failed")
+                    elif auth_phase == "turning":
+                        if auth.rotation_ready and pose_yaw is not None:
+                            auth.finish_turn(pose_yaw)
+                        stage_complete = auth.state in ("returning", "failed")
+                    elif auth_phase == "returning":
+                        if auth.state == "returning":
+                            auth.update_return(pose_xy)
+                        stage_complete = auth.state in ("completed", "failed")
+                    else:
+                        stage_complete = False
+                    if auth.state in ("completed", "failed"):
+                        next_branch = self.finish_portal_authentication_branch(now=now)
+                        self.publish_status(
+                            "portal_authentication_route_terminal",
+                            node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+                            route_id=int(self.active_route_id), phase=auth_phase,
+                            state=auth.state, failure_reason=auth.failure_reason,
+                            next_branch_id=None if next_branch is None
+                            else int(next_branch.branch_id),
+                        )
+                    if not stage_complete:
+                        return (row, col, x, y,
+                                float(route_steps[row, col]) * resolution, 0.0)
+                    self.active_portal_authentication_phase = ""
+            if not portal_transition and not auth_stage_only:
                 observed_region = self.mark_frontier_observed(
                     x,
                     y,
@@ -298,6 +401,100 @@ class GlobalFrontierExecutionResolutionMixin:
             durable_plan = find_plan()
         if durable_failure_epoch is None:
             durable_failure_epoch = getattr(self, "active_route_map_epoch", None)
+        auth_phase = str(getattr(
+            self, "active_portal_authentication_phase", "") or ""
+        )
+        auth = getattr(self, "active_portal_authentication", lambda: None)()
+        if auth is not None and auth.state == "entering":
+            entry_key = int(auth.branch_id)
+            if getattr(self, "portal_auth_entry_retry_branch_id", None) != entry_key:
+                self.portal_auth_entry_retry_branch_id = entry_key
+                self.portal_auth_entry_started_at = float(now)
+            entry_started = float(getattr(
+                self, "portal_auth_entry_started_at", now))
+            entry_budget = max(60.0, 2.0 * float(self.active_timeout))
+            if float(now) - entry_started < entry_budget:
+                self.publish_status(
+                    "portal_authentication_entry_route_retry",
+                    node_id=int(auth.node_id), branch_id=entry_key,
+                    reason=str(reason), retry_budget_remaining=round(
+                        entry_budget - (float(now) - entry_started), 2),
+                )
+                # Keep the same candidate and source node; a fresh controller
+                # lease retries the same gate without counting a second entry.
+                self.active_portal_authentication_phase = ""
+                auth_phase = ""
+        if auth is not None and auth.state == "turning":
+            turn_started = getattr(
+                self, "portal_auth_watchdog_turn_started_at", None)
+            if turn_started is None:
+                turn_started = float(now)
+                self.portal_auth_watchdog_turn_started_at = turn_started
+            turn_budget = max(60.0, 2.0 * float(self.active_timeout))
+            if float(now) - float(turn_started) < turn_budget:
+                self.publish_status(
+                    "portal_authentication_turn_route_retry",
+                    node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+                    reason=str(reason), retry_budget_remaining=round(
+                        turn_budget - (float(now) - float(turn_started)), 2),
+                )
+                # Retire the failed controller lease, keep the locked turn
+                # target, and let GP activate a fresh connector for this branch.
+                self.active_portal_authentication_phase = ""
+                auth_phase = ""
+        if auth is not None and auth.state == "returning":
+            return_key = int(auth.branch_id)
+            if getattr(self, "portal_auth_return_retry_branch_id", None) != return_key:
+                self.portal_auth_return_retry_branch_id = return_key
+                self.portal_auth_return_started_at = float(now)
+            return_started = float(getattr(self, "portal_auth_return_started_at", now))
+            return_budget = max(60.0, 2.0 * float(self.active_timeout))
+            if float(now) - return_started < return_budget:
+                # A transient controller failure is not a false doorway. Keep
+                # the same source node and retry returning under a fresh lease.
+                self.publish_status(
+                    "portal_authentication_return_route_retry",
+                    node_id=int(auth.node_id), branch_id=return_key,
+                    reason=str(reason), retry_budget_remaining=round(
+                        return_budget - (float(now) - return_started), 2),
+                )
+                self.active_portal_authentication_phase = ""
+                auth_phase = ""
+        if auth_phase:
+            auth = getattr(self, "active_portal_authentication", lambda: None)()
+            if (auth is not None and auth.state in ("turning", "returning")
+                    and auth_phase != auth.state):
+                # A terminal from the previous stage can arrive after the
+                # authentication ledger has already advanced. Retire that
+                # stale lease and let the selector activate the current stage.
+                self.publish_status(
+                    "portal_authentication_stale_stage_failure_ignored",
+                    node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+                    failed_phase=auth_phase, current_phase=auth.state,
+                    reason=str(reason),
+                )
+                self.active_portal_authentication_phase = ""
+                auth_phase = ""
+            if auth is not None and auth_phase and auth.state not in ("completed", "failed"):
+                failure = "navigation_route_failed:%s" % str(reason)
+                pose = getattr(self, "pose_odom", None)
+                pose_xy = None if pose is None else (float(pose.x), float(pose.y))
+                if auth_phase != "returning" and auth.request_failure_return(
+                        failure, pose_xy=pose_xy):
+                    if auth.state == "returning":
+                        self.active_portal_authentication_phase = "returning"
+                        self.publish_status(
+                            "portal_authentication_failure_returning",
+                            node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+                            reason=failure, source_xy=list(auth.source_xy),
+                        )
+                    else:
+                        self.finish_portal_authentication_branch(now=now)
+                        self.active_portal_authentication_phase = ""
+                else:
+                    auth.fail(failure)
+                    self.finish_portal_authentication_branch(now=now)
+                    self.active_portal_authentication_phase = ""
         settle_probe = getattr(self, "settle_active_portal_probe", None)
         if settle_probe is not None:
             settle_probe("failed", now, reason)

@@ -54,6 +54,8 @@
 
 ## development
 
+[20261021 GP 分支探索树开发与验收](development/20261021_gp_branch_tree.md)
+
 | 文档 | 内容 |
 | --- | --- |
 | [20260905_global_frontier_code_layout.md](development/20260905_global_frontier_code_layout.md) | Global frontier 主节点与策略模块的职责划分 |
