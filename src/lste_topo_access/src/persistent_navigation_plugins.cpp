@@ -707,13 +707,16 @@ bool PersistentTebLocalPlanner::computeVelocityCommands(
         cmd_vel, PlannerCommandContract::STATE_ZERO, "planner_no_command");
     return true;
   }
-  // TEB does not always fail when the start pose is clearance-deficient: an
-  // in-place rotation stays feasible while any translation does not.  The
-  // planner then answers with a rotation-only command and the turn supervisor
-  // keeps re-orienting, producing an in-place spin with no XY progress.  That
-  // is the same deadlock one level quieter, so it gets the same escape after a
-  // longer observation window (a legitimate turn is short).
-  if (std::fabs(cmd_vel.linear.x) <= 0.001 && startPoseClearanceDeficient()) {
+  // TEB does not always fail when the start pose is clearance-deficient.  Two
+  // shapes reach this point: a pure rotation (linear ~ 0) and a reverse entry
+  // sample saturated at ``max_vel_x_backwards`` (linear = -0.01).  The
+  // forward-only mux removes the translational component of both, so the robot
+  // can only spin in place.  Runs 20261031_183336 and 20261031_195131 spent
+  // 691 s and 1800 s in exactly that loop; 6 of their 7 failure snapshots
+  // carry a negative or zero planner linear command while the robot sat inside
+  // the clearance band.  Any command without a forward component is therefore
+  // a translational stall, not only an exactly-zero one.
+  if (cmd_vel.linear.x <= 0.001 && startPoseClearanceDeficient()) {
     cmd_vel = geometry_msgs::Twist();
     ++infeasible_cycle_count_;
     if (clearance_escape_enabled_ &&
