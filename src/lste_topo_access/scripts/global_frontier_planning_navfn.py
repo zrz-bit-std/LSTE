@@ -9,6 +9,7 @@ import rospy
 from nav_msgs.srv import GetPlanRequest
 from lifecycle_manager import EventType
 from clock_provider import now_for
+from global_frontier_planning_costmap import lethal_mask
 
 
 class GlobalFrontierPlanningNavfnMixin:
@@ -83,6 +84,7 @@ class GlobalFrontierPlanningNavfnMixin:
             "transaction_id": int(
                 self.lifecycle_transaction_id()
             ),
+            "scope_place_id": self._navfn_local_goal_place(goal_xy),
         }
 
     def _navfn_validation_result_ready(self):
@@ -212,13 +214,74 @@ class GlobalFrontierPlanningNavfnMixin:
         if reachable:
             point = response.plan.poses[-1].pose.position
             endpoint = (float(point.x), float(point.y))
+        path = []
+        if reachable:
+            path = [(float(p.pose.position.x), float(p.pose.position.y))
+                    for p in response.plan.poses]
         return {
             "kind": "response",
             "reachable": reachable,
             "endpoint": endpoint,
+            "path": path,
             "resolution": payload["resolution"],
                 "completed_wall": now_for(self),
         }
+
+    def _navfn_local_goal_place(self, goal_xy):
+        """Bind a local Navfn request to the Place owning its endpoint."""
+        mask = getattr(self, "current_place_scope_mask", None)
+        message = getattr(self, "current_place_scope_message", None)
+        place_id = getattr(self, "current_place_scope_id", None)
+        if (mask is None or message is None or place_id is None
+                or not getattr(self, "current_place_scope_valid", False)
+                or place_id != getattr(self, "current_physical_place_id", place_id)):
+            return None
+        origin = message.info.origin.position
+        resolution = float(message.info.resolution)
+        col = int(math.floor((float(goal_xy[0])-origin.x)/resolution))
+        row = int(math.floor((float(goal_xy[1])-origin.y)/resolution))
+        if 0 <= row < mask.shape[0] and 0 <= col < mask.shape[1] and mask[row,col]:
+            return int(place_id)
+        return None
+
+    def _navfn_path_in_local_place(self, path, place_id):
+        """Check every interpolated path point against one current Place mask."""
+        mask = getattr(self, "current_place_scope_mask", None)
+        message = getattr(self, "current_place_scope_message", None)
+        if (mask is None or message is None
+                or not getattr(self, "current_place_scope_valid", False)
+                or getattr(self, "current_place_scope_id", None) != place_id
+                or getattr(self, "current_physical_place_id", place_id) != place_id
+                or not path):
+            return None
+        resolution = float(message.info.resolution)
+        origin = message.info.origin.position
+        points = []
+        for point in path:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                return False
+            if not all(math.isfinite(float(value)) for value in point):
+                return False
+            points.append((float(point[0]), float(point[1])))
+        spacing = max(1e-3, 0.5 * resolution)
+        for start, end in zip(points, points[1:]):
+            distance = math.hypot(end[0]-start[0], end[1]-start[1])
+            count = max(1, int(math.ceil(distance/spacing)))
+            for index in range(count+1):
+                fraction = index/float(count)
+                x = start[0] + fraction*(end[0]-start[0])
+                y = start[1] + fraction*(end[1]-start[1])
+                col = int(math.floor((x-origin.x)/resolution))
+                row = int(math.floor((y-origin.y)/resolution))
+                if not (0 <= row < mask.shape[0] and 0 <= col < mask.shape[1]
+                        and mask[row,col]):
+                    return False
+        if len(points) == 1:
+            col = int(math.floor((points[0][0]-origin.x)/resolution))
+            row = int(math.floor((points[0][1]-origin.y)/resolution))
+            return bool(0 <= row < mask.shape[0] and 0 <= col < mask.shape[1]
+                        and mask[row,col])
+        return True
 
     def _store_navfn_validation_result(
         self, key, payload, result, completed_wall=None,
@@ -284,6 +347,22 @@ class GlobalFrontierPlanningNavfnMixin:
                     endpoint_error,
                 )
                 return False, True
+            local_place_id = payload.get("scope_place_id")
+            if local_place_id is not None:
+                path_state = self._navfn_path_in_local_place(
+                    result.get("path"), int(local_place_id),
+                )
+                if path_state is not True:
+                    if path_state is None:
+                        self.navfn_last_validation_state = "place_scope_pending"
+                        return None, True
+                    self.navfn_last_validation_state = "place_scope_path_leak"
+                    rospy.logwarn(
+                        "Global frontier rejected Navfn path outside Place %d "
+                        "goal=(%.2f,%.2f)", int(local_place_id),
+                        payload["goal_xy"][0], payload["goal_xy"][1],
+                    )
+                    return False, True
             self.navfn_last_validation_state = "reachable"
             if self.navfn_first_nonempty_response_wall is None:
                 self.navfn_first_nonempty_response_wall = now_wall
@@ -356,7 +435,7 @@ class GlobalFrontierPlanningNavfnMixin:
         desired_steps = max(
             1, int(math.ceil(self.navfn_startup_probe_distance / resolution))
         )
-        candidates = np.argwhere((steps >= 1) & (data < 253))
+        candidates = np.argwhere((steps >= 1) & ~lethal_mask(data))
         if candidates.size == 0:
             return None
         distances = np.abs(

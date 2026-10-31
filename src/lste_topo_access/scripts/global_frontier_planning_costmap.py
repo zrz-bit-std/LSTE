@@ -8,6 +8,36 @@ import rospy
 from clock_provider import now_for
 
 
+def lethal_threshold(data):
+    """Return the lethal-cell threshold for a published costmap grid.
+
+    ``costmap_2d`` stores ``LETHAL_OBSTACLE`` as 254 internally, but
+    ``Costmap2DROS`` scales the published OccupancyGrid to 0-100 with -1 for
+    unknown.  Comparing only against 253 therefore treated a lethal cell as
+    free on the published grid: run 20261031_165652 dispatched goals whose
+    costmap cell was 100, Navfn then returned an empty plan, and every route
+    died a few seconds after dispatch (25 controller stalls).
+
+    Pick the encoding from the observed maximum so both representations are
+    handled by the same gate.
+    """
+    if data is None:
+        return 253
+    try:
+        peak = int(np.max(data))
+    except (TypeError, ValueError):
+        return 253
+    return 100 if 0 <= peak <= 100 else 253
+
+
+def lethal_mask(data):
+    """Boolean mask of lethal cells for either costmap encoding."""
+    array = np.asarray(data)
+    if array.size == 0:
+        return array < 0
+    return array >= lethal_threshold(array)
+
+
 class GlobalFrontierPlanningCostmapMixin:
 
     @staticmethod
@@ -43,6 +73,7 @@ class GlobalFrontierPlanningCostmapMixin:
     def _endpoint_has_lethal_margin(self, data, message, cell):
         """Reject a goal whose required safety disk touches lethal cells."""
         margin_cells = self._costmap_endpoint_margin_cells(message)
+        threshold = lethal_threshold(data)
         if margin_cells <= 0:
             return True
         row, col = int(cell[0]), int(cell[1])
@@ -59,7 +90,7 @@ class GlobalFrontierPlanningCostmapMixin:
                     # reject a candidate; the map/costmap route gate owns
                     # out-of-bounds handling.
                     continue
-                if int(data[neighbour_row, neighbour_col]) >= 253:
+                if int(data[neighbour_row, neighbour_col]) >= threshold:
                     return False
         return True
 
@@ -129,7 +160,8 @@ class GlobalFrontierPlanningCostmapMixin:
     def costmap_steps(self, robot_xy):
         """Build the Navfn-compatible connected mask for the latest costmap.
 
-        Values >= 253 are lethal in costmap_2d. Unknown cells remain
+        Lethal cells are resolved from the grid encoding (see
+        :func:`lethal_threshold`). Unknown cells remain
         traversable here because the production NavfnROS configuration allows
         unknown space; the frontier goal itself is still selected from the
         known SLAM-free mask.
@@ -150,7 +182,7 @@ class GlobalFrontierPlanningCostmapMixin:
             )
         except (TypeError, ValueError):
             return None
-        free = data < 253
+        free = ~lethal_mask(data)
         cell = self.world_cell(message, costmap_robot[0], costmap_robot[1])
         if cell is None:
             return None
@@ -214,7 +246,7 @@ class GlobalFrontierPlanningCostmapMixin:
             if target is None:
                 return None
         cell = self.world_cell(message, target[0], target[1])
-        if cell is None or data[cell] >= 253 or steps[cell] < 0:
+        if cell is None or data[cell] >= lethal_threshold(data) or steps[cell] < 0:
             return None
         if not self._endpoint_has_lethal_margin(data, message, cell):
             rospy.loginfo_throttle(
