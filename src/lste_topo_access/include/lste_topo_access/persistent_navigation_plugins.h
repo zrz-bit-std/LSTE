@@ -49,6 +49,11 @@ class PersistentTebLocalPlanner : public nav_core::BaseLocalPlanner {
   // feasible until the robot moves away; reporting that separately keeps a
   // start-pose deadlock from looking like an ordinary transient TEB miss.
   bool startPoseClearanceDeficient();
+  // Measured distance from the robot cell to the nearest lethal cell.  Used
+  // to decide whether a zero-translation command is a *material* clearance
+  // problem or just TEB stopping inside a ~1 m corridor, where the grid
+  // quantisation alone can move the reading by half a cell.
+  double startPoseClearance();
   // Bounded clearance-restoring manoeuvre.  When TEB rejects every trajectory
   // because the robot's own cell already violates the feasibility clearance,
   // no amount of retrying or in-place recovery can help: the start pose has to
@@ -132,6 +137,9 @@ class PersistentTebLocalPlanner : public nav_core::BaseLocalPlanner {
   // Inscribed footprint radius + TEB min_obstacle_dist. Defaults match
   // teb_navigation.launch (0.30 m footprint, 0.22 m min_obstacle_dist).
   double start_pose_clearance_threshold_;
+  // A deficit smaller than this is inside the costmap quantisation noise and
+  // is reported as a plain zero-translation stop, not as a clearance stall.
+  double start_pose_clearance_margin_;
   // Bounded clearance escape (see clearanceEscapeCommand).
   bool clearance_escape_enabled_;
   int clearance_escape_trigger_cycles_;

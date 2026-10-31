@@ -93,6 +93,26 @@ def _pair(value):
     return (0.0, 0.0)
 
 
+def clearance_stall_is_material(
+    clearance,
+    required=DEFAULT_FOOTPRINT_RADIUS + DEFAULT_MIN_OBSTACLE_DIST,
+    margin=0.05,
+):
+    """Whether a clearance deficit is bigger than the costmap quantisation.
+
+    Run 20261031_214617 produced 12 ``planner_clearance_stall`` snapshots whose
+    nearest lethal cell was exactly 0.50 m against a 0.52 m threshold.  Two
+    centimetres is half a 0.1 m cell, so those were TEB stopping inside ~1 m
+    corridors, not a material clearance problem.  Only a deficit larger than
+    ``margin`` is reported as a clearance stall; anything smaller is a plain
+    zero-translation stop.
+    """
+    if clearance is None:
+        return False
+    deficit = float(required) - float(clearance)
+    return deficit > float(margin) + 1e-9
+
+
 def command_is_zero(command):
     linear, angular = _pair(command)
     return abs(linear) <= LINEAR_EPS and abs(angular) <= ANGULAR_EPS
@@ -247,6 +267,14 @@ def classify(
     #     costmap the feasibility check uses.  ``planner_clearance_stall`` is
     #     the same deadlock seen through a rotation-only TEB output instead of
     #     a hard feasibility failure.
+    if reason == "planner_zero_translation":
+        return verdict(
+            PLANNER_ZERO_COMMAND,
+            "the planner published a zero-translation command without a "
+            "material clearance deficit; TEB chose to stop rather than report "
+            "a clearance violation",
+        )
+
     if reason in ("planner_start_pose_infeasible", "planner_clearance_stall"):
         return verdict(
             PLANNER_INFEASIBLE_START_POSE,

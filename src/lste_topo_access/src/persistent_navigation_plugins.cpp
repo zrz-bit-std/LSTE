@@ -37,6 +37,7 @@ PersistentTebLocalPlanner::PersistentTebLocalPlanner()
       installed_mission_transaction_(0),
       costmap_ros_(nullptr),
       start_pose_clearance_threshold_(0.52),
+      start_pose_clearance_margin_(0.05),
       clearance_escape_enabled_(true),
       clearance_escape_trigger_cycles_(40),
       clearance_escape_max_cycles_(400),
@@ -144,6 +145,10 @@ void PersistentTebLocalPlanner::initialize(
                       robot_radius + min_obstacle_dist);
     start_pose_clearance_threshold_ =
         std::max(0.0, start_pose_clearance_threshold_);
+    ros::param::param("/move_base/persistent_start_pose_clearance_margin",
+                      start_pose_clearance_margin_, 0.05);
+    start_pose_clearance_margin_ =
+        std::max(0.0, start_pose_clearance_margin_);
     // Clearance escape is a bounded, forward-only manoeuvre.  All limits are
     // parameters so a run can disable it without rebuilding.
     ros::param::param("/move_base/persistent_clearance_escape",
@@ -473,25 +478,28 @@ double nearestLethalDistance(costmap_2d::Costmap2D* costmap, double world_x,
 
 }  // namespace
 
-bool PersistentTebLocalPlanner::startPoseClearanceDeficient() {
+double PersistentTebLocalPlanner::startPoseClearance() {
   if (costmap_ros_ == nullptr) {
-    return false;
+    return std::numeric_limits<double>::infinity();
   }
   costmap_2d::Costmap2D* costmap = costmap_ros_->getCostmap();
   if (costmap == nullptr) {
-    return false;
+    return std::numeric_limits<double>::infinity();
   }
   if (!(start_pose_clearance_threshold_ > 0.0)) {
-    return false;
+    return std::numeric_limits<double>::infinity();
   }
   geometry_msgs::PoseStamped robot_pose;
   if (!costmap_ros_->getRobotPose(robot_pose)) {
-    return false;
+    return std::numeric_limits<double>::infinity();
   }
   return nearestLethalDistance(costmap, robot_pose.pose.position.x,
                                robot_pose.pose.position.y,
-                               start_pose_clearance_threshold_) <
-         start_pose_clearance_threshold_;
+                               start_pose_clearance_threshold_);
+}
+
+bool PersistentTebLocalPlanner::startPoseClearanceDeficient() {
+  return startPoseClearance() < start_pose_clearance_threshold_;
 }
 
 void PersistentTebLocalPlanner::resetClearanceEscape() {
@@ -716,7 +724,18 @@ bool PersistentTebLocalPlanner::computeVelocityCommands(
   // carry a negative or zero planner linear command while the robot sat inside
   // the clearance band.  Any command without a forward component is therefore
   // a translational stall, not only an exactly-zero one.
-  if (cmd_vel.linear.x <= 0.001 && startPoseClearanceDeficient()) {
+  const double measured_clearance = startPoseClearance();
+  const bool clearance_deficient =
+      measured_clearance < start_pose_clearance_threshold_;
+  // Only a deficit larger than the grid quantisation is reported as a
+  // clearance stall.  In run 20261031_214617 every one of the 12
+  // "planner_clearance_stall" snapshots measured exactly 0.50 m against a
+  // 0.52 m threshold -- 2 cm, i.e. half a 0.1 m cell -- inside ~1 m wide
+  // corridors, and the bounded escape never fired for any of them.
+  const bool clearance_material =
+      measured_clearance <
+      start_pose_clearance_threshold_ - start_pose_clearance_margin_;
+  if (cmd_vel.linear.x <= 0.001 && clearance_deficient) {
     cmd_vel = geometry_msgs::Twist();
     ++infeasible_cycle_count_;
     if (clearance_escape_enabled_ &&
@@ -729,7 +748,8 @@ bool PersistentTebLocalPlanner::computeVelocityCommands(
     }
     publishPlannerCommandContract(
         cmd_vel, PlannerCommandContract::STATE_ZERO,
-        "planner_clearance_stall");
+        clearance_material ? "planner_clearance_stall"
+                           : "planner_zero_translation");
     return true;
   }
   infeasible_cycle_count_ = 0;
