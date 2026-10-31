@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 import math
 
+from global_frontier_portal_crossing import portal_signed_distance, portal_section_destination
+
 
 def _xy(value):
     try:
@@ -25,7 +27,8 @@ class DoorwayAuthentication:
     gate_xy: tuple
     destination_xy: tuple
     required_depth: float = 0.40
-    return_radius: float = 0.60
+    return_radius: float = 0.75
+    return_goal_margin: float = 0.60
     # Slightly exceed the TEB supervisor's 0.35 rad completion envelope so
     # pose quantization cannot leave authentication waiting after TEB stops.
     turn_tolerance: float = 0.40
@@ -41,8 +44,11 @@ class DoorwayAuthentication:
     failure_reason: str = None
     turn_stable_samples: int = 0
     rotation_ready: bool = False
+    return_gate_cleared: bool = False
     events: list = field(default_factory=list)
     entry_goal_margin: float = 0.60
+    # Provisional while pending; immutable measured section once entry begins.
+    gate_geometry: tuple = None
 
     def __post_init__(self):
         self.branch_id = int(self.branch_id)
@@ -52,8 +58,30 @@ class DoorwayAuthentication:
         self.required_depth = max(0.0, float(self.required_depth))
         self.entry_goal_margin = max(0.0, float(self.entry_goal_margin))
         self.return_radius = max(0.05, float(self.return_radius))
+        self.return_goal_margin = max(0.0, float(self.return_goal_margin))
+        if self.gate_geometry is not None:
+            self.refresh_pending_geometry(self.gate_xy, self.destination_xy, *self.gate_geometry)
         if self.gate_xy is None or self.destination_xy is None:
             self.fail("invalid_gate_or_destination")
+
+    def refresh_pending_geometry(self, gate, destination, width, bounds):
+        """Follow new SLAM evidence before entry, then freeze one coherent section."""
+        if self.state != 'pending':
+            return False
+        gate, destination = _xy(gate), _xy(destination)
+        if gate is None or destination is None:
+            return False
+        try:
+            width=float(width)
+            if not math.isfinite(width) or width<=0:width=None
+        except (TypeError,ValueError):width=None
+        points=None
+        if bounds is not None and len(bounds)==2:
+            projected=tuple(_xy(point) for point in bounds)
+            if all(point is not None for point in projected):points=projected
+        self.gate_xy,self.destination_xy=gate,destination
+        self.gate_geometry=(width,points)
+        return True
 
     def _event(self, name, **data):
         event = {"event": name, "branch_id": self.branch_id,
@@ -61,6 +89,178 @@ class DoorwayAuthentication:
         event.update(data)
         self.events.append(event)
         return event
+
+    def _remember_failed_return_fallback(self, pose_xy=None):
+        goal = _xy(getattr(self, "last_source_side_return_goal_odom", None))
+        if goal is None:
+            return
+        current = _xy(pose_xy)
+        source = _xy(self.source_xy)
+        history = list(getattr(self, "failed_source_side_return_goals_odom", ()))
+        distance = None if current is None else math.dist(current, goal)
+        protected_source = source is not None and math.dist(source, goal) <= self.return_radius
+        # A stalled approach does not prove the destination is blocked. Never
+        # erase the small source-return disk because a remote controller leg
+        # failed; retain it for a new bounded approach.
+        if (not protected_source and distance is not None and distance < 0.80
+                and not any(math.dist(goal, point) < 0.20 for point in history)):
+            history.append(goal)
+        self.failed_source_side_return_goals_odom = history[-16:]
+        if current is None or distance < 0.80:
+            return
+        dx, dy = goal[0] - current[0], goal[1] - current[1]
+        marker = (current[0] + 0.45 * dx / distance,
+                  current[1] + 0.45 * dy / distance)
+        obstacles = list(getattr(
+            self, "failed_return_approach_obstacles_odom", (),
+        ))
+        if any(math.hypot(marker[0] - point[0], marker[1] - point[1]) < 0.25
+               for point in obstacles if _xy(point) is not None):
+            return
+        obstacles.append(marker)
+        self.failed_return_approach_obstacles_odom = obstacles[-12:]
+        self._event(
+            "doorway_return_stall_approach_marked",
+            pose_xy=list(current), failed_goal_xy=list(goal),
+            obstacle_marker_xy=list(marker),
+        )
+
+    def _entry_heading(self):
+        destination = portal_section_destination(
+            self.gate_xy, self.destination_xy,
+            None if self.gate_geometry is None else self.gate_geometry[1])
+        if destination is None:
+            return None
+        return math.atan2(destination[1]-self.gate_xy[1],
+                          destination[0]-self.gate_xy[0])
+
+    def _physical_motion_progressed(self, pose, yaw):
+        reference = getattr(self, "_progress_pose", None)
+        if reference is None:
+            return False
+        if self.state == "returning" and self.source_xy is not None:
+            distance = math.dist(pose, self.source_xy)
+            return getattr(self, "_return_best_source_distance", distance) - distance >= 0.10
+        if self.state == "turning":
+            before = abs(_angle_delta(self.target_yaw, self._progress_yaw))
+            after = abs(_angle_delta(self.target_yaw, float(yaw)))
+            return before - after >= 0.08
+        translated = math.hypot(pose[0]-reference[0], pose[1]-reference[1]) >= 0.10
+        if translated or self.state != "entering":
+            return translated
+        # Entering may first require a real half-turn toward the frozen gate.
+        # Credit only improvement toward its immutable section normal, using
+        # the same angular threshold as the explicit authentication turn.
+        # Rotation away or oscillation back to the previous best cannot renew
+        # the budget; lease/map changes never supply progress.
+        heading = self._entry_heading()
+        if heading is None:
+            return False
+        before = abs(_angle_delta(heading, self._progress_yaw))
+        after = abs(_angle_delta(heading, float(yaw)))
+        return before - after >= 0.08
+
+    def physical_progress_due(self, pose_xy, yaw, now, timeout):
+        """Read-only cooperative deadline check; the owner performs settlement."""
+        pose = _xy(pose_xy)
+        if (pose is None or self.state not in ("entering", "inside", "turning", "returning")
+                or getattr(self, "_progress_phase", None) != self.state
+                or getattr(self, "_progress_pose", None) is None
+                or getattr(self, "return_recovery_final_blocked", False)):
+            return False
+        return (not self._physical_motion_progressed(pose, yaw)
+                and max(0.0, float(now)-self._progress_at) >= float(timeout))
+
+    def physical_progress_expired(self, pose_xy, yaw, now, timeout):
+        """Track phase motion across controller lease renewals and terminals."""
+        pose = _xy(pose_xy)
+        if pose is None or self.state not in ("entering", "inside", "turning", "returning"):
+            return False
+        if (self.state == "returning"
+                and getattr(self, "return_recovery_final_blocked", False)):
+            return False
+        now = float(now)
+        key = str(self.state)
+        reference = getattr(self, "_progress_pose", None)
+        if getattr(self, "_progress_phase", None) != key or reference is None:
+            self._progress_phase = key
+            self._progress_pose = pose
+            self._progress_yaw = float(yaw)
+            self._progress_at = now
+            if key == "returning" and self.source_xy is not None:
+                self._return_best_source_distance = math.dist(pose, self.source_xy)
+            return False
+        progressed = self._physical_motion_progressed(pose, yaw)
+        if progressed and key == "returning" and self.source_xy is not None:
+            self._return_best_source_distance = math.dist(pose, self.source_xy)
+        if progressed:
+            if key == "entering" and math.dist(pose, reference) < 0.10:
+                self._event("doorway_physical_progress_observed", phase=key,
+                            kind="entry_alignment", pose_xy=list(pose),
+                            heading_yaw=self._entry_heading(),
+                            previous_yaw=self._progress_yaw, yaw=float(yaw))
+            self._progress_pose = pose
+            self._progress_yaw = float(yaw)
+            self._progress_at = now
+            return False
+        elapsed = max(0.0, now - self._progress_at)
+        if elapsed < float(timeout):
+            return False
+        self._event("doorway_physical_progress_expired", phase=key,
+                    elapsed=round(elapsed, 3), timeout=float(timeout),
+                    pose_xy=list(pose), source_xy=list(self.source_xy),
+                    source_distance=round(math.hypot(pose[0]-self.source_xy[0],
+                                                   pose[1]-self.source_xy[1]), 3))
+        if key == "returning":
+            self._remember_failed_return_fallback(pose)
+            # A stalled return is still an outstanding safety obligation.
+            # Re-arm a bounded progress window so the route can be retried,
+            # but never turn this into a terminal branch failure here.
+            self._progress_pose = pose
+            self._progress_yaw = float(yaw)
+            self._progress_at = now
+            retry_count = int(getattr(self, "return_retry_count", 0)) + 1
+            self.return_retry_count = retry_count
+            self._event("doorway_failure_return_retry",
+                        retry_count=retry_count,
+                        reason=self.failure_reason or "return_progress_stalled",
+                        source_distance=round(math.hypot(
+                            pose[0]-self.source_xy[0], pose[1]-self.source_xy[1]), 3))
+            if retry_count >= 3:
+                self.return_recovery_blocked = True
+                self._event("doorway_failure_return_recovery_blocked",
+                            retry_count=retry_count,
+                            reason="bounded_source_side_return_retries_exhausted")
+            if retry_count >= 6:
+                self.return_recovery_final_blocked = True
+                self._event("doorway_failure_return_finally_blocked",
+                            retry_count=retry_count,
+                            reason="source_side_recovery_budget_exhausted")
+        return True
+
+    def note_return_route_failure(self, reason):
+        """Keep the source-return obligation alive and request a fresh fallback."""
+        if self.state != "returning":
+            return False
+        reason = str(reason or "controller_failure")
+        self._remember_failed_return_fallback(
+            getattr(self, "_progress_pose", None),
+        )
+        if not self.failure_reason:
+            self.failure_reason = "navigation_route_failed:%s" % reason
+        failures = int(getattr(self, "return_controller_failure_count", 0)) + 1
+        self.return_controller_failure_count = failures
+        self.return_recovery_blocked = True
+        self.return_recovery_blocked_reported = False
+        self._event("doorway_return_controller_failure",
+                    reason=reason, retry_count=failures,
+                    source_xy=list(self.source_xy or ()))
+        if failures >= 4:
+            self.return_recovery_final_blocked = True
+            self._event("doorway_failure_return_finally_blocked",
+                        retry_count=failures,
+                        reason="source_side_controller_budget_exhausted")
+        return True
 
     def begin(self, source_xy):
         if self.state != "pending":
@@ -76,19 +276,22 @@ class DoorwayAuthentication:
         pose = _xy(pose_xy)
         if pose is None or self.gate_xy is None or self.destination_xy is None:
             return None
-        dx = self.destination_xy[0] - self.gate_xy[0]
-        dy = self.destination_xy[1] - self.gate_xy[1]
-        length = math.hypot(dx, dy)
-        if length <= 1e-9:
-            return None
-        return ((pose[0] - self.gate_xy[0]) * dx
-                + (pose[1] - self.gate_xy[1]) * dy) / length
+        return portal_signed_distance(
+            pose, self.gate_xy, self.destination_xy,
+            None if self.gate_geometry is None else self.gate_geometry[1],
+        )
 
     def route_goal(self):
         """Return XY for entry/return; turning holds XY and commands target yaw."""
+        destination = portal_section_destination(
+            self.gate_xy, self.destination_xy,
+            None if self.gate_geometry is None else self.gate_geometry[1],
+        )
+        if destination is None:
+            return None
         if self.state == "entering":
-            dx = self.destination_xy[0] - self.gate_xy[0]
-            dy = self.destination_xy[1] - self.gate_xy[1]
+            dx = destination[0] - self.gate_xy[0]
+            dy = destination[1] - self.gate_xy[1]
             length = math.hypot(dx, dy) or 1.0
             # Leave enough distance for the controller's endpoint tolerance
             # after the full robot footprint has crossed the gate plane.
@@ -98,8 +301,60 @@ class DoorwayAuthentication:
         if self.state == "turning":
             return self.inside_xy
         if self.state == "returning":
-            return self.source_xy
+            if self.failure_reason:
+                return self.source_xy
+            dx = destination[0] - self.gate_xy[0]
+            dy = destination[1] - self.gate_xy[1]
+            length = math.hypot(dx, dy) or 1.0
+            margin = self.return_goal_margin
+            # A source pose can be close to the doorway plane (or, after a
+            # topology/SLAM correction, slightly on the destination side).
+            # Merely offsetting from that pose can leave the goal on the plane;
+            # TEB then stops within endpoint tolerance without the robot center
+            # actually crossing back. Aim at least this far onto the source
+            # side while preserving the original retreat from the source pose.
+            source_depth = self.signed_depth(self.source_xy)
+            # Once the robot center has crossed back to the source side,
+            # finish the return at the actual junction node.  This also covers
+            # SLAM placing the node slightly behind the estimated gate plane;
+            # repeatedly targeting a margin-offset waypoint would otherwise
+            # leave the branch returning forever.
+            if self.return_gate_cleared:
+                return self.source_xy
+            # If SLAM places the estimated gate beyond the junction node, first
+            # clear its plane and then explicitly drive back to the source node.
+            # Otherwise the plane-clearing waypoint can stop short forever.
+            if source_depth is not None and source_depth >= -0.05:
+                goal_depth = -margin
+            else:
+                goal_depth = min(source_depth - margin, -margin)
+            return (self.gate_xy[0] + dx * goal_depth / length,
+                    self.gate_xy[1] + dy * goal_depth / length)
         return None
+
+    def source_side_depth(self):
+        """Signed source-node distance from the directed doorway plane."""
+        return self.signed_depth(self.source_xy)
+
+    def source_side_proven(self, margin=0.05):
+        depth = self.source_side_depth()
+        return depth is not None and depth < -max(0.0, float(margin))
+
+    def reject_completed_portal_candidate(self, reason):
+        """Reject a traversable gap whose gate is not beyond the source node."""
+        if self.state != "completed":
+            return False
+        self.state = "failed"
+        self.failure_reason = str(reason or "portal_geometry_unproven")
+        self._event(
+            "portal_candidate_rejected",
+            reason=self.failure_reason,
+            source_depth=(
+                None if self.source_side_depth() is None
+                else round(self.source_side_depth(), 3)
+            ),
+        )
+        return True
 
     def update_entry(self, pose_xy):
         if self.state != "entering":
@@ -176,8 +431,30 @@ class DoorwayAuthentication:
             return False
         distance = math.hypot(pose[0] - self.source_xy[0],
                               pose[1] - self.source_xy[1])
+        # A radius-only test can call a robot returned while it is still on
+        # the destination side of the doorway plane. Require the robot center
+        # to cross back onto the source side before closing this observation.
+        source_depth = self.signed_depth(pose)
+        node_depth = self.signed_depth(self.source_xy)
+        if source_depth is not None and source_depth < -0.05:
+            # Failure returns need the same physical gate-crossing proof as
+            # successful observations. Being close to the source coordinate
+            # while still inside the Portal is not a completed recovery.
+            self.return_gate_cleared = True
         if distance > self.return_radius:
             return False
+        if self.failure_reason:
+            if not self.return_gate_cleared:
+                return False
+        else:
+            if node_depth is None or source_depth is None:
+                return False
+            if node_depth < -0.05 and source_depth >= -0.05:
+                return False
+            if node_depth >= -0.05 and not self.return_gate_cleared:
+                if source_depth >= -0.05:
+                    return False
+                self.return_gate_cleared = True
         if self.failure_reason:
             self.state = "failed"
             self._event("returned_to_junction_node_after_failure",
@@ -198,13 +475,19 @@ class DoorwayAuthentication:
         if pose is not None and self.source_xy is not None:
             distance = math.hypot(pose[0] - self.source_xy[0],
                                   pose[1] - self.source_xy[1])
-            if distance > self.return_radius:
+            depth = self.signed_depth(pose)
+            if (distance > self.return_radius
+                    or (not self.return_gate_cleared and (depth is None or depth >= -0.05))):
                 self.state = "returning"
                 self._event("doorway_failure_return_started",
                             reason=self.failure_reason,
                             from_xy=list(pose), source_xy=list(self.source_xy),
                             distance=round(distance, 3))
                 return True
+            self._event("doorway_failure_settled_at_source",
+                        reason=self.failure_reason, phase=self.state,
+                        source_xy=list(self.source_xy), pose_xy=list(pose),
+                        distance=round(distance, 3), signed_depth=depth)
         return self.fail(self.failure_reason)
 
     def fail(self, reason):
@@ -223,12 +506,18 @@ class DoorwayAuthentication:
             "destination_xy": None if self.destination_xy is None else list(self.destination_xy),
             "source_xy": None if self.source_xy is None else list(self.source_xy),
             "inside_xy": None if self.inside_xy is None else list(self.inside_xy),
+            "required_depth": self.required_depth,
+            "opening_width": None if self.gate_geometry is None else self.gate_geometry[0],
+            "physical_bounds": None if self.gate_geometry is None else self.gate_geometry[1],
             "frontier_count_left": self.frontier_count_left,
             "frontier_count_right": self.frontier_count_right,
             "chosen_turn_side": self.chosen_turn_side,
             "turn_direction": self.turn_direction,
             "initial_yaw": self.initial_yaw, "target_yaw": self.target_yaw,
             "rotation_ready": self.rotation_ready,
+            "source_side_depth": self.source_side_depth(),
+            "source_side_proven": self.source_side_proven(),
+            "return_gate_cleared": self.return_gate_cleared,
             "failure_reason": self.failure_reason, "events": list(self.events),
         }
 
@@ -244,17 +533,76 @@ class JunctionDoorwayAuthentication:
         self.signature_since = 0.0
         self.signature = tuple(sorted(self.branches))
         self.phase = "watching"
+        # First observation time with no runnable branch.  ``watching`` used to
+        # have no deadline: a node whose branches could never be entered kept
+        # the ordinary route retired forever (run 20261031_165652, node 5).
+        self.watching_since = None
+
+    def expire_unstartable(self, now, timeout):
+        """Conclude an observation period that can never start a branch.
+
+        Returns the branch ids that were concluded.  ``watching`` is only
+        allowed to persist while a branch is actually startable; once none has
+        been startable for ``timeout`` seconds the remaining branches are
+        failed and the task completes, so the caller stops retiring the
+        ordinary route and the graph can dispatch again.
+        """
+        if self.active_branch_id is not None:
+            self.watching_since = None
+            return []
+        if self.all_finished():
+            self.watching_since = None
+            return []
+        now = float(now)
+        if self.watching_since is None:
+            self.watching_since = now
+            return []
+        if now - self.watching_since < max(0.0, float(timeout)):
+            return []
+        expired = []
+        for branch in list(self.branches.values()):
+            if branch.state == "pending":
+                if self.withdraw_pending(branch.branch_id, now=now):
+                    expired.append(int(branch.branch_id))
+            elif branch.state not in ("completed", "failed"):
+                branch.state = "failed"
+                branch.failure_reason = "observation_geometry_unavailable"
+                branch._event("doorway_authentication_failed",
+                              reason="observation_geometry_unavailable")
+                expired.append(int(branch.branch_id))
+        self.active_branch_id = None
+        self.phase = "complete"
+        self.watching_since = None
+        self.signature_since = now
+        self.signature = tuple(sorted(self.branches))
+        return expired
 
     def add(self, branch, now=0.0):
         if int(branch.node_id) != self.node_id:
             raise ValueError("branch belongs to another node")
         branch_id = int(branch.branch_id)
-        if branch_id in self.branches:
+        active = self.branches.get(self.active_branch_id)
+        if (branch_id in self.branches
+                or (active is not None and active.state not in ("completed", "failed"))):
             return False
         self.branches[branch_id] = branch
         self.signature = tuple(sorted(self.branches))
         self.signature_since = float(now)
         self.phase = "watching"
+        return True
+
+    def withdraw_pending(self, branch_id, now=0.0):
+        """Withdraw changed map evidence without cancelling a physical return."""
+        branch_id = int(branch_id)
+        branch = self.branches.get(branch_id)
+        if (branch is None or branch.state != "pending"
+                or self.active_branch_id == branch_id):
+            return False
+        del self.branches[branch_id]
+        self.signature = tuple(sorted(self.branches))
+        self.signature_since = float(now)
+        if self.active_branch_id is None:
+            self.phase = "complete" if self.all_finished() else "watching"
         return True
 
     def next_pending(self):
@@ -294,6 +642,44 @@ class JunctionDoorwayAuthentication:
                 "all_finished": self.all_finished(),
                 "branches": [self.branches[key].snapshot()
                              for key in sorted(self.branches)]}
+
+
+def resolve_certified_probe_work_items(probe_ledger, work_item_ledger, portal_id, now, reason):
+    """Retire source frontier WIs now superseded by a certified Portal.
+
+    Certification transfers ownership of the opening from its generic
+    frontier-observation WI to the semantic Portal-entry WI (or suppresses it
+    when the room has a negative semantic score). Leaving the old WI unresolved
+    makes the current Place look like it still has an unmaterialized obligation.
+    """
+    try:
+        portal_id = int(portal_id)
+    except (TypeError, ValueError):
+        return []
+    if portal_id <= 0 or probe_ledger is None or work_item_ledger is None:
+        return []
+    try:
+        probes = probe_ledger.snapshot()
+        items = work_item_ledger.snapshot()
+    except (AttributeError, TypeError):
+        return []
+    item_states = {int(item.get("id", -1)): item.get("state") for item in items}
+    resolved = []
+    for probe in probes:
+        try:
+            matches = int(probe.get("portal_id", -1)) == portal_id
+            work_item_id = int(probe.get("work_item_id"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if not matches or item_states.get(work_item_id) in (None, "resolved"):
+            continue
+        attempt_id = work_item_ledger.active_attempt_id(work_item_id)
+        item = work_item_ledger.resolve(
+            work_item_id, now, reason, attempt_id=attempt_id,
+        )
+        if item is not None and item.get("state") == "resolved":
+            resolved.append(work_item_id)
+    return resolved
 
 
 class GlobalFrontierPortalAuthenticationMixin:
@@ -336,6 +722,16 @@ class GlobalFrontierPortalAuthenticationMixin:
         branch = self.active_portal_authentication()
         if task is None or branch is None:
             return None
+        if branch.state == "completed" and not branch.source_side_proven():
+            branch.reject_completed_portal_candidate(
+                "portal_source_side_geometry_unproven",
+            )
+            self.publish_status(
+                "portal_candidate_rejected",
+                node_id=int(branch.node_id), branch_id=int(branch.branch_id),
+                reason=branch.failure_reason,
+                source_depth=branch.source_side_depth(),
+            )
         result = branch.snapshot()
         self.portal_authentication_history.append(result)
         tree = getattr(self, "gp_exploration_tree", None)
@@ -344,6 +740,29 @@ class GlobalFrontierPortalAuthenticationMixin:
             tree_branch["authentication_state"] = branch.state
             tree_branch["authentication_failure_reason"] = branch.failure_reason
             tree_branch["authentication_evidence"] = result
+            portal_id = tree_branch.get("canonical_portal_id")
+            portal_ledger = getattr(self, "portal_hypothesis_ledger", None)
+            portal = None if portal_ledger is None or portal_id is None else portal_ledger.get(portal_id)
+            if portal is not None and branch.state == "completed":
+                portal["gp_authentication_state"] = "completed"
+                portal["gp_authentication_node_id"] = int(task.node_id)
+                portal["gp_authentication_branch_id"] = int(branch.branch_id)
+                portal["gp_authentication_evidence"] = result
+            observation_tree = getattr(self, "gp_observation_tree", None)
+            if observation_tree is not None:
+                room = observation_tree.finish_room(
+                    task.node_id, branch.branch_id,
+                    valid=(branch.state == "completed"),
+                )
+                if room is not None:
+                    tree_branch["room_observation"] = {key: value for key, value in room.items() if key != "frames"}
+                    tree_branch["semantic_score"] = room["semantic_score"]
+                    tree_branch["room_semantic_score"] = room["semantic_score"]
+                    tree_branch["room_priority"] = room.get("priority")
+                    tree_branch["room_invalidated"] = room["invalidated"]
+                    tree_branch["room_place_id"] = room.get("place_id")
+                    tree_branch["room_gp_space_id"] = tree_branch.get("destination_space_id")
+                    tree_branch["room_labels"] = list(room.get("labels", []))
             if branch.state == "failed":
                 tree.reject_branch_authentication(branch.branch_id,
                                                   branch.failure_reason)
@@ -356,6 +775,100 @@ class GlobalFrontierPortalAuthenticationMixin:
         source_xy = (node.get("physical_xy") if node is not None
                      else branch.source_xy)
         next_branch = task.finish_active(source_xy, now=now)
+        observation_tree = getattr(self, "gp_observation_tree", None)
+        if next_branch is None and task.all_finished() and observation_tree is not None:
+            ranked = observation_tree.finish_junction(task.node_id)
+            if tree is not None:
+                for room in ranked:
+                    item = tree.branches.get(int(room["branch_id"]))
+                    if item is not None:
+                        item["room_priority"] = room["priority"]
+                        item["room_invalidated"] = room["invalidated"]
+                        item["room_state"] = room["state"]
+                        item["room_observation"] = {key: value for key, value in room.items() if key != "frames"}
+                        portal_id = item.get("canonical_portal_id")
+                        ledger = getattr(self, "portal_hypothesis_ledger", None)
+                        portal = None if ledger is None or portal_id is None else ledger.get(portal_id)
+                        if portal is not None:
+                            portal["semantic_priority"] = room.get("priority")
+                            portal["semantic_score"] = room.get("semantic_score")
+                            portal["exploration_suppressed"] = bool(
+                                room.get("invalidated") or room.get("exploration_suppressed")
+                            )
+                            if not portal["exploration_suppressed"]:
+                                entry_goal = portal.get("physical_destination")
+                                source_place_id = portal.get("source_place_id")
+                                item_ledger = getattr(self, "place_work_items", None)
+                                ensure_entry = getattr(item_ledger, "ensure_portal_entry", None)
+                                entry_id = (
+                                    None if not callable(ensure_entry) else ensure_entry(
+                                        portal_id, source_place_id, entry_goal,
+                                        room.get("priority"), room.get("semantic_score"), now,
+                                    )
+                                )
+                                if entry_id is not None:
+                                    portal["semantic_entry_work_item_id"] = int(entry_id)
+                                    room["work_item_ids"] = [int(entry_id)]
+                                    tree_room = observation_tree.junctions.get(int(task.node_id), {}).get("rooms", {}).get(int(room["branch_id"]))
+                                    if tree_room is not None:
+                                        tree_room["work_item_ids"] = [int(entry_id)]
+                                    self.publish_status(
+                                        "portal_entry_work_item_created",
+                                        node_id=int(task.node_id), branch_id=int(room["branch_id"]),
+                                        portal_id=int(portal_id), work_item_id=int(entry_id),
+                                        place_id=int(source_place_id), priority=int(room["priority"]),
+                                        semantic_score=float(room["semantic_score"]), goal_xy=list(entry_goal),
+                                    )
+                            entry_ready = bool(
+                                portal["exploration_suppressed"]
+                                or portal.get("semantic_entry_work_item_id") is not None
+                            )
+                            if entry_ready:
+                                item_ledger = getattr(self, "place_work_items", None)
+                                probe_ledger = getattr(self, "portal_probe_ledger", None)
+                                reason = (
+                                    "negative_semantic_room_priority"
+                                    if portal["exploration_suppressed"]
+                                    else "portal_entry_work_item_created"
+                                )
+                                retired = resolve_certified_probe_work_items(
+                                    probe_ledger, item_ledger, portal_id, now, reason,
+                                )
+                                if retired:
+                                    room["superseded_work_item_ids"] = retired
+                                    self.publish_status(
+                                        "portal_probe_work_items_superseded",
+                                        node_id=int(task.node_id),
+                                        branch_id=int(room["branch_id"]),
+                                        portal_id=int(portal_id),
+                                        work_item_ids=retired,
+                                        reason=reason,
+                                    )
+                            if portal["exploration_suppressed"]:
+                                item_ledger = getattr(self, "place_work_items", None)
+                                resolve_entry = getattr(
+                                    item_ledger, "resolve_portal_entry", None,
+                                )
+                                if callable(resolve_entry):
+                                    resolve_entry(
+                                        portal_id, now,
+                                        reason="negative_semantic_room_priority",
+                                    )
+                                room["work_item_ids"] = []
+                            destination_id = portal.get("destination_place_id")
+                            if portal["exploration_suppressed"] and destination_id is not None:
+                                ledger_items = getattr(self, "place_work_items", None)
+                                if ledger_items is not None:
+                                    dismissed = ledger_items.close_place(
+                                        destination_id, now,
+                                        reason="negative_semantic_room_priority",
+                                    )
+                                    item["room_work_item_ids_dismissed"] = dismissed
+            self.publish_status(
+                "portal_rooms_prioritized", node_id=int(task.node_id),
+                rooms=[{key: value for key, value in room.items() if key != "frames"} for room in ranked],
+                observation_tree=observation_tree.snapshot(),
+            )
         if next_branch is not None:
             if tree is not None:
                 next_tree_branch = tree.branches.get(next_branch.branch_id)
@@ -373,4 +886,16 @@ class GlobalFrontierPortalAuthenticationMixin:
                             next_branch_id=None if next_branch is None
                             else int(next_branch.branch_id),
                             observation_period=task.snapshot())
+        if task.phase == "complete" and task.all_finished():
+            # The next snapshot may already belong to a child Place, whose
+            # discovery deliberately skips this parent junction. Publish the
+            # completed observation transaction here, without waiting for it.
+            task.last_report_signature = (
+                task.phase, tuple(sorted(task.branches)), task.active_branch_id,
+                task.all_finished(),
+            )
+            self.publish_status("portal_authentication_observation_period",
+                node_id=int(task.node_id), phase=task.phase,
+                branch_ids=sorted(task.branches), active_branch_id=None,
+                all_finished=True)
         return next_branch
