@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Unattended four-scenario run with up to three attempts per scenario.
+#
+# Rules (agreed with the user):
+#   * drive ceiling 3000 s wall, driver stops itself on goal completion,
+#   * any uninterrupted 180 s without progress terminates the attempt,
+#   * a scenario passes only when every audit status is 0,
+#   * each scenario gets at most 3 attempts, then the next scenario starts,
+#   * failure snapshots are collected for every failed attempt,
+#   * the loop never stops early.
+set -uo pipefail
+
+WS="${LSTE_WS:-/home/zrz/work/lste_ws}"
+CASES=(semantic_l_junction semantic_t_junction semantic_cross_junction semantic_t_junction_rotated)
+MAX_ATTEMPTS="${LSTE_MAX_ATTEMPTS:-3}"
+DRIVE_SECONDS="${GP_SUITE_SECONDS:-3000}"
+STALL_SECONDS="${LSTE_STALL_SECONDS:-180}"
+LOG_ROOT="$WS/runtime/diagnostics/20261031_four_scenarios"
+ATTEMPTS_TSV="$LOG_ROOT/attempts.tsv"
+mkdir -p "$LOG_ROOT"
+[[ -f "$ATTEMPTS_TSV" ]] || printf 'case\tattempt\tresult\tfailing\troot\tstart\tend\n' > "$ATTEMPTS_TSV"
+
+log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+
+cleanup_env() {
+  # Terminate anything the previous attempt left behind, then free the master.
+  local pids
+  pids=$(pgrep -f "roslaunch .*t_junction_nav.launch" || true)
+  [[ -z "$pids" ]] || kill -INT $pids 2>/dev/null
+  pids=$(pgrep -f "gzserver" || true)
+  [[ -z "$pids" ]] || kill -TERM $pids 2>/dev/null
+  pids=$(pgrep -f "rosbag record" || true)
+  [[ -z "$pids" ]] || kill -INT $pids 2>/dev/null
+  sleep 5
+  pids=$(pgrep -f "run_place_dfs_suite.sh" || true)
+  [[ -z "$pids" ]] || kill -TERM $pids 2>/dev/null
+  local holder
+  holder=$(ss -ltnp 2>/dev/null | grep 11673 | grep -o "pid=[0-9]*" | head -1 | cut -d= -f2)
+  [[ -z "$holder" ]] || kill -TERM "$holder" 2>/dev/null
+  sleep 3
+}
+
+run_attempt() {
+  local case="$1" attempt="$2"
+  local stamp log root suite_pid watchdog_pid
+  stamp=$(date +%Y%m%d_%H%M%S)
+  log="/tmp/four_${case}_a${attempt}_${stamp}.log"
+  cleanup_env
+  log "launch $case attempt $attempt"
+  setsid nohup env SEMANTIC_CASES="$case" GP_SUITE_SECONDS="$DRIVE_SECONDS" \
+    bash "$WS/scripts/tests/targeted_navigation/run_place_dfs_suite.sh" \
+    >"$log" 2>&1 </dev/null &
+  suite_pid=$!
+  local waited=0
+  while (( waited < 60 )); do
+    root=$(head -1 "$log" 2>/dev/null)
+    [[ -n "$root" && -d "$root" ]] && break
+    sleep 2; waited=$((waited + 2))
+  done
+  if [[ -z "${root:-}" || ! -d "${root:-}" ]]; then
+    log "suite root not found for $case attempt $attempt"
+    return 1
+  fi
+  log "root=$root"
+  setsid nohup python3 "$WS/scripts/tests/targeted_navigation/l_stall_watchdog.py" \
+    --suite-root "$root" --wrapper-pid "$suite_pid" \
+    --stall-seconds "$STALL_SECONDS" \
+    --since-wall "$(date +%s)" \
+    --max-wall-seconds "$((DRIVE_SECONDS + 900))" \
+    >"/tmp/four_watchdog_${case}_a${attempt}_${stamp}.log" 2>&1 </dev/null &
+  watchdog_pid=$!
+  wait "$suite_pid" 2>/dev/null
+  local suite_status=$?
+  sleep 3
+  kill -TERM "$watchdog_pid" 2>/dev/null
+  bash "$WS/scripts/tests/targeted_navigation/collect_failure_snapshots.sh" \
+    "$root" "$LOG_ROOT/snapshots" >/dev/null 2>&1
+  local result failing
+  result=$(python3 "$WS/scripts/tests/targeted_navigation/scenario_audit_result.py" \
+    "$root/summary.log" "$case" 2>/dev/null)
+  failing="${result#FAIL }"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$case" "$attempt" "${result%% *}" "$failing" "$root" \
+    "$(date +%H:%M:%S)" "$(date +%H:%M:%S)" >> "$ATTEMPTS_TSV"
+  log "$case attempt $attempt -> $result (driver status $suite_status)"
+  [[ "$result" == "PASS" ]]
+}
+
+overall=0
+for case in "${CASES[@]}"; do
+  passed=0
+  for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+    if run_attempt "$case" "$attempt"; then
+      log "$case PASSED on attempt $attempt"
+      passed=1
+      break
+    fi
+    log "$case attempt $attempt failed"
+  done
+  if (( ! passed )); then
+    log "$case EXHAUSTED $MAX_ATTEMPTS attempts"
+    overall=1
+  fi
+done
+
+log "all scenarios processed"
+exit "$overall"
