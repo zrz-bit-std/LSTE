@@ -662,14 +662,16 @@ bool PersistentTebLocalPlanner::computeVelocityCommands(
   // been installed in the same control cycle. A target approach additionally
   // emits its one-shot observation event; a frontier simply holds zero.
   if (teb_.isGoalReached()) {
-    if (isInstalledTargetPlanLocked()) {
-      reportTargetApproachIfReady();
-    } else {
-      reportFrontierEndpointIfReady();
-    }
+    const bool endpoint_reported =
+        isInstalledTargetPlanLocked() ? reportTargetApproachIfReady()
+                                      : reportFrontierEndpointIfReady();
     cmd_vel = geometry_msgs::Twist();
+    // Never claim arrival for a route whose endpoint report was refused (a
+    // plan retained for a different goal, or no installed plan at all).  That
+    // is how a stale route becomes a permanent terminal hold.
     publishPlannerCommandContract(
-        cmd_vel, PlannerCommandContract::STATE_ZERO, "endpoint_reached");
+        cmd_vel, PlannerCommandContract::STATE_ZERO,
+        endpoint_reported ? "endpoint_reached" : "planner_no_endpoint");
     return true;
   }
   if (!command_available) {
@@ -1278,7 +1280,20 @@ bool StreamingNavfnPlanner::makePlan(
             report_target_failure = true;
           }
         }
-        if (!cached_plan_.empty()) {
+        // Retaining the previous route is only valid while this request still
+        // refers to that route's goal.  Handing a cached plan for a different
+        // mission goal makes the local planner re-install the old endpoint and
+        // announce it as reached for the new route; the persistent action then
+        // holds at a fixed pose forever (run 20261030_220218: 215 failures,
+        // one "endpoint reached" every ~9 s, zero motion).
+        const bool same_cached_goal =
+            !cached_plan_.empty() &&
+            cached_goal_.header.frame_id == selected_goal.header.frame_id &&
+            std::hypot(cached_goal_.pose.position.x -
+                           selected_goal.pose.position.x,
+                       cached_goal_.pose.position.y -
+                           selected_goal.pose.position.y) <= goal_epsilon_;
+        if (same_cached_goal) {
           plan = cached_plan_;
           retained_previous_plan = true;
         }
