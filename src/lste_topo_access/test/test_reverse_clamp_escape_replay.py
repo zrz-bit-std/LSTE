@@ -140,8 +140,13 @@ class PluginTriggerContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_no_forward_component_is_the_trigger(self):
-        self.assertIn("if (cmd_vel.linear.x <= 0.001 && "
-                      "startPoseClearanceDeficient())", self.source)
+        self.assertIn("if (cmd_vel.linear.x <= 0.001 && clearance_deficient)",
+                      self.source)
+        # ``clearance_deficient`` must still come from the measured clearance,
+        # not from a constant.
+        self.assertIn("const bool clearance_deficient =", self.source)
+        self.assertIn("measured_clearance < start_pose_clearance_threshold_",
+                      self.source)
 
     def test_absolute_value_form_is_gone(self):
         self.assertNotIn("std::fabs(cmd_vel.linear.x) <= 0.001", self.source)
