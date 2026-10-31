@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Clean-environment launcher for the L scenario.
 #
+# Drive cap: 3000 s wall (~45 min of simulated time at the measured 0.74x
+# ratio).  The driver stops on its own at semantic_junction_goal_complete, so
+# this is only a ceiling: a healthy L finished in 27-44 minutes historically.
+# Any uninterrupted loss of progress longer than LSTE_STALL_SECONDS (default
+# 180 s) is treated as failure by l_stall_watchdog.py, which terminates the
+# suite immediately instead of waiting for the ceiling.
+#
 # Preflight refuses to start when the host is not clean, because a stale
 # rosmaster or a leftover Gazebo silently contaminates the run (a previous
 # attempt attached to a five-day-old master on the suite port).
@@ -8,7 +15,8 @@ set -o pipefail
 
 WS="${LSTE_WS:-/home/zrz/work/lste_ws}"
 CASE="${SEMANTIC_CASES:-semantic_l_junction}"
-SECONDS_TO_RUN="${GP_SUITE_SECONDS:-3600}"
+SECONDS_TO_RUN="${GP_SUITE_SECONDS:-3000}"
+STALL_SECONDS="${LSTE_STALL_SECONDS:-180}"
 MASTER_PORT="${PLACE_DFS_MASTER_PORT:-11673}"
 
 fail() { echo "PREFLIGHT FAIL: $*" >&2; exit 2; }
@@ -41,13 +49,22 @@ echo "== launch =="
 cd "$WS" || fail "workspace missing"
 STAMP=$(date +%Y%m%d_%H%M%S)
 LOG="/tmp/l_suite_${STAMP}.log"
+SUITE_STARTED=$(date +%s)
 setsid nohup env SEMANTIC_CASES="$CASE" GP_SUITE_SECONDS="$SECONDS_TO_RUN" \
   bash ./scripts/tests/targeted_navigation/run_place_dfs_suite.sh \
   >"$LOG" 2>&1 </dev/null &
+SUITE_PID=$!
 echo "suite_log=$LOG"
 sleep 25
 ROOT=$(head -1 "$LOG")
 echo "result_root=$ROOT"
+WATCHDOG_LOG="/tmp/l_watchdog_${STAMP}.log"
+setsid nohup python3 scripts/tests/targeted_navigation/l_stall_watchdog.py \
+  --suite-root "$ROOT" --wrapper-pid "$SUITE_PID" \
+  --stall-seconds "$STALL_SECONDS" --since-wall "$((SUITE_STARTED - 2))" \
+  --max-wall-seconds "$((SECONDS_TO_RUN + 600))" \
+  >"$WATCHDOG_LOG" 2>&1 </dev/null &
+echo "watchdog_log=$WATCHDOG_LOG stall_seconds=$STALL_SECONDS"
 echo
 echo "watch the stall gate with:"
 echo "  python3 $WS/scripts/tests/targeted_navigation/l_stall_gate.py $ROOT"
