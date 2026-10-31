@@ -95,6 +95,61 @@ class TebGoalBridgeMissionRuntimeMixin:
         )
         self.active_action_contract = MappingProxyType(updated)
 
+    def _publish_route_continuation_locked(
+            self, previous_route_id, previous_transaction_id,
+            previous_lifecycle_transaction_id, previous_graph_transaction_id,
+            previous_map_epoch, previous_origin_epoch,
+            previous_projection_epoch, previous_route_kind, new_route_id):
+        """Record an explicit close/open pair when a route is superseded.
+
+        A persistent action keeps one transport generation while the semantic
+        route changes.  Publishing only ``persistent_mission_path_adopted``
+        leaves the superseded route without a closing record and the adopted
+        route without an opening one, so any consumer that reconstructs
+        controller ownership from dispatch/release pairs keeps the old lease
+        open forever.  Run 20261031_214617 dispatched route 140 and adopted
+        route 141 in the same action generation; the native costmap audit then
+        attributed route 140's dispatch-time ``transparent`` mode to the next
+        650 s and reported 96 false "mask mode disagrees" errors.
+
+        ``route_superseded`` carries the superseded identity field-for-field so
+        it can close that exact lease; ``route_continuation_dispatch`` carries
+        the adopted identity so the eventual ``lease_release_ack`` can close
+        the new interval.  Both are additive events: existing consumers keyed
+        on ``dispatch``/``lease_release_ack`` are unaffected.
+        """
+        generation = int(self.action_generation)
+        self.publish_bridge_status(
+            "route_superseded",
+            route_id=int(previous_route_id),
+            transaction_id=int(previous_transaction_id),
+            lifecycle_transaction_id=int(previous_lifecycle_transaction_id),
+            graph_transaction_id=int(previous_graph_transaction_id),
+            map_epoch=previous_map_epoch,
+            origin_epoch=previous_origin_epoch,
+            projection_epoch=previous_projection_epoch,
+            route_kind=str(previous_route_kind or ""),
+            action_generation=generation,
+            superseded_by_route_id=int(new_route_id),
+            continuation=True,
+        )
+        self.publish_bridge_status(
+            "route_continuation_dispatch",
+            route_id=int(new_route_id),
+            transaction_id=int(self.latest_goal_transaction_id),
+            lifecycle_transaction_id=int(
+                self._canonical_lifecycle_transaction_id()),
+            graph_transaction_id=int(
+                getattr(self, "latest_graph_transaction_id", 0) or 0),
+            map_epoch=getattr(self, "latest_route_map_epoch", None),
+            origin_epoch=getattr(self, "latest_origin_epoch", None),
+            projection_epoch=getattr(self, "latest_projection_epoch", None),
+            route_kind=str(self.latest_route_kind or ""),
+            action_generation=generation,
+            continuation=True,
+            supersedes_route_id=int(previous_route_id),
+        )
+
     def _adopt_persistent_mission_goal_locked(self):
         """Advance the semantic route while retaining the actionlib lease."""
         if self.latest_goal is None or not self.action_active:
@@ -184,6 +239,19 @@ class TebGoalBridgeMissionRuntimeMixin:
             )
             if callable(cancel_watchdog):
                 cancel_watchdog("new_route_adopted")
+        if (route_changed and previous_route_id > 0
+                and previous_route_id != int(self.latest_route_id)):
+            self._publish_route_continuation_locked(
+                previous_route_id=previous_route_id,
+                previous_transaction_id=previous_transaction_id,
+                previous_lifecycle_transaction_id=previous_lifecycle_transaction_id,
+                previous_graph_transaction_id=previous_graph_transaction_id,
+                previous_map_epoch=previous_map_epoch,
+                previous_origin_epoch=previous_origin_epoch,
+                previous_projection_epoch=previous_projection_epoch,
+                previous_route_kind=previous_route_kind,
+                new_route_id=int(self.latest_route_id),
+            )
         self.active_goal_global = copy.deepcopy(semantic_goal)
         self.last_dispatched_goal = copy.deepcopy(semantic_goal)
         # Persistent execution changes the semantic route without creating a
