@@ -128,6 +128,9 @@ class TebTurnSupervisorTurnLifecycleMixin:
                 round(float(pose.theta), 4),
             ],
             "yaw_error": None if error is None else round(float(error), 4),
+            "authentication_turn": (
+                getattr(self, "turn_authentication_contract", None)
+                if getattr(self, "turn_phase", "") == "portal_authentication_turn" else None),
             "turn_velocity": round(float(self.turn_velocity), 4),
             "scan_minimum": (
                 None if not math.isfinite(self.scan_minimum)
@@ -314,21 +317,35 @@ class TebTurnSupervisorTurnLifecycleMixin:
         ) + 1
         if previous_theta is None:
             self.turn_last_odom_theta = theta
+            if getattr(self, "turn_odom_progress_anchor_theta", None) is None:
+                self.turn_odom_progress_anchor_theta = theta
             if self.turn_last_odom_progress_wall <= 0.0:
                 self.turn_last_odom_progress_wall = float(now)
             return
         delta = abs(normalize_angle(theta - float(previous_theta)))
         self.turn_last_odom_theta = theta
-        # Keep the swept-angle budget faithful to odom while ignoring only
-        # numerical noise.  A larger delta also refreshes the no-progress
-        # clock, which is the health signal used for a physically blocked turn.
+        # Swept-angle budget remains the sum of real odom increments. The
+        # watchdog measures net target-yaw error from the last proven progress
+        # anchor so many small steps can accumulate.
         if delta > 1.0e-4:
             self.turn_abs_rotation += delta
-        if delta >= max(
+        progress_anchor_theta = getattr(
+            self, "turn_odom_progress_anchor_theta", None
+        )
+        if progress_anchor_theta is None:
+            progress_anchor_theta = float(previous_theta)
+            self.turn_odom_progress_anchor_theta = progress_anchor_theta
+        progress_epsilon = max(
             0.005,
             float(getattr(self, "turn_odom_progress_epsilon", 0.01) or 0.01),
-        ):
+        )
+        anchor_error = abs(
+            normalize_angle(self.turn_target_yaw - float(progress_anchor_theta))
+        )
+        current_error = abs(normalize_angle(self.turn_target_yaw - theta))
+        if anchor_error - current_error >= progress_epsilon:
             self.turn_last_odom_progress_wall = float(now)
+            self.turn_odom_progress_anchor_theta = theta
 
     def _release_turn_locked(self, reason, completed=False):
         previous_odom_rotation = float(
@@ -349,6 +366,7 @@ class TebTurnSupervisorTurnLifecycleMixin:
             self.turn_goal_xy = None
             self.turn_velocity = 0.0
             self.turn_last_odom_theta = None
+            self.turn_odom_progress_anchor_theta = None
             self.turn_last_odom_sample_wall = 0.0
             self.turn_last_odom_progress_wall = 0.0
             self.turn_odom_sample_count = 0
@@ -388,11 +406,28 @@ class TebTurnSupervisorTurnLifecycleMixin:
         self.turn_goal_xy = None
         self.turn_key = None
         self.turn_action_identity = None
+        self.stalled_route_turn_handoff_count = 0
         self.turn_velocity = 0.0
         self.turn_last_odom_theta = None
+        self.turn_odom_progress_anchor_theta = None
         self.turn_last_odom_sample_wall = 0.0
         self.turn_last_odom_progress_wall = 0.0
         self.turn_odom_sample_count = 0
+        reseed = getattr(self, "native_teb_reseed", None)
+        # A reverse-entry stall can become ready while the same action is
+        # already doing its initial alignment. Keep that owned turn intact,
+        # but consume its positive stall evidence when the turn completes.
+        stalled_alignment_completed = (
+            previous_action_identity is not None
+            and previous_phase in ("pre_route_alignment", "portal_entry_alignment")
+            and getattr(self, "stalled_route_ready_identity", None)
+            == previous_action_identity
+        )
+        if (completed and (previous_phase == "stalled_route_reorientation"
+                           or stalled_alignment_completed)
+                and getattr(self, "native_teb_reseed_enabled", False)
+                and reseed is not None):
+            reseed.request(previous_action_identity)
         self.publish_status_locked(
             "turn_completed" if completed else "turn_released",
             reason=str(reason),
@@ -427,6 +462,89 @@ class TebTurnSupervisorTurnLifecycleMixin:
         if self.scan_minimum < self.turn_min_clearance:
             return "obstacle_inside_circular_footprint"
         return ""
+
+    def _continue_stalled_route_turn_for_handoff_locked(
+            self, new_identity, previous_context):
+        """Keep one physical turn alive across a same-Place endpoint refresh."""
+        if (getattr(self, "state", None) != STATE_TURNING
+                or str(getattr(self, "turn_phase", "") or "")
+                != "stalled_route_reorientation"):
+            return False
+        count = int(getattr(self, "stalled_route_turn_handoff_count", 0) or 0)
+        if count >= 8:
+            return False
+        old = previous_context if isinstance(previous_context, dict) else {}
+        new = getattr(self, "active_action_goal_context", None)
+        if not isinstance(new, dict):
+            return False
+        # One dispatch can be published under two goal-role labels: the frontier
+        # work item appears as ``place_observation`` (with a place id) and, a
+        # moment later, as ``geometry_frontier`` (no place id) while the mission
+        # and the physical endpoint are unchanged.  Run 20261031_172738 showed
+        # the role flipping within 1 s and graph_transaction_id advancing every
+        # 1-2 s; 27 of 36 reorientations were cancelled by exactly that refresh.
+        # Judge "same dispatch" by mission identity plus the geometric guards
+        # below, and enforce place ids only when both sides carry them.
+        allowed_roles = ("place_observation", "place_observation_work",
+                         "geometry_frontier")
+        if (old.get("goal_role") not in allowed_roles
+                or new.get("goal_role") not in allowed_roles):
+            return False
+        place_id = int(old.get("owner_place_id", 0) or 0)
+        new_place_id = int(new.get("owner_place_id", 0) or 0)
+        if place_id > 0 and new_place_id > 0 and new_place_id != place_id:
+            return False
+        old_source = int(old.get("source_place_id", 0) or 0)
+        new_source = int(new.get("source_place_id", 0) or 0)
+        if old_source > 0 and new_source > 0 and new_source != old_source:
+            return False
+        old_mission = str(old.get("mission_id") or "")
+        new_mission = str(new.get("mission_id") or "")
+        if old_mission and new_mission and new_mission != old_mission:
+            return False
+        if (not bool(getattr(self, "active_action", False))
+                or str(getattr(self, "active_action_source", "") or "")
+                != "global_slam_frontier"
+                or str(getattr(self, "active_action_route_kind", "") or "")
+                != "frontier_endpoint"
+                or bool(new.get("portal_crossing_certified", False))):
+            return False
+        goal = getattr(self, "active_action_goal", None)
+        if goal is None or getattr(self, "turn_target_yaw", None) is None:
+            return False
+        refreshed_yaw = self._goal_yaw_in_pose_frame_locked(goal)
+        if refreshed_yaw is None:
+            return False
+        yaw_gap = abs(normalize_angle(
+            float(refreshed_yaw) - float(self.turn_target_yaw)
+        ))
+        tolerance = max(
+            0.35, float(getattr(self, "yaw_goal_tolerance", 0.35) or 0.35)
+        )
+        if yaw_gap > tolerance:
+            return False
+        goal_xy = self._goal_xy(goal)
+        if getattr(self, "turn_goal_xy", None) is not None:
+            if math.hypot(goal_xy[0]-self.turn_goal_xy[0],
+                          goal_xy[1]-self.turn_goal_xy[1]) > 2.0:
+                return False
+        # Rebind the existing bounded turn to the refreshed action. Do not
+        # restart its odometry progress clock or rotation budget.
+        self.turn_action_identity = new_identity
+        self.turn_goal_xy = goal_xy
+        self.turn_key = self._turn_key_for_goal_locked(
+            goal, self.turn_target_yaw,
+        )
+        self.stalled_route_reorientation_attempted_identity = new_identity
+        self.stalled_route_turn_handoff_count = count + 1
+        self.publish_status_locked(
+            "stalled_route_turn_handoff_continued",
+            owner_place_id=place_id,
+            handoff_count=count + 1,
+            yaw_gap=round(float(yaw_gap), 4),
+            goal_xy=[round(float(value), 3) for value in goal_xy],
+        )
+        return True
 
     def _stalled_route_reorientation_locked(self, action_identity):
         """Return a Navfn heading only for a persistent clear-path TEB stall."""
@@ -650,6 +768,19 @@ class TebTurnSupervisorTurnLifecycleMixin:
                 target_yaw = None
             else:
                 turn_phase = "local_egress_alignment"
+        from portal_authentication_turn_contract import active_authentication_turn, directed_turn_error
+        authentication_turn = active_authentication_turn(self)
+        if (self.active_action_route_kind == TURN_ROUTE_KIND
+                and getattr(self, "latest_authentication_turn_required", False)
+                and authentication_turn is None):
+            return False
+        if authentication_turn is not None:
+            # Physical odom yaw and signed sweep were frozen by observation.
+            # A refreshed map goal cannot replace either one for this action.
+            target_yaw = float(authentication_turn["target_yaw"])
+            heading_error = directed_turn_error(
+                target_yaw, float(self.pose.theta), authentication_turn["direction"])
+            turn_phase = "portal_authentication_turn"
         if target_yaw is None and self.active_action_route_kind == TURN_ROUTE_KIND:
             target_yaw = self._goal_yaw_in_pose_frame_locked(self.active_action_goal)
             if target_yaw is None:
@@ -725,8 +856,11 @@ class TebTurnSupervisorTurnLifecycleMixin:
         self.state = STATE_TURNING
         self.turn_key = key
         self.turn_action_identity = action_identity
+        self.stalled_route_turn_handoff_count = 0
         if turn_phase == "stalled_route_reorientation":
             self.stalled_route_reorientation_attempted_identity = action_identity
+        self.turn_authentication_contract = (
+            authentication_turn if turn_phase == "portal_authentication_turn" else None)
         self.turn_target_yaw = target_yaw
         self.turn_phase = str(turn_phase or "")
         self.turn_goal_xy = self._goal_xy(self.active_action_goal)
@@ -751,6 +885,7 @@ class TebTurnSupervisorTurnLifecycleMixin:
         self.turn_last_odom_theta = (
             float(self.pose.theta) if self.pose is not None else None
         )
+        self.turn_odom_progress_anchor_theta = self.turn_last_odom_theta
         self.turn_last_odom_sample_wall = now
         self.turn_last_odom_progress_wall = now
         self.turn_odom_sample_count = 0
