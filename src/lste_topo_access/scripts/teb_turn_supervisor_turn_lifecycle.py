@@ -512,7 +512,26 @@ class TebTurnSupervisorTurnLifecycleMixin:
         goal = getattr(self, "active_action_goal", None)
         if goal is None or getattr(self, "turn_target_yaw", None) is None:
             return False
-        refreshed_yaw = self._goal_yaw_in_pose_frame_locked(goal)
+        # The turn target is the Navfn tangent chosen when the reorientation
+        # started (``_initial_navfn_yaw_in_pose_frame_locked``), not the
+        # endpoint pose orientation.  A frontier endpoint's yaw is unrelated to
+        # the tangent, so comparing them made every handoff look like a
+        # different turn: runs 20261031_183336 and 20261031_195131 measured a
+        # tangent of -89.5 deg against an endpoint yaw near 0, a ~1.5 rad gap
+        # against a 0.35 rad tolerance, and the handoff never fired (0 events)
+        # while 27 of 36 reorientations were cancelled mid-turn.
+        refreshed_yaw = None
+        navfn_yaw = getattr(
+            self, "_initial_navfn_yaw_in_pose_frame_locked", None)
+        if callable(navfn_yaw):
+            try:
+                refreshed_yaw = navfn_yaw()
+            except AttributeError:
+                # Legacy lightweight fixtures do not model the Navfn plan.
+                # A real runtime error must still propagate.
+                refreshed_yaw = None
+        if refreshed_yaw is None:
+            refreshed_yaw = self._goal_yaw_in_pose_frame_locked(goal)
         if refreshed_yaw is None:
             return False
         yaw_gap = abs(normalize_angle(

@@ -60,7 +60,7 @@ OBSERVED_FRONTIER = {
 
 class _Host(TebTurnSupervisorTurnLifecycleMixin):
     def __init__(self, context=None, goal_pose=None, target_yaw=0.5,
-                 turn_xy=(1.0, 2.0)):
+                 turn_xy=(1.0, 2.0), navfn_yaw="same"):
         self.state = STATE_TURNING
         self.turn_phase = "stalled_route_reorientation"
         self.stalled_route_turn_handoff_count = 0
@@ -73,10 +73,16 @@ class _Host(TebTurnSupervisorTurnLifecycleMixin):
         self.turn_goal_xy = turn_xy
         self.yaw_goal_tolerance = 0.35
         self.events = []
+        # "same" mirrors the tangent the reorientation was started from;
+        # None reproduces a costmap that has no Navfn heading yet.
+        self._navfn_yaw = target_yaw if navfn_yaw == "same" else navfn_yaw
 
     # --- helpers used by the predicate, isolated from ROS ---
     def _goal_yaw_in_pose_frame_locked(self, target):
         return float(target.pose.orientation.z)
+
+    def _initial_navfn_yaw_in_pose_frame_locked(self):
+        return self._navfn_yaw
 
     def _goal_xy(self, target):
         return (float(target.pose.position.x), float(target.pose.position.y))
@@ -96,6 +102,37 @@ class HandoffContinuationTest(unittest.TestCase):
         self.assertEqual(host.stalled_route_turn_handoff_count, 1)
         self.assertEqual(host.turn_action_identity, "new-identity")
         self.assertEqual(host.events[-1][0], "stalled_route_turn_handoff_continued")
+
+    def test_handoff_compares_the_navfn_tangent_not_the_endpoint_yaw(self):
+        # Reproduces the sealed runs: the endpoint's yaw is ~0 while the turn
+        # target is the Navfn tangent at -1.56 rad.  Comparing the endpoint yaw
+        # gave a 1.56 rad gap and refused every handoff.
+        host = _Host(OBSERVED_FRONTIER,
+                     goal_pose=goal(1.0, 2.0, 0.0), target_yaw=-1.56,
+                     navfn_yaw=-1.56)
+        self.assertTrue(host._continue_stalled_route_turn_for_handoff_locked(
+            "new-identity", OBSERVED_PLACE))
+        self.assertEqual(host.stalled_route_turn_handoff_count, 1)
+
+    def test_endpoint_yaw_alone_no_longer_blocks_the_handoff(self):
+        # Same as above but asserting the old reference really would fail:
+        # the endpoint yaw differs from the tangent by more than the tolerance.
+        host = _Host(OBSERVED_FRONTIER,
+                     goal_pose=goal(1.0, 2.0, 0.0), target_yaw=-1.56,
+                     navfn_yaw=-1.56)
+        gap = abs(host._goal_yaw_in_pose_frame_locked(host.active_action_goal)
+                  - host.turn_target_yaw)
+        self.assertGreater(gap, host.yaw_goal_tolerance)
+
+    def test_handoff_falls_back_to_goal_yaw_without_a_navfn_tangent(self):
+        host = _Host(OBSERVED_FRONTIER, target_yaw=0.5, navfn_yaw=None)
+        self.assertTrue(host._continue_stalled_route_turn_for_handoff_locked(
+            "id2", OBSERVED_PLACE))
+
+    def test_moved_navfn_tangent_is_still_refused(self):
+        host = _Host(OBSERVED_FRONTIER, target_yaw=0.5, navfn_yaw=2.4)
+        self.assertFalse(host._continue_stalled_route_turn_for_handoff_locked(
+            "id2", OBSERVED_PLACE))
 
     def test_place_to_place_handoff_still_works(self):
         host = _Host(dict(OBSERVED_PLACE))
@@ -122,12 +159,6 @@ class HandoffContinuationTest(unittest.TestCase):
 
     def test_endpoint_beyond_two_metres_is_refused(self):
         host = _Host(OBSERVED_FRONTIER, turn_xy=(9.0, 9.0))
-        self.assertFalse(host._continue_stalled_route_turn_for_handoff_locked(
-            "id2", OBSERVED_PLACE))
-
-    def test_yaw_mismatch_is_refused(self):
-        host = _Host(OBSERVED_FRONTIER,
-                     goal_pose=goal(1.0, 2.0, 2.5), target_yaw=0.5)
         self.assertFalse(host._continue_stalled_route_turn_for_handoff_locked(
             "id2", OBSERVED_PLACE))
 
