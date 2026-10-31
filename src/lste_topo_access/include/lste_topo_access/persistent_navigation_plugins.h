@@ -43,6 +43,20 @@ class PersistentTebLocalPlanner : public nav_core::BaseLocalPlanner {
   void onInstalledTargetCommand(
       const PersistentGoalCommandConstPtr& message);
   bool isInstalledTargetPlanLocked();
+  // True when the robot's own cell already violates the clearance that TEB's
+  // feasibility check requires (inscribed footprint + min_obstacle_dist).
+  // Every candidate trajectory starts at this pose, so no trajectory can be
+  // feasible until the robot moves away; reporting that separately keeps a
+  // start-pose deadlock from looking like an ordinary transient TEB miss.
+  bool startPoseClearanceDeficient();
+  // Bounded clearance-restoring manoeuvre.  When TEB rejects every trajectory
+  // because the robot's own cell already violates the feasibility clearance,
+  // no amount of retrying or in-place recovery can help: the start pose has to
+  // leave the forbidden band first.  This drives a short, forward-only motion
+  // along the direction that strictly increases measured clearance, then hands
+  // control back to TEB.
+  bool clearanceEscapeCommand(geometry_msgs::Twist& cmd_vel);
+  void resetClearanceEscape();
   bool reportTargetApproachIfReady();
   bool reportFrontierEndpointIfReady();
   void publishPlanEvent(
@@ -112,6 +126,25 @@ class PersistentTebLocalPlanner : public nav_core::BaseLocalPlanner {
   ros::Publisher plan_event_publisher_;
   ros::Publisher planner_command_contract_publisher_;
   teb_local_planner::TebLocalPlannerROS teb_;
+  // Retained so the command-contract reason can measure the robot's own
+  // clearance against the same costmap TEB plans on.
+  costmap_2d::Costmap2DROS* costmap_ros_;
+  // Inscribed footprint radius + TEB min_obstacle_dist. Defaults match
+  // teb_navigation.launch (0.30 m footprint, 0.22 m min_obstacle_dist).
+  double start_pose_clearance_threshold_;
+  // Bounded clearance escape (see clearanceEscapeCommand).
+  bool clearance_escape_enabled_;
+  int clearance_escape_trigger_cycles_;
+  int clearance_escape_max_cycles_;
+  double clearance_escape_linear_velocity_;
+  double clearance_escape_angular_velocity_;
+  double clearance_escape_distance_;
+  double clearance_escape_margin_;
+  int infeasible_cycle_count_;
+  bool clearance_escape_active_;
+  int clearance_escape_cycle_count_;
+  double clearance_escape_heading_;
+  double clearance_escape_start_clearance_;
   uint32_t latest_route_id_;
   uint64_t latest_graph_transaction_id_;
   uint64_t latest_map_epoch_;

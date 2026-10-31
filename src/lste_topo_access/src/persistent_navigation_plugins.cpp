@@ -35,6 +35,20 @@ PersistentTebLocalPlanner::PersistentTebLocalPlanner()
       installed_target_projection_epoch_(0),
       latest_mission_transaction_(0),
       installed_mission_transaction_(0),
+      costmap_ros_(nullptr),
+      start_pose_clearance_threshold_(0.52),
+      clearance_escape_enabled_(true),
+      clearance_escape_trigger_cycles_(40),
+      clearance_escape_max_cycles_(400),
+      clearance_escape_linear_velocity_(0.08),
+      clearance_escape_angular_velocity_(0.30),
+      clearance_escape_distance_(0.45),
+      clearance_escape_margin_(0.05),
+      infeasible_cycle_count_(0),
+      clearance_escape_active_(false),
+      clearance_escape_cycle_count_(0),
+      clearance_escape_heading_(0.0),
+      clearance_escape_start_clearance_(0.0),
       latest_route_id_(0),
       latest_graph_transaction_id_(0),
       latest_map_epoch_(0),
@@ -114,6 +128,51 @@ void PersistentTebLocalPlanner::initialize(
   // Use the original plugin name: all existing TebLocalPlannerROS parameters
   // remain valid, so this wrapper changes lifecycle semantics only.
   teb_.initialize("TebLocalPlannerROS", tf, costmap_ros);
+  costmap_ros_ = costmap_ros;
+  // The feasibility envelope is owned by the live configuration, not by a
+  // constant here: the footprint radius and TEB's min_obstacle_dist are read
+  // from the same parameter server values the controller uses.
+  {
+    double robot_radius = 0.30;
+    double min_obstacle_dist = 0.22;
+    ros::param::param("/move_base/global_costmap/robot_radius", robot_radius,
+                      0.30);
+    ros::param::param("/move_base/TebLocalPlannerROS/min_obstacle_dist",
+                      min_obstacle_dist, 0.22);
+    ros::param::param("/move_base/persistent_start_pose_clearance",
+                      start_pose_clearance_threshold_,
+                      robot_radius + min_obstacle_dist);
+    start_pose_clearance_threshold_ =
+        std::max(0.0, start_pose_clearance_threshold_);
+    // Clearance escape is a bounded, forward-only manoeuvre.  All limits are
+    // parameters so a run can disable it without rebuilding.
+    ros::param::param("/move_base/persistent_clearance_escape",
+                      clearance_escape_enabled_, true);
+    ros::param::param("/move_base/persistent_clearance_escape_trigger_cycles",
+                      clearance_escape_trigger_cycles_, 40);
+    clearance_escape_trigger_cycles_ =
+        std::max(1, clearance_escape_trigger_cycles_);
+    ros::param::param("/move_base/persistent_clearance_escape_max_cycles",
+                      clearance_escape_max_cycles_, 400);
+    clearance_escape_max_cycles_ =
+        std::max(clearance_escape_trigger_cycles_,
+                 clearance_escape_max_cycles_);
+    ros::param::param("/move_base/persistent_clearance_escape_linear_velocity",
+                      clearance_escape_linear_velocity_, 0.08);
+    clearance_escape_linear_velocity_ =
+        std::max(0.01, clearance_escape_linear_velocity_);
+    ros::param::param(
+        "/move_base/persistent_clearance_escape_angular_velocity",
+        clearance_escape_angular_velocity_, 0.30);
+    clearance_escape_angular_velocity_ =
+        std::max(0.05, clearance_escape_angular_velocity_);
+    ros::param::param("/move_base/persistent_clearance_escape_distance",
+                      clearance_escape_distance_, 0.45);
+    clearance_escape_distance_ = std::max(0.10, clearance_escape_distance_);
+    ros::param::param("/move_base/persistent_clearance_escape_margin",
+                      clearance_escape_margin_, 0.05);
+    clearance_escape_margin_ = std::max(0.0, clearance_escape_margin_);
+  }
   task_done_subscriber_ = private_nh.subscribe(
       task_done_topic, 1, &PersistentTebLocalPlanner::onTaskDone, this);
   std::string mission_command_topic;
@@ -213,6 +272,10 @@ bool PersistentTebLocalPlanner::setPlan(
     // refreshes deliberately retain the hold above and do not reset TEB.
     terminal_hold_active_.store(false, std::memory_order_release);
     hard_reset_hold_.store(false, std::memory_order_release);
+    // A new route is a new planning context: do not carry a clearance escape
+    // or an infeasibility streak across it.
+    infeasible_cycle_count_ = 0;
+    resetClearanceEscape();
   }
   plan_installed_count_.fetch_add(1, std::memory_order_relaxed);
   route_geometry_hash_.store(geometryHash(plan), std::memory_order_relaxed);
@@ -360,6 +423,184 @@ bool PersistentTebLocalPlanner::planIsEquivalentLocked(
   return true;
 }
 
+namespace {
+
+// Nearest lethal costmap cell to a world point, capped at ``limit`` metres.
+// Returns 0.0 when the point is outside the rolling costmap (unknown space is
+// treated as blocked, never as free).
+double nearestLethalDistance(costmap_2d::Costmap2D* costmap, double world_x,
+                             double world_y, double limit) {
+  const double infinity = std::numeric_limits<double>::infinity();
+  if (costmap == nullptr) {
+    return infinity;
+  }
+  const double resolution = costmap->getResolution();
+  if (!(resolution > 0.0) || !(limit > 0.0)) {
+    return infinity;
+  }
+  unsigned int cell_x = 0;
+  unsigned int cell_y = 0;
+  if (!costmap->worldToMap(world_x, world_y, cell_x, cell_y)) {
+    return 0.0;
+  }
+  const int reach = static_cast<int>(std::ceil(limit / resolution));
+  const int size_x = static_cast<int>(costmap->getSizeInCellsX());
+  const int size_y = static_cast<int>(costmap->getSizeInCellsY());
+  double best = infinity;
+  for (int delta_y = -reach; delta_y <= reach; ++delta_y) {
+    for (int delta_x = -reach; delta_x <= reach; ++delta_x) {
+      const double distance =
+          std::sqrt(static_cast<double>(delta_x * delta_x +
+                                        delta_y * delta_y)) * resolution;
+      if (distance > limit || distance >= best) {
+        continue;
+      }
+      const int neighbour_x = static_cast<int>(cell_x) + delta_x;
+      const int neighbour_y = static_cast<int>(cell_y) + delta_y;
+      if (neighbour_x < 0 || neighbour_y < 0 || neighbour_x >= size_x ||
+          neighbour_y >= size_y) {
+        continue;
+      }
+      if (costmap->getCost(static_cast<unsigned int>(neighbour_x),
+                           static_cast<unsigned int>(neighbour_y)) >=
+          costmap_2d::LETHAL_OBSTACLE) {
+        best = distance;
+      }
+    }
+  }
+  return best;
+}
+
+}  // namespace
+
+bool PersistentTebLocalPlanner::startPoseClearanceDeficient() {
+  if (costmap_ros_ == nullptr) {
+    return false;
+  }
+  costmap_2d::Costmap2D* costmap = costmap_ros_->getCostmap();
+  if (costmap == nullptr) {
+    return false;
+  }
+  if (!(start_pose_clearance_threshold_ > 0.0)) {
+    return false;
+  }
+  geometry_msgs::PoseStamped robot_pose;
+  if (!costmap_ros_->getRobotPose(robot_pose)) {
+    return false;
+  }
+  return nearestLethalDistance(costmap, robot_pose.pose.position.x,
+                               robot_pose.pose.position.y,
+                               start_pose_clearance_threshold_) <
+         start_pose_clearance_threshold_;
+}
+
+void PersistentTebLocalPlanner::resetClearanceEscape() {
+  clearance_escape_active_ = false;
+  clearance_escape_cycle_count_ = 0;
+  clearance_escape_heading_ = 0.0;
+  clearance_escape_start_clearance_ = 0.0;
+}
+
+bool PersistentTebLocalPlanner::clearanceEscapeCommand(
+    geometry_msgs::Twist& cmd_vel) {
+  cmd_vel = geometry_msgs::Twist();
+  if (costmap_ros_ == nullptr) {
+    return false;
+  }
+  costmap_2d::Costmap2D* costmap = costmap_ros_->getCostmap();
+  if (costmap == nullptr) {
+    return false;
+  }
+  geometry_msgs::PoseStamped robot_pose;
+  if (!costmap_ros_->getRobotPose(robot_pose)) {
+    return false;
+  }
+  const double robot_x = robot_pose.pose.position.x;
+  const double robot_y = robot_pose.pose.position.y;
+  const double clearance = nearestLethalDistance(
+      costmap, robot_x, robot_y, start_pose_clearance_threshold_);
+
+  // Already clear of the forbidden band: hand control straight back to TEB.
+  if (!(clearance < start_pose_clearance_threshold_)) {
+    resetClearanceEscape();
+    return false;
+  }
+
+  if (!clearance_escape_active_) {
+    const int heading_steps = 24;
+    double best_heading = 0.0;
+    double best_gain = 0.0;
+    for (int index = 0; index < heading_steps; ++index) {
+      const double heading =
+          2.0 * M_PI * static_cast<double>(index) / heading_steps;
+      double worst = std::numeric_limits<double>::infinity();
+      double end_clearance = clearance;
+      for (double travel = 0.05;
+           travel <= clearance_escape_distance_ + 1e-9; travel += 0.05) {
+        const double sample = nearestLethalDistance(
+            costmap, robot_x + std::cos(heading) * travel,
+            robot_y + std::sin(heading) * travel,
+            start_pose_clearance_threshold_);
+        worst = std::min(worst, sample);
+        end_clearance = sample;
+      }
+      // The whole ray must be monotonically non-decreasing in clearance.
+      if (worst + 1e-9 < clearance) {
+        continue;
+      }
+      const double gain = end_clearance - clearance;
+      if (gain > best_gain) {
+        best_gain = gain;
+        best_heading = heading;
+      }
+    }
+    if (!(best_gain > clearance_escape_margin_)) {
+      // No direction improves clearance; stay put instead of moving blind.
+      return false;
+    }
+    clearance_escape_active_ = true;
+    clearance_escape_cycle_count_ = 0;
+    clearance_escape_heading_ = best_heading;
+    clearance_escape_start_clearance_ = clearance;
+  }
+
+  ++clearance_escape_cycle_count_;
+  if (clearance_escape_cycle_count_ > clearance_escape_max_cycles_) {
+    resetClearanceEscape();
+    return false;
+  }
+  if (clearance + 1e-9 <
+      clearance_escape_start_clearance_ - clearance_escape_margin_) {
+    // Moving the wrong way: stop rather than grind towards the obstacle.
+    resetClearanceEscape();
+    return false;
+  }
+
+  const double yaw = tf::getYaw(robot_pose.pose.orientation);
+  double error = clearance_escape_heading_ - yaw;
+  while (error > M_PI) {
+    error -= 2.0 * M_PI;
+  }
+  while (error < -M_PI) {
+    error += 2.0 * M_PI;
+  }
+  if (std::fabs(error) > 1.6) {
+    // The free direction is behind the robot: forward-only, so reorient first
+    // and never reverse out of the band.
+    cmd_vel.angular.z =
+        (error > 0.0 ? 1.0 : -1.0) * clearance_escape_angular_velocity_;
+  } else {
+    // Arc toward the free direction.  A non-zero linear component also keeps
+    // the turn supervisor from substituting its own near-zero reorientation,
+    // which would otherwise keep the robot spinning in place.
+    cmd_vel.linear.x = clearance_escape_linear_velocity_;
+    cmd_vel.angular.z =
+        std::max(-clearance_escape_angular_velocity_,
+                 std::min(clearance_escape_angular_velocity_, error));
+  }
+  return true;
+}
+
 bool PersistentTebLocalPlanner::computeVelocityCommands(
     geometry_msgs::Twist& cmd_vel) {
   if (hard_reset_hold_.load(std::memory_order_acquire)) {
@@ -437,15 +678,64 @@ bool PersistentTebLocalPlanner::computeVelocityCommands(
     // server's control loop responsive so an explicit cancel can reach its
     // terminal state and the successor gate can make progress.
     cmd_vel = geometry_msgs::Twist();
+    // Distinguish a transient miss from a start-pose deadlock.  When the
+    // robot's own cell already violates the feasibility clearance, every
+    // candidate trajectory starts inside the forbidden band, so retrying and
+    // in-place recovery can never succeed.  A bounded, forward-only escape
+    // along the direction that strictly increases clearance is the only
+    // motion that can restore TEB's start pose.
+    if (startPoseClearanceDeficient()) {
+      ++infeasible_cycle_count_;
+      if (clearance_escape_enabled_ &&
+          infeasible_cycle_count_ >= clearance_escape_trigger_cycles_ &&
+          clearanceEscapeCommand(cmd_vel)) {
+        publishPlannerCommandContract(
+            cmd_vel, PlannerCommandContract::STATE_ACTIVE,
+            "planner_clearance_escape");
+        return true;
+      }
+      publishPlannerCommandContract(
+          cmd_vel, PlannerCommandContract::STATE_ZERO,
+          "planner_start_pose_infeasible");
+      return true;
+    }
+    infeasible_cycle_count_ = 0;
+    resetClearanceEscape();
+    publishPlannerCommandContract(
+        cmd_vel, PlannerCommandContract::STATE_ZERO, "planner_no_command");
+    return true;
   }
+  // TEB does not always fail when the start pose is clearance-deficient: an
+  // in-place rotation stays feasible while any translation does not.  The
+  // planner then answers with a rotation-only command and the turn supervisor
+  // keeps re-orienting, producing an in-place spin with no XY progress.  That
+  // is the same deadlock one level quieter, so it gets the same escape after a
+  // longer observation window (a legitimate turn is short).
+  if (std::fabs(cmd_vel.linear.x) <= 0.001 && startPoseClearanceDeficient()) {
+    cmd_vel = geometry_msgs::Twist();
+    ++infeasible_cycle_count_;
+    if (clearance_escape_enabled_ &&
+        infeasible_cycle_count_ >= 4 * clearance_escape_trigger_cycles_ &&
+        clearanceEscapeCommand(cmd_vel)) {
+      publishPlannerCommandContract(
+          cmd_vel, PlannerCommandContract::STATE_ACTIVE,
+          "planner_clearance_escape");
+      return true;
+    }
+    publishPlannerCommandContract(
+        cmd_vel, PlannerCommandContract::STATE_ZERO,
+        "planner_clearance_stall");
+    return true;
+  }
+  infeasible_cycle_count_ = 0;
+  resetClearanceEscape();
   publishPlannerCommandContract(
       cmd_vel,
-      (command_available &&
-       (std::abs(cmd_vel.linear.x) > 0.001 ||
-        std::abs(cmd_vel.angular.z) > 0.01))
+      (std::abs(cmd_vel.linear.x) > 0.001 ||
+       std::abs(cmd_vel.angular.z) > 0.01)
           ? PlannerCommandContract::STATE_ACTIVE
           : PlannerCommandContract::STATE_ZERO,
-      command_available ? "planner_command" : "planner_no_command");
+      "planner_command");
   return true;
 }
 
