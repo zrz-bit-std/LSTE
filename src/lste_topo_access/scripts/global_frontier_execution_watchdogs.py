@@ -89,9 +89,18 @@ class GlobalFrontierExecutionWatchdogMixin:
             )
         )
         waypoint_distance = self.active_waypoint_distance(robot_map)
+        auth_approach_pending = bool(
+            getattr(self, "active_portal_authentication_phase", "") == "entering"
+            and getattr(self, "active_portal_authentication_entry_approach", False)
+        )
+        waypoint_release_radius = (
+            max(float(self.waypoint_release_radius), 0.50)
+            if auth_approach_pending
+            else float(self.waypoint_release_radius)
+        )
         waypoint_reached = (
             self.active_last_waypoint_map is None
-            or waypoint_distance <= self.waypoint_release_radius
+            or waypoint_distance <= waypoint_release_radius
         )
         # A portal route represents one graph edge, not an open-ended local
         # search. Its lease starts at the physical doorway, rather than at a
@@ -117,6 +126,12 @@ class GlobalFrontierExecutionWatchdogMixin:
             post_turn_stalled=post_turn_stalled,
             portal_edge_expired=portal_edge_expired,
             active_timeout=active_timeout,
+            stalled_for=float(
+                now - float(getattr(self, "active_progress_time", now))
+            ),
+            controller_terminal_limit=float(
+                getattr(self, "controller_terminal_wait_seconds", 45.0) or 0.0
+            ),
         )
         expired = lease_decision.release
         if (
@@ -262,9 +277,19 @@ class GlobalFrontierExecutionWatchdogMixin:
         )
 
     def active_frontier_observation_ready(self, endpoint_distance):
-        """Require the controller's physical arrival before starting dwell."""
+        """Require physical arrival before starting frontier observation.
+
+        MoveBase may terminate an endpoint action anywhere inside the local
+        planner's xy goal tolerance. Keep the frontier waypoint threshold at
+        least that large, or a successful controller arrival just outside the
+        smaller handoff radius can leave the durable WorkItem pending forever.
+        """
+        arrival_radius = max(
+            float(self.waypoint_release_radius),
+            float(getattr(self, "teb_xy_goal_tolerance", 0.0)),
+        )
         return (
             self.active_last_waypoint_map is not None
             and self.active_route_kind != "frontier_turn_connector"
-            and float(endpoint_distance) <= self.waypoint_release_radius
+            and float(endpoint_distance) <= arrival_radius
         )

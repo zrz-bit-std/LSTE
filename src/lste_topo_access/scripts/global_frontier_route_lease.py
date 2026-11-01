@@ -34,6 +34,8 @@ def route_lease_failure_decision(
     post_turn_stalled=False,
     portal_edge_expired=False,
     active_timeout=False,
+    stalled_for=None,
+    controller_terminal_limit=None,
 ):
     """Return the only admissible failure transition for an active lease.
 
@@ -55,6 +57,17 @@ def route_lease_failure_decision(
             "controller_terminal_failure",
         )
     if controller_owns_failure:
+        # The controller is the failure authority, but it is not allowed to
+        # withhold its terminal forever.  ``controller_owned_route_failure`` is
+        # a mode flag, so the wait is measured from the route's own stalled
+        # duration rather than from the flag.
+        if (stalled_for is not None and controller_terminal_limit is not None
+                and float(stalled_for) > float(controller_terminal_limit)):
+            return RouteLeaseDecision(
+                True,
+                authority,
+                "controller_terminal_timeout",
+            )
         return RouteLeaseDecision(
             False,
             authority,

@@ -144,6 +144,13 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.controller_failure_hold_seconds = max(
             0.0, float(gp("~controller_failure_hold_seconds", 20.0))
         )
+        # The controller is the failure authority in persistent mode, but it
+        # must deliver its terminal.  Fall back to the global watchdog after
+        # this long without route progress (10 s lifecycle sync + 20 s release
+        # hold fit comfortably inside it, the stall watchdog is 180 s).
+        self.controller_terminal_wait_seconds = max(
+            0.0, float(gp("~controller_terminal_wait_seconds", 45.0))
+        )
         self.unreachable_grace = max(
             0.0, float(gp("~unreachable_grace", 20.0))
         )
