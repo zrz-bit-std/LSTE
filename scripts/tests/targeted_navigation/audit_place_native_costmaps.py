@@ -119,6 +119,22 @@ def controller_lease_intervals(status_events,mode_for):
         starts.append(dict(route_id=route,action_generation=generation,
                            start=stamp,end=end,mode=mode_for(route,stamp),
                            exact_ack=end is not None))
+    # A dispatch that is still open when the recording stops is a truncated
+    # trial, not a lost lease: the window ended before the bridge could deliver
+    # the ACK.  Only the final dispatch can be truncated -- any later lease
+    # event proves the run continued, and then the older lease really is lost
+    # (run 20261031_214617: route 140 never closed while 141 was adopted).
+    lease_events = [
+        (stamp, data) for stamp, data in ordered
+        if data.get('event') in ('dispatch', 'route_continuation_dispatch',
+                                 'lease_release_ack', 'route_superseded')
+    ]
+    if lease_events:
+        last_stamp, last = lease_events[-1]
+        if last.get('event') in ('dispatch', 'route_continuation_dispatch'):
+            for lease in starts:
+                if lease['end'] is None and lease['start'] == last_stamp:
+                    lease['open_at_end'] = True
     # Two different routes owning the same transport generation must never
     # overlap. When they do the reconstruction cannot attribute a mask mode to
     # one owner, so report the identity conflict instead of silently letting
@@ -285,7 +301,8 @@ def audit(metrics,bag_path):
         if bridge_topic in topics:
             controller_leases=controller_lease_intervals(bridge_events,mode_for_controller_route)
             missing_ack=[dict(route_id=x['route_id'],action_generation=x['action_generation'],start=x['start'])
-                         for x in controller_leases if not x['exact_ack']]
+                         for x in controller_leases
+                         if not x['exact_ack'] and not x.get('open_at_end')]
             if missing_ack:fail('raw controller dispatch lacks matching exact lease ACK',routes=missing_ack[:20])
             controller_dispatches=[(x['start'],x['route_id'],x['action_generation'],x['mode']) for x in controller_leases]
         else:
