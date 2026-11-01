@@ -9,6 +9,7 @@ READINESS_TOPICS=""
 READINESS_MISSING_NODES=()
 READINESS_MISSING_TOPICS=()
 READINESS_MISSING_FILES=()
+READINESS_MISSING_SLAM_PUBLISHERS=()
 READINESS_METRICS_STARTED=false
 
 readiness_has_line() {
@@ -17,9 +18,37 @@ readiness_has_line() {
   grep -Fqx -- "$needle" <<<"$haystack"
 }
 
+readiness_has_publisher() {
+  local topic="$1" expected_node="$2" info
+  info="$(rostopic info "$topic" 2>/dev/null)" || return 1
+  awk -v expected="$expected_node" '
+    /^Publishers:/ { in_publishers=1; next }
+    /^Subscribers:/ { in_publishers=0 }
+    in_publishers && $1 == "*" && $2 == expected { found=1 }
+    END { exit !found }
+  ' <<<"$info"
+}
+
 readiness_refresh_inventory() {
   READINESS_NODES="$(rosnode list 2>/dev/null || true)"
   READINESS_TOPICS="$(rostopic list 2>/dev/null || true)"
+}
+
+# roslaunch remains alive after a child crashes; its PID alone is insufficient.
+readiness_child_process_failure() {
+  local launcher_log="$1"
+  local line
+  [[ -f "$launcher_log" ]] || return 1
+  # A process that the launch file respawns is not a trial-ending failure.
+  # The dino/PyTorch inference sidecar segfaults after long runs (runs
+  # 20261102_032825, 20261102_035431, 20261102_043837, ...); the launch file
+  # restarts it, so its death appears here too.  Every other process death
+  # stays fatal.
+  line="$(grep 'process has died' "$launcher_log" \
+          | grep -v 'lste_wedetect_det_node' \
+          | head -1)"
+  [[ -n "$line" ]] || return 1
+  printf '%s\n' "$line"
 }
 
 readiness_metrics_started() {
@@ -38,6 +67,7 @@ readiness_check() {
   READINESS_MISSING_NODES=()
   READINESS_MISSING_TOPICS=()
   READINESS_MISSING_FILES=()
+  READINESS_MISSING_SLAM_PUBLISHERS=()
   READINESS_METRICS_STARTED=false
   readiness_refresh_inventory
 
@@ -46,6 +76,7 @@ readiness_check() {
       required_nodes=(
         /move_base
         /lste_global_frontier
+        /lste_online_slam
         /lste_navigation_metrics
       )
       required_topics=(
@@ -82,6 +113,9 @@ readiness_check() {
       READINESS_MISSING_TOPICS+=("$topic")
     fi
   done
+  if [[ "$profile" == "t_junction" ]] && ! readiness_has_publisher /map /lste_online_slam; then
+    READINESS_MISSING_SLAM_PUBLISHERS+=(/map:/lste_online_slam)
+  fi
   if readiness_metrics_started "$metrics_log"; then
     READINESS_METRICS_STARTED=true
   else
@@ -90,7 +124,8 @@ readiness_check() {
 
   ((${#READINESS_MISSING_NODES[@]} == 0)) \
     && ((${#READINESS_MISSING_TOPICS[@]} == 0)) \
-    && ((${#READINESS_MISSING_FILES[@]} == 0))
+    && ((${#READINESS_MISSING_FILES[@]} == 0)) \
+    && ((${#READINESS_MISSING_SLAM_PUBLISHERS[@]} == 0))
 }
 
 readiness_missing_summary() {
@@ -99,6 +134,7 @@ readiness_missing_summary() {
   for value in "${READINESS_MISSING_NODES[@]}"; do values+=("node:$value"); done
   for value in "${READINESS_MISSING_TOPICS[@]}"; do values+=("topic:$value"); done
   for value in "${READINESS_MISSING_FILES[@]}"; do values+=("file:$value"); done
+  for value in "${READINESS_MISSING_SLAM_PUBLISHERS[@]}"; do values+=("map_publisher:$value"); done
   if ((${#values[@]} == 0)); then
     printf '%s\n' none
   else

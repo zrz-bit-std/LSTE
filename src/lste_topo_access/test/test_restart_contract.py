@@ -31,6 +31,14 @@ class PerceptionRestartTest(unittest.TestCase):
         self.assertIn('respawn="true"', block)
         self.assertIn("respawn_delay=", block)
 
+    def test_runner_ignores_respawned_perception_deaths(self):
+        readiness = (Path(__file__).resolve().parents[3]
+                     / "scripts/tests/targeted_navigation/readiness.sh"
+                     ).read_text(encoding="utf-8")
+        self.assertIn("grep -v 'lste_wedetect_det_node'", readiness)
+        # Any other death must still be reported.
+        self.assertIn("grep 'process has died'", readiness)
+
     def test_the_metrics_node_is_not_respawned(self):
         # The recorder must not silently restart and split a run's evidence.
         self.assertNotIn('name="lste_navigation_metrics"', self.source)
