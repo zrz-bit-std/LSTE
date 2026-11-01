@@ -99,8 +99,22 @@ def controller_lease_intervals(status_events,mode_for):
         if event=='dispatch' and data.get('active') is not True:
             continue
         try:
-            route=int(data.get('active_route_id',data.get('route_id')) or 0)
-            generation=int(data.get('active_action_generation',data.get('action_generation')) or 0)
+            # A continuation status is published BEFORE the bridge promotes
+            # the adopted route, so ``active_route_id`` still names the
+            # predecessor there.  Keying that event on ``active_route_id``
+            # opened the *previous* route a second time and left the adopted
+            # route's real opening at the next successor's status, past its own
+            # ACK.  Runs 20261101_160923 closed 35/36 and 40/41 that way: six
+            # false "lacks matching exact lease ACK" errors, two identity
+            # conflicts, and every mask-mode sample attributed to the wrong
+            # owner.
+            if event=='route_continuation_dispatch':
+                route=int(data.get('route_id',0) or 0)
+                generation=int(data.get('action_generation',
+                    data.get('active_action_generation',0)) or 0)
+            else:
+                route=int(data.get('active_route_id',data.get('route_id')) or 0)
+                generation=int(data.get('active_action_generation',data.get('action_generation')) or 0)
         except (TypeError,ValueError):
             continue
         if route<=0 or generation<=0 or (route,generation) in seen:
