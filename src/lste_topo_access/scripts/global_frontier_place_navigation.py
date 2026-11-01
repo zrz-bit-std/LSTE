@@ -125,7 +125,10 @@ class PlaceNavigationConstraints:
             return False
         unchanged_scope=self._same_effective_bounded_scope(key,physical_origin,resolution,local_data)
         if bounded and self.bounded and self.key is not None and not unchanged_scope:
-            if getattr(node,'active_frontier',None) is not None and getattr(node,'active_route_id',0):
+            if (getattr(node,'active_frontier',None) is not None
+                    and getattr(node,'active_route_id',0)
+                    and not self._scope_revision_keeps_active_task(
+                        node,message,allowed)):
                 from clock_provider import now_for
                 suspend=getattr(node,'suspend_active_work_item',None)
                 if callable(suspend):suspend(now_for(node),'place_scope_revision')
@@ -156,6 +159,54 @@ class PlaceNavigationConstraints:
         self.last_report=dict(sequence=self.sequence,bounded=bounded,ready=False,
                               excluded_cells=int(np.count_nonzero(data==100)),map_stamp=message.header.stamp.to_sec(),
                               local_frame='odom',local_excluded_cells=int(np.count_nonzero(local_data==100)))
+        return True
+
+    def _scope_revision_keeps_active_task(self,node,message,allowed,project=None):
+        """Whether a revised Place scope still contains the active local task.
+
+        Observation grows the mask on almost every SLAM update.  Suspending the
+        active WorkItem for that growth alone produced 174-204 suspend/resume
+        cycles in runs 20261101_010504 and 20261101_020324: the robot never
+        drove for more than about 2 s, every Attempt was reset, and the Place
+        could not finish.  A revision is only allowed to abort a route when it
+        removes the robot, the active endpoint, or the segment between them
+        from the scope; growth never does.
+        """
+        if allowed is None or message is None:
+            return False
+        frontier=getattr(node,'active_frontier',None)
+        pose=getattr(node,'pose_odom',None)
+        if frontier is None or pose is None:
+            return False
+        try:
+            goal=(float(frontier[2]),float(frontier[3]))
+        except (TypeError,IndexError,ValueError):
+            return False
+        if project is None:
+            from global_frontier_geometry import map_snapshot_projector
+            project=map_snapshot_projector(node,message)
+        if project is None:
+            return False
+        start=project(pose.x,pose.y)
+        if start is None:
+            return False
+        # ``active_frontier`` x/y already live in the map frame used by
+        # ``allowed``; only the odom pose needs projection.
+        samples=[start,goal]
+        for fraction in (0.25,0.5,0.75):
+            samples.append((start[0]+(goal[0]-start[0])*fraction,
+                            start[1]+(goal[1]-start[1])*fraction))
+        origin=message.info.origin.position;resolution=float(message.info.resolution)
+        if not (resolution>0.0):
+            return False
+        rows,cols=allowed.shape
+        for point in samples:
+            row=int(np.floor((point[1]-origin.y)/resolution))
+            col=int(np.floor((point[0]-origin.x)/resolution))
+            if not (0<=row<rows and 0<=col<cols):
+                return False
+            if not allowed[row,col]:
+                return False
         return True
 
     def robot_in_scope(self,node,message,allowed):
