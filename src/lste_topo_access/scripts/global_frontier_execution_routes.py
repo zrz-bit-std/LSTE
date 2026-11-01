@@ -16,17 +16,38 @@ class GlobalFrontierExecutionRouteMixin:
             self.active_unreachable_since = now
         held_for = now - self.active_unreachable_since
         waypoint_distance = self.active_waypoint_distance(robot_map)
+        force_abandon = False
         if getattr(self, "controller_owned_route_failure", False):
-            rospy.logwarn_throttle(
-                3.0,
-                "Global frontier route is temporarily disconnected; retaining "
-                "controller-owned lease route_id=%d held=%.1fs",
-                self.active_route_id,
-                held_for,
+            hold_limit = float(
+                getattr(self, "controller_failure_hold_seconds", 20.0) or 0.0
             )
-            return (row, col, x, y, 0.0, 0.0), self.active_last_waypoint_map
+            if held_for <= hold_limit:
+                rospy.logwarn_throttle(
+                    3.0,
+                    "Global frontier route is temporarily disconnected; retaining "
+                    "controller-owned lease route_id=%d held=%.1fs/%.1fs",
+                    self.active_route_id,
+                    held_for,
+                    hold_limit,
+                )
+                return (row, col, x, y, 0.0, 0.0), self.active_last_waypoint_map
+            # The exact lease ACK never arrived.  Holding the route any longer
+            # only blocks the failure resolution that is supposed to request
+            # it, so fall through to the bounded abandon path below.
+            rospy.logwarn(
+                "Global frontier controller-owned lease hold expired after "
+                "%.1fs of %.1fs (route_id=%d); abandoning the disconnected "
+                "route so the failure can be resolved",
+                held_for,
+                hold_limit,
+                self.active_route_id,
+            )
+            # The controller-owned bound is authoritative: do not let a longer
+            # ordinary grace re-hold the same route afterwards.
+            force_abandon = True
         if (
-            self.active_last_waypoint_map is not None
+            not force_abandon
+            and self.active_last_waypoint_map is not None
             and held_for <= self.unreachable_grace
             and waypoint_distance > 0.8
         ):
@@ -49,7 +70,9 @@ class GlobalFrontierExecutionRouteMixin:
         )
         self.publish_status(
             "route_invalidated",
-            reason="disconnected",
+            reason=str(
+                getattr(self, "recovery_pending_reason", "") or "disconnected"
+            ),
             goal=[round(float(x), 3), round(float(y), 3)],
             distance=round(float(math.hypot(x - robot_map[0], y - robot_map[1])), 3),
             elapsed=round(float(held_for), 3),

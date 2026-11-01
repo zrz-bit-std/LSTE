@@ -136,6 +136,14 @@ class GlobalFrontierNavigationConfigurationMixin:
         # SLAM can temporarily disconnect an active frontier while integrating
         # a scan. Keep the last safe endpoint briefly instead of switching
         # branches on every map update.
+        # A controller-owned failure may hold the disconnected route only
+        # until its exact lease ACK arrives.  The failure resolution that
+        # requests that ACK runs after the release, so an unbounded hold
+        # deadlocks the planner.  Measured ACK latency is ~0.5 s; the lifecycle
+        # sync timeout is 10 s.
+        self.controller_failure_hold_seconds = max(
+            0.0, float(gp("~controller_failure_hold_seconds", 20.0))
+        )
         self.unreachable_grace = max(
             0.0, float(gp("~unreachable_grace", 20.0))
         )

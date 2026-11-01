@@ -989,12 +989,31 @@ class GPBranchFrontierMixin:
                         reason="source_side_recovery_budget_exhausted",
                         snapshot=auth.snapshot(),
                     )
+                    # Close the branch as failed and advance the observation
+                    # period.  The obligation stays explicit (the ledger entry
+                    # and the tree branch both keep ``return_obligation_pending``),
+                    # but it no longer freezes a mission that has other
+                    # doorways to authenticate.
+                    fail = getattr(auth, "fail", None)
+                    if callable(fail):
+                        fail("return_unrecoverable")
+                    tree = getattr(self, "gp_exploration_tree", None)
+                    if tree is not None:
+                        tree_branch = tree.branches.get(int(auth.branch_id))
+                        if tree_branch is not None:
+                            tree_branch["authentication_state"] = "failed"
+                            tree_branch["authentication_failure_reason"] = (
+                                "return_unrecoverable")
+                            tree_branch["return_obligation_pending"] = True
                     self.release_active_frontier(
-                        discard_prefetch=True, queue_successor=False,
-                        await_controller_release_ack=True,
+                        discard_prefetch=True,
                         preserve_place_departure=bool(getattr(
                             getattr(self, "place_departure", None), "active", False)),
                     )
+                    finish = getattr(
+                        self, "finish_portal_authentication_branch", None)
+                    if callable(finish):
+                        finish(now=now)
                 return True
         if auth.physical_progress_expired(
                 (pose.x, pose.y), pose.theta, now,

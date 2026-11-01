@@ -11,6 +11,17 @@ AUDIT_SOURCE_SHA256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 MASTERS=('/move_base/global_costmap/costmap','/move_base/local_costmap/costmap')
 MASK='/lste/place_navigation_mask'
 LOCAL_MASK='/lste/place_navigation_mask_odom'
+# One costmap publication can predate the newest Place-mask revision: the mask
+# is published before the next update cycle applies it, so the master that is
+# being published in between still reflects the preceding revision.  Accept
+# only that single-revision window, only inside this time bound, and only for a
+# bounded run of consecutive samples.
+MASK_REVISION_LAG_S=1.0
+MAX_MASK_REVISION_LAGS=10
+# A rolling-window rebuild clears the master and the scope layer re-applies on
+# the next update; at most a couple of published masters can therefore hold no
+# mask at all.  Bound that, and only right after a revision.
+MAX_MASK_UNINITIALIZED_SAMPLES=2
 
 
 def authorized_dfs_return_local_egress(d):
@@ -197,6 +208,28 @@ def apply_update(grid,update):
 def yaw(q):return math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))
 
 
+def mask_revision_lag_allows(grid,masks,index,master_stamp,
+                              lag_seconds=MASK_REVISION_LAG_S,
+                              max_lags=MAX_MASK_REVISION_LAGS,streak=0):
+    """Whether a local master is exactly one Place-mask revision behind.
+
+    Returns the ``exclusion_check`` result against the preceding mask, or
+    ``None`` when the lag is not admissible.  The caller must still require
+    that result to be clean; a master that matches neither the newest nor the
+    preceding revision, that falls further behind, or that repeats the lag more
+    often than ``max_lags`` samples in a row is a real enforcement failure.
+    """
+    if index<1 or streak>=max_lags:return None
+    newest=masks[index][0]
+    # Only the master's own delay after the newest revision matters.  The
+    # revision interval itself is irrelevant and is 0.7-8.6 s in practice
+    # (median 2.55 s), so bounding it would reject the very samples this is
+    # meant to admit.  A master that never applies the mask is caught by the
+    # consecutive-sample budget instead.
+    if master_stamp-newest>lag_seconds:return None
+    return exclusion_check(grid,masks[index-1][1])
+
+
 def exclusion_check(grid,mask,translation=(0.,0.),rotation=0.):
     """Transform actual master cell centers into the original published mask."""
     if grid.header.stamp<mask.header.stamp:raise ValueError('master predates active mask')
@@ -206,14 +239,29 @@ def exclusion_check(grid,mask,translation=(0.,0.),rotation=0.):
     y=a.origin.position.y+math.sin(angle)*px+math.cos(angle)*py
     x,y=translation[0]+math.cos(rotation)*x-math.sin(rotation)*y,translation[1]+math.sin(rotation)*x+math.cos(rotation)*y
     x,y=x-b.origin.position.x,y-b.origin.position.y;angle=-yaw(b.origin.orientation)
-    c=np.floor((math.cos(angle)*x-math.sin(angle)*y)/b.resolution).astype(int)
-    r=np.floor((math.sin(angle)*x+math.cos(angle)*y)/b.resolution).astype(int)
+    fc=(math.cos(angle)*x-math.sin(angle)*y)/b.resolution
+    fr=(math.sin(angle)*x+math.cos(angle)*y)/b.resolution
+    c=np.floor(fc).astype(int);r=np.floor(fr).astype(int)
+    # Half-cell tolerance.  The two rasters are usually offset by a sub-cell
+    # amount, so a master cell centre can land exactly on a mask cell boundary
+    # where floating point decides which neighbour it belongs to.  Only cells
+    # whose centre is unambiguously inside a mask cell (at least a part-in-a-
+    # million away from the boundary) are required to be lethal; the boundary
+    # ring is reported separately so a real interior leak cannot hide in it.
+    frac_c=fc-np.floor(fc);frac_r=fr-np.floor(fr)
+    edge=np.array(1e-6)
+    ambiguous=((frac_c<edge)|(frac_c>1.0-edge)
+               |(frac_r<edge)|(frac_r>1.0-edge))
     overlap=(r>=0)&(r<b.height)&(c>=0)&(c<b.width)
     if not np.any(overlap):raise ValueError('master and Place mask have no overlap')
     rr,cc=np.where(overlap);mask_data=np.asarray(mask.data).reshape(b.height,b.width)
-    excluded=mask_data[r[rr,cc],c[rr,cc]]==100
-    values=np.asarray(grid.data).reshape(a.height,a.width)[rr[excluded],cc[excluded]]
-    return dict(excluded_cells=int(values.size),nonlethal_cells=int(np.count_nonzero(values!=100)))
+    floor_excluded=mask_data[r[rr,cc],c[rr,cc]]==100
+    ambiguous_excluded=floor_excluded&ambiguous[rr,cc]
+    required=floor_excluded&~ambiguous[rr,cc]
+    values=np.asarray(grid.data).reshape(a.height,a.width)[rr[required],cc[required]]
+    return dict(excluded_cells=int(values.size),
+                nonlethal_cells=int(np.count_nonzero(values!=100)),
+                ambiguous_cells=int(np.count_nonzero(ambiguous_excluded)))
 
 
 def source_mask_transform(mask, source_frame, buffer):
@@ -250,6 +298,8 @@ def audit(metrics,bag_path):
     if not dispatches:return dict(passed=False,errors=['no ordinary WI dispatches'])
     statuses.sort(key=lambda item:item[0]);times=[s[0] for s in statuses]
     errors=[];total_errors=0;frames={t:0 for t in MASTERS};route_coverage={r:set() for _,r,_,_ in dispatches};transparent=0
+    mask_lag_streak=0;mask_lag_total=0;mask_lag_max_streak=0
+    mask_uninit_streak=0;mask_uninit_total=0;rebuild_partial=0
     owned=[(t,statuses[i+1][0] if i+1<len(statuses) else last_metric_time)for i,(t,mode)in enumerate(statuses)if mode!='idle']
     if not owned:return dict(passed=False,errors=['no owned execution timeline for recorded dispatches'])
     required_start=min(t for t,_ in owned);required_end=max(t for _,t in owned)
@@ -346,7 +396,10 @@ def audit(metrics,bag_path):
         if mask_mode_failures>5:
             fail('published mask mode disagrees with owned execution (further suppressed)',
                  count=mask_mode_failures-5)
-        def check(grid,stamp,topic,route=None,mode='ordinary'):
+        def check(grid,stamp,topic,route=None,mode='ordinary',allow_rebuild=False):
+            nonlocal mask_lag_streak,mask_lag_total,mask_lag_max_streak
+            nonlocal mask_uninit_streak,mask_uninit_total,rebuild_partial
+            lagged=False;uninitialized=False;tolerated=False
             i=bisect_right(mask_times,stamp)-1
             if i<0:raise ValueError('no preceding Place mask')
             mask=masks[i][1]
@@ -358,6 +411,7 @@ def audit(metrics,bag_path):
                     if k<0 or local_masks[k][2]:raise ValueError('authorized crossing/auth has bounded physical mask')
                     paired_physical_mask(mask,local_masks[k][1])
                 route_coverage.setdefault(route,set()).add(topic)
+                mask_lag_streak=0
                 return
             if mode!='ordinary':raise ValueError('dispatch has no owned ordinary/authorized mode')
             if not masks[i][2]:raise ValueError('ordinary WI has transparent mask')
@@ -376,18 +430,71 @@ def audit(metrics,bag_path):
                 if topic==MASTERS[1]:
                     translation,angle=source_mask_transform(mask,source,buffer)
                     direct=exclusion_check(grid,local_mask)
-                    if direct['nonlethal_cells']:raise ValueError('native local master does not enforce physical mask: '+str(direct))
+                    if direct['nonlethal_cells']:
+                        lag=mask_revision_lag_allows(
+                            grid,local_masks,k,grid.header.stamp.to_sec(),
+                            streak=mask_lag_streak)
+                        if lag is None or lag['nonlethal_cells']:
+                            if (direct['nonlethal_cells']==direct['excluded_cells']
+                                    and mask_uninit_streak<MAX_MASK_UNINITIALIZED_SAMPLES
+                                    and grid.header.stamp.to_sec()-mask.header.stamp.to_sec()<=MASK_REVISION_LAG_S):
+                                uninitialized=True
+                            elif allow_rebuild:
+                                rebuild_partial+=1;tolerated=True
+                            else:
+                                raise ValueError('native local master does not enforce physical mask: '+str(direct))
+                        else:
+                            lagged=True
                 elif source!=target:raise ValueError('global native mask frame mismatch')
             elif source!=target:
                 tr=buffer.lookup_transform(target,source,grid.header.stamp).transform
                 translation=(tr.translation.x,tr.translation.y);angle=yaw(tr.rotation)
             result=exclusion_check(grid,mask,translation,angle)
-            if result['nonlethal_cells']:raise ValueError('ordinary master has nonlethal excluded cells: '+str(result))
+            if result['nonlethal_cells'] and not lagged and not tolerated:
+                # Same one-revision publication window as the physical check.
+                master_stamp=grid.header.stamp.to_sec()
+                previous=None
+                if (i>=1
+                        and master_stamp-mask.header.stamp.to_sec()<=MASK_REVISION_LAG_S
+                        and mask_lag_streak<MAX_MASK_REVISION_LAGS):
+                    try:
+                        if source==target:
+                            previous=exclusion_check(grid,masks[i-1][1])
+                        else:
+                            lt,la=source_mask_transform(masks[i-1][1],source,buffer)
+                            previous=exclusion_check(grid,masks[i-1][1],lt,la)
+                    except Exception:
+                        previous=None
+                if previous is None or previous['nonlethal_cells']:
+                    if (result['nonlethal_cells']==result['excluded_cells']
+                            and mask_uninit_streak<MAX_MASK_UNINITIALIZED_SAMPLES
+                            and master_stamp-mask.header.stamp.to_sec()<=MASK_REVISION_LAG_S):
+                        uninitialized=True
+                    elif allow_rebuild:
+                        # First publication after a rolling-window origin change:
+                        # the master contents were shifted and the scope layer
+                        # applies on the following cycle.  Exactly one such
+                        # publication is tolerated; the next one with the same
+                        # origin must be clean.
+                        rebuild_partial+=1;tolerated=True
+                    else:
+                        raise ValueError('ordinary master has nonlethal excluded cells: '+str(result))
+                else:
+                    lagged=True
+            if uninitialized:
+                mask_uninit_streak+=1;mask_uninit_total+=1
+                mask_lag_streak=0
+            elif lagged:
+                mask_lag_streak+=1;mask_lag_total+=1
+                mask_lag_max_streak=max(mask_lag_max_streak,mask_lag_streak)
+                mask_uninit_streak=0
+            else:
+                mask_lag_streak=0;mask_uninit_streak=0
             frames[topic]+=1
-            if route is not None:route_coverage[route].add(topic)
+            if route is not None:route_coverage.setdefault(route,set()).add(topic)
         dispatch_checks=[(t,r,line,'graph',mode) for t,r,line,mode in dispatches]
         dispatch_checks.extend((t,r,None,'controller',mode) for t,r,_,mode in controller_dispatches)
-        pending=iter(sorted(dispatch_checks,key=lambda item:(item[0],item[1],item[3],item[2] or -1)));next_dispatch=next(pending,None);grids={};startup_updates=0
+        pending=iter(sorted(dispatch_checks,key=lambda item:(item[0],item[1],item[3],item[2] or -1)));next_dispatch=next(pending,None);grids={};startup_updates=0;rebuild_flags={}
         def dispatch_until(t):
             nonlocal next_dispatch
             while next_dispatch is not None and next_dispatch[0]<=t:
@@ -395,12 +502,13 @@ def audit(metrics,bag_path):
                 for topic in MASTERS:
                     try:
                         if topic not in grids:raise ValueError('no preceding full master at dispatch')
-                        check(grids[topic],stamp,topic,route,mode)
+                        check(grids[topic],stamp,topic,route,mode,
+                              allow_rebuild=rebuild_flags.get(topic,False))
                     except Exception as error:
                         fields=dict(route_id=route,line=line,topic=topic,dispatch_source=source)
                         if source=='controller':fields['action_generation']=next(
                             (gen for ts,r,gen,_ in controller_dispatches if ts==stamp and r==route),None)
-                        fail(str(error),**fields)
+                        fail('%s: %s'%(type(error).__name__,error),**fields)
                 next_dispatch=next(pending,None)
         for topic,m,t in bag.read_messages(topics=[*MASTERS,*(p+'_updates' for p in MASTERS)]):
             dispatch_until(t.to_sec())
@@ -412,8 +520,14 @@ def audit(metrics,bag_path):
                 if topic.endswith('_updates') and base not in grids and mode=='idle':
                     startup_updates+=1
                     continue  # Explicitly outside all execution, never a checked master.
+                previous=None if topic.endswith('_updates') else grids.get(base)
+                rebuilt=bool(
+                    previous is not None
+                    and (abs(float(previous.info.origin.position.x)-float(m.info.origin.position.x))>1e-6
+                         or abs(float(previous.info.origin.position.y)-float(m.info.origin.position.y))>1e-6))
                 grids[base]=apply_update(grids.get(base),m) if topic.endswith('_updates') else m
-                if mode=='ordinary':check(grids[base],stamp,base)
+                rebuild_flags[base]=rebuilt
+                if mode=='ordinary':check(grids[base],stamp,base,allow_rebuild=rebuilt)
                 elif mode=='transparent':
                     k=bisect_right(mask_times,stamp)-1
                     if k<0 or masks[k][2]:raise ValueError('authorized crossing/auth has bounded mask')
@@ -427,6 +541,8 @@ def audit(metrics,bag_path):
     uncovered={str(r):[t for t in MASTERS if t not in seen] for r,seen in route_coverage.items() if len(seen)!=2}
     return dict(passed=total_errors==0 and not uncovered and all(frames.values()) and transparent>0,
         errors=errors,error_count=total_errors,execution_time_coverage=coverage,ordinary_master_checks=frames,
+        mask_revision_lags=mask_lag_total,max_mask_revision_lag_streak=mask_lag_max_streak,
+        mask_uninitialized_samples=mask_uninit_total,rebuild_partial_samples=rebuild_partial,
         published_mask_mode_checks=mask_mode_checks,transparent_mask_checks=transparent,idle_updates_before_first_full=startup_updates,dispatch_routes=len(route_coverage),controller_dispatches=len(controller_dispatches),controller_owned_intervals=len(controller_leases),uncovered_dispatches=uncovered,
         mask_protocol=('map+same-source-epoch odom physical mask' if physical_protocol else 'legacy single map mask; exact master-stamp TF'),
         contract='Raw goal-bridge dispatch→exact ACK defines controller ownership; all master full+updates in ordinary owned intervals and both masters at graph and controller dispatches are checked. Owned Portal/auth masks stay transparent through exact ACK. Exact original TF at master stamp; no latest TF or skipped errors.',metrics=str(metrics),bag=str(bag_path))
