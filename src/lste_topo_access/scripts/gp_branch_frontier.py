@@ -969,6 +969,19 @@ class GPBranchFrontierMixin:
 
     def check_portal_authentication_physical_progress(self, now):
         """Check the same physical budget even when no map plan is rebuilt."""
+        # A pinned observation period with no active branch must be concluded
+        # here, not only from the discovery callback: once the active Place
+        # stops owning that node the callback returns early, and the pinned
+        # task then holds tree.current_node_id forever (run 20261101_232628
+        # stalled 180 s in exactly this state).
+        task = getattr(self, "junction_portal_authentication", None)
+        if (task is not None and task.active_branch_id is None
+                and not task.all_finished()):
+            expired = self._expire_stranded_portal_authentication(
+                getattr(self, "gp_exploration_tree", None),
+                getattr(self, "map_msg", None), now)
+            if expired:
+                return True
         auth = self.active_portal_authentication()
         pose = getattr(self, "pose_odom", None)
         if auth is None or pose is None:
