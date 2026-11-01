@@ -547,6 +547,43 @@ class GPBranchFrontierMixin:
                 else self.junction_portal_authentication.snapshot()
             ))
 
+    def _expire_stranded_portal_authentication(self, tree, message, now):
+        """Conclude a pinned observation period that can never start a branch.
+
+        ``expire_unstartable`` is the bounded conclusion for a junction whose
+        remaining branches cannot be entered.  It used to be reached only from
+        the in-scope discovery path, so a task pinned by
+        ``portal_authentication_node_to_pin`` survived every scope check and
+        held ``tree.current_node_id`` indefinitely.
+        """
+        task = getattr(self, "junction_portal_authentication", None)
+        if task is None or task.active_branch_id is not None:
+            return []
+        if task.all_finished():
+            return []
+        get_param = getattr(
+            rospy, "get_param", lambda _name, default=None: default,
+        )
+        timeout = float(get_param(
+            "/lste_global_frontier/portal_observation_start_timeout", 30.0))
+        expired = task.expire_unstartable(now, timeout)
+        if not expired:
+            return []
+        if tree is not None:
+            for expired_id in expired:
+                tree_branch = tree.branches.get(expired_id)
+                if tree_branch is not None:
+                    tree_branch["authentication_state"] = "failed"
+                    tree_branch["authentication_failure_reason"] = (
+                        "observation_geometry_unavailable")
+        self.publish_status(
+            "portal_authentication_observation_expired",
+            node_id=int(task.node_id), branch_ids=list(expired),
+            timeout=timeout, phase=task.phase,
+            reason="pinned_observation_unstartable",
+        )
+        return expired
+
     def _sync_portal_authentication(self, tree, message, map_context, now):
         """Maintain the stable branch set for a node's observation period."""
         # A certified crossing already owns the physical edge. A second GP
@@ -555,6 +592,14 @@ class GPBranchFrontierMixin:
         transaction = getattr(self, "portal_transaction", None)
         if transaction is not None and transaction.active:
             return
+        # A pinned task whose branches can never start must not hold the tree
+        # cursor, and therefore the whole graph, forever.  The scope guards
+        # below deliberately skip discovery for a node the active Place no
+        # longer owns; before this check they also skipped the bounded expiry,
+        # so a task pinned in ``watching`` blocked every dispatch for the rest
+        # of the run (sealed 20261101_002732: 180 s with two pending branches
+        # and ``active_branch_id is None``).
+        self._expire_stranded_portal_authentication(tree, message, now)
         ledger = getattr(self, "place_work_items", None)
         closed = getattr(ledger, "place_is_closed", None)
         current = getattr(self, "current_physical_place_id", None)

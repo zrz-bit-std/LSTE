@@ -738,8 +738,14 @@ bool PersistentTebLocalPlanner::computeVelocityCommands(
   if (cmd_vel.linear.x <= 0.001 && clearance_deficient) {
     cmd_vel = geometry_msgs::Twist();
     ++infeasible_cycle_count_;
+    // The trigger must fit inside one route's life.  move_base fails a route
+    // that makes no physical progress after controller_patience (5 s) and the
+    // next setPlan resets this counter, so the previous 4x budget (160 cycles
+    // = 8 s) could never mature in the return loops it was written for: runs
+    // 20261101_002029 and 20261101_050044 emitted 130 zero-translation
+    // contracts each and never one clearance escape.
     if (clearance_escape_enabled_ &&
-        infeasible_cycle_count_ >= 4 * clearance_escape_trigger_cycles_ &&
+        infeasible_cycle_count_ >= clearance_escape_trigger_cycles_ &&
         clearanceEscapeCommand(cmd_vel)) {
       publishPlannerCommandContract(
           cmd_vel, PlannerCommandContract::STATE_ACTIVE,
