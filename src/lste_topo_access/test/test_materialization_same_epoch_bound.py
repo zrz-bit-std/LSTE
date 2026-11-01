@@ -41,6 +41,7 @@ from global_frontier_graph_route_adapter import (  # noqa: E402
 from global_frontier_graph_route_planner import (  # noqa: E402
     ACTION_CROSS_PORTAL,
     GraphRoutePlan,
+    PLAN_BLOCKED,
     PLAN_READY,
 )
 
@@ -66,9 +67,9 @@ class Fixture(GlobalFrontierGraphRouteAdapterMixin):
         return True
 
 
-def plan():
+def plan(status=PLAN_READY):
     return GraphRoutePlan(
-        PLAN_READY,
+        status,
         ACTION_CROSS_PORTAL,
         current_place_id=2,
         target_place_id=3,
@@ -124,6 +125,24 @@ class SameEpochMaterializationBudgetTest(unittest.TestCase):
             fixture._record_graph_route_materialization_miss(route, 7), False
         )
         self.assertEqual(fixture.graph_route_materialization_attempts, 1)
+
+    def test_blocked_plan_also_consumes_the_budget(self):
+        # A blocked plan (e.g. dfs_execution_failed_return_obligation_preserved)
+        # cannot materialize either; without a budget it holds the decision
+        # forever.
+        fixture = Fixture()
+        route = plan(PLAN_BLOCKED)
+        results = [
+            fixture._record_graph_route_materialization_miss(
+                route, 7, "graph_route_blocked:dfs_return_obligation",
+            )
+            for _ in range(_GRAPH_ROUTE_MATERIALIZATION_MAX_MISSES)
+        ]
+        self.assertEqual(results[-1], True, results)
+        self.assertEqual(
+            [reason for reason, *_ in fixture.invalidated],
+            ["graph_route_materialization_expired"],
+        )
 
     def test_published_miss_carries_the_attempt_count(self):
         fixture = Fixture()

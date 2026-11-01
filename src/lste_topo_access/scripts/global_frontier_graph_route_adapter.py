@@ -16,6 +16,7 @@ from global_frontier_graph_route_planner import (
     ACTION_OBSERVE_LOCAL_WORK,
     ACTION_PROBE_PORTAL,
     ACTION_RETRY_VIEWPOINT,
+    PLAN_BLOCKED,
     PLAN_READY,
     GraphRoutePlan,
     dfs_exit_projection_ready,
@@ -1451,7 +1452,17 @@ class GlobalFrontierGraphRouteAdapterMixin:
         self, plan, map_epoch=None, reason="graph_route_materialization_wait"
     ):
         """Count materialization misses and force a bounded next action."""
-        if plan is None or getattr(plan, "status", None) != PLAN_READY:
+        # A blocked plan is not waiting for a different snapshot: its own
+        # reason (e.g. ``dfs_execution_failed_return_obligation_preserved``)
+        # stays true until something else retires the obligation, and nothing
+        # else can run while it holds the decision.  Runs
+        # 20261031_160157, 20261101_172224, 20261101_165734 and
+        # 20261101_163936 each stopped dispatching for the rest of the window
+        # after exactly this shape.  Count a blocked projection against the
+        # same bounded budget as a ready plan whose identity is missing.
+        if plan is None or getattr(plan, "status", None) not in (
+            PLAN_READY, PLAN_BLOCKED,
+        ):
             return False
         obligation_key = self._graph_route_materialization_obligation_key(plan)
         if obligation_key is None:

@@ -24,6 +24,7 @@ from global_frontier_portal_probe_adapter import (
 )
 from global_frontier_graph_route_gate import (
     candidate_matches_graph_plan,
+    candidate_matches_tsp_work_item,
     candidate_refines_graph_plan,
     graph_plan_is_exclusive,
 )
@@ -48,7 +49,12 @@ class GlobalFrontierSelectionPlannerMixin:
                 work_item_id = int(getattr(candidate, "work_item_id", 0))
             except (TypeError, ValueError):
                 work_item_id = 0
-            if work_item_id > 0:
+            route = getattr(candidate, "route", ()) or ()
+            action = route[17] if len(route) > 17 else None
+            local_action = action in (
+                "bootstrap_observation", "observe_local_work", "retry_viewpoint", "reinspect_target")
+            legacy_local = len(route) <= 17 and getattr(candidate, "portal_id", None) is None
+            if work_item_id > 0 and (local_action or legacy_local):
                 work_item_ids.add(work_item_id)
             try:
                 probe_id = int(getattr(candidate, "portal_id", 0))
@@ -78,11 +84,34 @@ class GlobalFrontierSelectionPlannerMixin:
     ):
         """Select a local endpoint or one deliberate doorway transition."""
         self.last_frontier_decision = None
-        if getattr(self, "exploration_method", "") == "gp_branch_tree":
-            self._reset_frontier_selection_metrics()
-            return self.choose_gp_branch_frontier(
-                message, preferred_steps if preferred_steps is not None else steps,
-                now, robot_map, semantic_hint, excluded)
+        # GP+SLAM owns the entire temporary Portal observation period. Hold
+        # normal Place/WorkItem selection during the quiet deduplication window
+        # as well as while a branch is being entered, viewed, and returned.
+        if getattr(self, "gp_portal_assistance_enabled", False):
+            auth = getattr(self, "active_portal_authentication", lambda: None)()
+            task = getattr(self, "junction_portal_authentication", None)
+            observation_active = bool(
+                task is not None
+                and getattr(task, "branches", None)
+                and getattr(task, "phase", "") in ("watching", "authenticating")
+                and not task.all_finished()
+            )
+            if auth is not None or observation_active:
+                self._reset_frontier_selection_metrics()
+                if auth is None:
+                    return None
+                auth_steps = preferred_steps if preferred_steps is not None else steps
+                if preferred_mask is not None and steps is not None:
+                    # The relaxed field is the existing observation/recovery
+                    # topology, not permission for a relaxed endpoint. A narrow
+                    # raster connection can split strict BFS components even
+                    # when both endpoints satisfy strict clearance and native
+                    # Navfn/TEB can route between them. Keep endpoint admission
+                    # strict while preserving that already-supported topology.
+                    auth_steps = np.where(preferred_mask, steps, -1)
+                return self.choose_gp_branch_frontier(
+                    message, auth_steps,
+                    now, robot_map, semantic_hint, excluded)
         # Keep the named candidate alongside the legacy route tuple until the
         # outer lifecycle commits it.  The tuple is the public compatibility
         # boundary, but it cannot carry the candidate's physical Place ID;
@@ -445,7 +474,14 @@ class GlobalFrontierSelectionPlannerMixin:
                     visible_portal_ids=visible_portal_ids,
                 )
             )
-            if graph_plan_identity_visible:
+            durable_egress = bool(getattr(
+                self, "_graph_plan_requires_durable_egress", lambda _plan: False
+            )(graph_plan))
+            if durable_egress:
+                rehydration_event = "graph_route_rehydration_deferred"
+                rehydration_complete = False
+                rehydration_reason = "reverse_portal_uses_physical_egress_materializer"
+            elif graph_plan_identity_visible:
                 rehydration_event = "graph_route_rehydration_ready"
                 rehydration_complete = True
                 rehydration_reason = "current_snapshot_identity_matches_plan"
@@ -497,6 +533,15 @@ class GlobalFrontierSelectionPlannerMixin:
                     geometry_source="current_frontier_snapshot",
                 )
 
+            if durable_egress:
+                # Ordinary frontier absence says nothing about a known return
+                # edge. The existing egress materializer owns current-map
+                # reachability and bounded failure/release for this Portal.
+                retain = getattr(self, "_retain_graph_route_plan_lease", None)
+                if callable(retain):
+                    retain(graph_plan, rehydration_reason)
+                return None
+
             # Projection completion is only a statement about the snapshot
             # pass.  A ready durable plan whose identity is absent is already
             # a materialization miss, including the empty-candidate case; do
@@ -537,6 +582,19 @@ class GlobalFrontierSelectionPlannerMixin:
                     current_place_id=graph_plan.current_place_id,
                     obligation_kind=str(graph_plan.obligation_kind),
                     obligation_id=graph_plan.obligation_id,
+                )
+            # A blocked identity still consumes the obligation's bounded
+            # retry budget.  Without this the decision returns None on every
+            # wake and no other action can ever be selected (sealed runs
+            # 20261031_160157 / 20261101_172224 stalled 180 s this way).
+            record_miss = getattr(
+                self, "_record_graph_route_materialization_miss", None
+            )
+            if callable(record_miss):
+                record_miss(
+                    graph_plan,
+                    snapshot_epoch,
+                    "graph_route_blocked:%s" % str(graph_plan.reason),
                 )
             return None
         if graph_plan is not None:
@@ -808,6 +866,18 @@ class GlobalFrontierSelectionPlannerMixin:
         # on canonical invalidation, after which normal same-place refinement
         # may resume for a newly selected plan.
         exact_work_item_lease = False
+        active_room = getattr(self, "active_semantic_room", None)
+        if (
+            isinstance(active_room, dict)
+            and str(getattr(plan, "obligation_kind", "") or "") == "work_item"
+        ):
+            try:
+                exact_work_item_lease = (
+                    int(getattr(plan, "current_place_id", -1))
+                    == int(active_room.get("place_id", -2))
+                )
+            except (TypeError, ValueError):
+                exact_work_item_lease = False
         materialization_miss_count = getattr(
             self, "graph_route_materialization_miss_count", 0
         )
@@ -816,7 +886,8 @@ class GlobalFrontierSelectionPlannerMixin:
         except (TypeError, ValueError):
             materialization_miss_count = 0
         if (
-            plan is not None
+            not exact_work_item_lease
+            and plan is not None
             and str(getattr(plan, "obligation_kind", "") or "")
             == "work_item"
             and materialization_miss_count > 0
@@ -835,10 +906,19 @@ class GlobalFrontierSelectionPlannerMixin:
                     )
                 except (TypeError, ValueError):
                     exact_work_item_lease = False
+        tsp_work_item_order = bool(
+            plan is not None
+            and str(getattr(plan, "obligation_kind", "") or "") == "work_item"
+            and tuple(getattr(plan, "work_item_tour", ()) or ())
+        )
         matcher = (
-            candidate_matches_graph_plan
-            if exact_work_item_lease
-            else candidate_refines_graph_plan
+            candidate_matches_tsp_work_item
+            if tsp_work_item_order
+            else (
+                candidate_matches_graph_plan
+                if exact_work_item_lease
+                else candidate_refines_graph_plan
+            )
         )
         matching = [
             candidate
@@ -846,10 +926,27 @@ class GlobalFrontierSelectionPlannerMixin:
             if matcher(plan, candidate)
         ]
         if not matching:
+            report = dict(
+                planned_action=getattr(plan, "action", None),
+                planned_work_item_id=getattr(plan, "obligation_id", None),
+                planned_place_id=getattr(plan, "current_place_id", None),
+                candidates=[dict(work_item_id=getattr(c, "work_item_id", None),
+                    place_id=getattr(c, "place_id", None),
+                    action=(c.route[17] if len(c.route)>17 else None),
+                    probe_id=getattr(c, "portal_id", None)) for c in (candidates or ())])
+            if report != getattr(self, "last_graph_candidate_identity_report", None):
+                self.last_graph_candidate_identity_report = report
+                publish = getattr(self, "publish_status", None)
+                if callable(publish):
+                    publish("graph_candidate_identity_unavailable", **report)
             return None
         if getattr(self, "frontier_action_policy", "legacy_scalar") == "event_pareto":
             selected_route = self._select_frontier_decision_candidate(
                 matching, FRONTIER_ACTION_ORDER, request,
+                durable_work_item=bool(tsp_work_item_order
+                    and getattr(self, "current_physical_place_id", None) is not None
+                    and getattr(plan, "current_place_id", None)
+                    == getattr(self, "current_physical_place_id", None)),
             )
             if selected_route is None:
                 return None
@@ -901,7 +998,7 @@ class GlobalFrontierSelectionPlannerMixin:
         return route
 
     def _select_frontier_decision_candidate(
-        self, candidates, allowed_categories, request,
+        self, candidates, allowed_categories, request, durable_work_item=False,
     ):
         """Select one legal local action without reading the scalar score."""
         if not candidates:
@@ -909,7 +1006,11 @@ class GlobalFrontierSelectionPlannerMixin:
         decision = select_frontier_action(
             candidates,
             allowed_categories=tuple(allowed_categories or FRONTIER_ACTION_ORDER),
-            allowed_region_tiers=request.allowed_region_tiers,
+            # Memory tiers rank raw frontiers, not an exact unresolved TSP
+            # obligation in the current Place. Parent WI must remain executable
+            # after its region becomes a revisit. All hard candidate ownership,
+            # coverage and route checks still run in select_frontier_action.
+            allowed_region_tiers=(None if durable_work_item else request.allowed_region_tiers),
             decision_epoch=(
                 getattr(request.components, "epoch", None),
                 getattr(self, "current_physical_place_id", None),
@@ -929,6 +1030,17 @@ class GlobalFrontierSelectionPlannerMixin:
             "decision_epoch": decision.decision_epoch,
         }
         if decision.selected is None:
+            report = dict(rejected=[dict(
+                work_item_id=getattr(item.candidate, "work_item_id", None),
+                place_id=getattr(item.candidate, "place_id", None),
+                action_category=getattr(item.candidate, "action_category", None),
+                region_tier=getattr(item.candidate, "region_tier", None),
+                reasons=list(item.reasons)) for item in decision.rejected])
+            if report != getattr(self, "last_frontier_policy_rejection_report", None):
+                self.last_frontier_policy_rejection_report = report
+                publish = getattr(self, "publish_status", None)
+                if callable(publish):
+                    publish("frontier_policy_candidates_rejected", **report)
             return None
         selected = decision.selected.route
         self.last_frontier_region_tier = decision.selected.region_tier
