@@ -1,0 +1,78 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<sdf version="1.6">
+  <world name="semantic_t_junction">
+    <gravity>0 0 -9.8</gravity>
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+    <scene>
+      <ambient>0.45 0.45 0.45 1</ambient>
+      <background>0.72 0.72 0.72 1</background>
+      <shadows>true</shadows>
+    </scene>
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.2 -0.9</direction>
+    </light>
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>60 60</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>60 60</size></plane></geometry>
+          <material>
+            <script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    
+    <model name="low_body_plant">
+    <link name="link_29">
+      <pose frame="">-0.010565 -0.019137 0.004813 0 -0 1.12457</pose>
+       <visual name="visual">
+        <pose frame="">0 0 0 0 -0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://plant_1/meshes/leaf.dae</uri>
+            <scale>1 1 1</scale>
+          </mesh>
+        </geometry>
+        <material>
+          <lighting>1</lighting>
+          <ambient>0.36 0.737 0.211 1</ambient>
+          <diffuse>0.36 0.737 0.211 1</diffuse>
+          <specular>0.01 0.01 0.01 1</specular>
+          <emissive>0 0 0 1</emissive>
+          <shader type="vertex">
+            <normal_map>__default__</normal_map>
+          </shader>
+        </material>
+        <cast_shadows>1</cast_shadows>
+        <transparency>0</transparency>
+      </visual>
+      <collision name="collision">
+        <laser_retro>0</laser_retro>
+        <max_contacts>10</max_contacts>
+        <pose frame="">0 0 0 0 -0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://plant_1/meshes/leaf.dae</uri>
+            <scale>1 1 1</scale>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+    
+    <allow_auto_disable>1</allow_auto_disable>
+  <pose>0 0 0 0 0 0</pose><static>true</static></model>
+<model name="north"><static>true</static><pose>0 4 1 0 0 0</pose><link name="wall"><collision name="collision"><geometry><box><size>8.2 0.2 2</size></box></geometry></collision><visual name="visual"><geometry><box><size>8.2 0.2 2</size></box></geometry></visual></link></model><model name="south"><static>true</static><pose>0 -4 1 0 0 0</pose><link name="wall"><collision name="collision"><geometry><box><size>8.2 0.2 2</size></box></geometry></collision><visual name="visual"><geometry><box><size>8.2 0.2 2</size></box></geometry></visual></link></model><model name="east"><static>true</static><pose>4 0 1 0 0 0</pose><link name="wall"><collision name="collision"><geometry><box><size>0.2 8.2 2</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2 8.2 2</size></box></geometry></visual></link></model><model name="west"><static>true</static><pose>-4 0 1 0 0 0</pose><link name="wall"><collision name="collision"><geometry><box><size>0.2 8.2 2</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2 8.2 2</size></box></geometry></visual></link></model></world>
+</sdf>

@@ -64,6 +64,32 @@ class GlobalFrontierTerminalReplanMixin:
         self.awaiting_controller_lease_release_ack = bool(table)
         return table
 
+    def _controller_release_ack_matches(self, contract):
+        """Return true only for the exact already-acknowledged lease identity."""
+        ack = getattr(self, "last_controller_lease_release_ack", None)
+        if not isinstance(ack, dict) or not isinstance(contract, dict):
+            return False
+        for field in (
+            "route_id", "route_kind", "transaction_id",
+            "lifecycle_transaction_id", "action_generation",
+            "graph_transaction_id", "map_epoch", "origin_epoch",
+            "projection_epoch",
+        ):
+            expected = contract.get(field)
+            received = ack.get(field)
+            if expected is None:
+                continue
+            if field == "route_kind":
+                if str(expected or "") != str(received or ""):
+                    return False
+                continue
+            try:
+                if int(expected) != int(received):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
     def _remember_controller_release_contract(self, contract):
         """Store one predecessor contract without overwriting another route."""
         if not isinstance(contract, dict):
@@ -293,6 +319,15 @@ class GlobalFrontierTerminalReplanMixin:
 
         pending_table = self._pending_controller_release_table()
         pending_table.pop(identity["route_id"], None)
+        superseded_routes = []
+        for raw_route_id in list(pending_table):
+            try:
+                pending_route_id = int(raw_route_id)
+            except (TypeError, ValueError):
+                continue
+            if pending_route_id < identity["route_id"]:
+                pending_table.pop(raw_route_id, None)
+                superseded_routes.append(pending_route_id)
         self._sync_controller_release_compatibility()
         self.last_controller_lease_release_ack = dict(identity)
         last_released_route_id = int(
@@ -310,6 +345,7 @@ class GlobalFrontierTerminalReplanMixin:
             ),
             successor_planning="released",
             pending_controller_lease_release_count=len(pending_table),
+            superseded_pending_release_route_ids=sorted(superseded_routes),
         )
         active_route_id = int(getattr(self, "active_route_id", 0) or 0)
         successor_active = bool(

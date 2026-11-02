@@ -6,10 +6,14 @@
   <!-- Task/detection streams feed the task-conditioned Place belief. They
        never publish goals or alter controller parameters. -->
   <arg name="task_topic" default="/lste/task"/>
+  <arg name="target_done_policy" default="visual_target"/>
   <arg name="detections_topic" default="/lste/detections"/>
   <!-- Candidate validation follows the same inflated grid used by Navfn. -->
   <arg name="costmap_topic" default="/move_base/global_costmap/costmap"/>
   <arg name="costmap_updates_topic" default="/move_base/global_costmap/costmap_updates"/>
+  <!-- Extend the online map for long single-test corridors whose spawn
+       pose is west of the production environment window. -->
+  <arg name="map_xmin" default="-3.0"/>
   <arg name="costmap_max_age" default="3.0"/>
   <arg name="costmap_stationary_pose_epsilon" default="0.01"/>
   <!-- Connectivity validation is throttled because the rolling local
@@ -19,6 +23,7 @@
        service. A false response means the candidate has no executable global
        path even if a simplified occupancy BFS considered it connected. -->
   <arg name="navfn_plan_validation" default="true"/>
+  <arg name="place_navigation_constraints" default="false"/>
   <arg name="navfn_make_plan_service" default="/move_base/NavfnROS/make_plan"/>
   <arg name="navfn_make_plan_timeout" default="0.05"/>
   <!-- The service must validate the exact endpoint that move_base will
@@ -102,7 +107,6 @@
        place_portal_workitem. The full method also consumes /lste/task and
        /lste/detections to choose task-conditioned topological expansion. -->
   <arg name="exploration_method" default="gp_branch_tree"/>
-  <arg name="target_done_policy" default="visual_target"/>
   <!-- Region memory sits above point-level frontier completion. The primary
        identity is a doorway-separated, high-clearance known-free component:
        it groups far endpoints in one room while a narrow door cuts the room
@@ -167,13 +171,14 @@
     <!-- env04 occupies roughly x=[-2, 25], y=[-15, 7]. At 10 cm this keeps
          the Python connected-frontier search below 80k cells per cycle. -->
     <param name="delta" value="0.10"/>
-    <param name="xmin" value="-3.0"/>
+    <param name="xmin" value="$(arg map_xmin)"/>
     <param name="xmax" value="27.0"/>
     <param name="ymin" value="-16.0"/>
     <param name="ymax" value="9.0"/>
   </node>
 
-  <node if="$(arg start_frontier)" pkg="lste_topo_access" type="lste_global_frontier_node.py" name="lste_global_frontier" output="screen">
+  <node if="$(arg start_frontier)" pkg="lste_topo_access" type="lste_global_frontier_node.py" name="lste_global_frontier" output="screen" launch-prefix="$(optenv LSTE_FRONTIER_LAUNCH_PREFIX)">
+    <param name="target_done_policy" value="$(arg target_done_policy)"/>
     <param name="map_topic" value="/map"/>
     <param name="costmap_topic" value="$(arg costmap_topic)"/>
     <param name="costmap_updates_topic" value="$(arg costmap_updates_topic)"/>
@@ -181,6 +186,7 @@
     <param name="costmap_stationary_pose_epsilon" value="$(arg costmap_stationary_pose_epsilon)"/>
     <param name="costmap_validation_period" value="$(arg costmap_validation_period)"/>
     <param name="navfn_plan_validation" value="$(arg navfn_plan_validation)"/>
+    <param name="place_navigation_constraints" value="$(arg place_navigation_constraints)"/>
     <param name="navfn_make_plan_service" value="$(arg navfn_make_plan_service)"/>
     <param name="navfn_make_plan_timeout" value="$(arg navfn_make_plan_timeout)"/>
     <param name="navfn_make_plan_tolerance" value="$(arg navfn_make_plan_tolerance)"/>

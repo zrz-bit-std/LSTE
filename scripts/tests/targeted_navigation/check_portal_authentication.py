@@ -2,6 +2,7 @@
 """Audit one GP junction run's serial doorway-observation transactions."""
 import argparse
 import json
+import math
 from collections import Counter
 from pathlib import Path
 
@@ -9,17 +10,96 @@ AUTH_PREFIX = "portal_authentication_"
 
 def load_events(path):
     events = []
-    with Path(path).open(encoding="utf-8", errors="replace") as stream:
-        for line in stream:
-            if " event=global_frontier_event " not in line or " data=" not in line:
+    tree_index = None
+    dedup_max = {}
+    candidate_history = {}
+    with Path(path).open(encoding="utf-8", errors="strict") as stream:
+        for lineno, line in enumerate(stream, 1):
+            if not line.strip():
                 continue
-            try:
-                data = json.loads(line.split(" data=", 1)[1])
-            except (ValueError, TypeError):
+            if " data=" not in line or not line.endswith("\n"):
+                raise ValueError("incomplete metrics record at line %d" % lineno)
+            # Every trajectory sample is evidence too: never let a corrupt
+            # non-Portal record silently disappear behind a passing auth gate.
+            data = json.loads(line.split(" data=", 1)[1])
+            if not isinstance(data, dict):
+                raise ValueError("non-object metrics record at line %d" % lineno)
+            if " event=global_frontier_event " not in line:
                 continue
             name = str(data.get("frontier_event", ""))
-            events.append((name, data))
+            if name == "gp_branch_tree":
+                for key, value in (data.get("dedup_audit") or {}).items():
+                    if isinstance(value, (int, float)):
+                        dedup_max[key] = max(dedup_max.get(key, 0), int(value))
+                previous_tree = None if tree_index is None else events[tree_index][1].get("tree")
+                snapshot_tree = data.get("tree") or previous_tree
+                for branch_id, fact in candidate_branch_facts(snapshot_tree).items():
+                    candidate_history.setdefault(branch_id, fact)
+                record = (name, {"tree": snapshot_tree,
+                                 "dedup_audit": dict(dedup_max),
+                                 "candidate_history": dict(candidate_history)})
+                if tree_index is None:
+                    tree_index = len(events)
+                    events.append(record)
+                else:
+                    events[tree_index] = record
+            elif name.startswith(AUTH_PREFIX) or name == "portal_candidate_rejected":
+                # Preserve every audit input, without retaining unrelated full
+                # planner/region/WI snapshots for every event in a two-hour run.
+                keys = ("node_id", "branch_id", "phase", "state", "failure_reason",
+                        "snapshot", "left_frontier_cells", "right_frontier_cells",
+                        "turn_side", "turn_direction", "target_yaw", "all_finished",
+                        "reason", "spatial_evidence", "ros_time")
+                events.append((name, {key: data[key] for key in keys if key in data}))
     return events
+
+def candidate_branch_facts(tree):
+    """Stable open doorways recorded on a confirmed junction in one snapshot."""
+    facts = {}
+    if not tree:
+        return facts
+    nodes = {int(n["id"]): n for n in tree.get("nodes", [])
+             if n.get("id") is not None}
+    for branch in tree.get("branches", []):
+        try:
+            branch_id = int(branch.get("id", -1))
+            node = nodes.get(int(branch.get("node_id", -2)))
+        except (TypeError, ValueError):
+            continue
+        if node is None or not node.get("junction_confirmed"):
+            continue
+        if not branch.get("stable") or branch.get("passability") != "open":
+            continue
+        if branch.get("physical_gate") is None:
+            continue
+        if (branch.get("connection") == "return"
+                or branch.get("state") in ("return", "superseded")):
+            continue
+        facts[branch_id] = {
+            "node_id": int(node["id"]),
+            "node_xy": [float(v) for v in (node.get("physical_xy") or [])],
+        }
+    return facts
+
+
+def observed_candidate_branch_ids(history, junction_center=None,
+                                  junction_radius=2.0):
+    """Branch ids ever observed as a candidate during the run."""
+    observed = set()
+    for branch_id, fact in (history or {}).items():
+        if junction_center is not None:
+            try:
+                if math.dist([float(v) for v in fact.get("node_xy") or []],
+                             [float(v) for v in junction_center]) > float(junction_radius):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        try:
+            observed.add(int(branch_id))
+        except (TypeError, ValueError):
+            continue
+    return observed
+
 
 def ordered(names, required):
     at = -1
@@ -30,9 +110,135 @@ def ordered(names, required):
             return False
     return True
 
-def audit(path):
+def bounded_stall_returned(snapshot):
+    """Accept a timed-out candidate only with bounded stall and physical return."""
+    reason = str(snapshot.get("failure_reason", ""))
+    if not reason.startswith("authentication_physical_stall:"):
+        return False
+    events = snapshot.get("events", [])
+    names = [event.get("event") for event in events]
+    if not ordered(names, ["doorway_physical_progress_expired",
+                           "doorway_failure_return_started",
+                           "returned_to_junction_node_after_failure"]):
+        return False
+    phase = reason.rsplit(":", 1)[-1]
+    expired = next((e for e in events if e.get("event") == "doorway_physical_progress_expired"
+                    and e.get("phase") == phase), {})
+    returned = next((e for e in reversed(events)
+                     if e.get("event") == "returned_to_junction_node_after_failure"), {})
+    try:
+        budget, elapsed = float(expired["timeout"]), float(expired["elapsed"])
+        source, pose = snapshot["source_xy"], returned["pose_xy"]
+        if len(source) != 2 or len(pose) != 2:
+            return False
+        distance = math.dist(source, pose)
+        radius = float(snapshot.get("return_radius", .75))
+        return (all(math.isfinite(v) for v in (budget, elapsed, distance, radius))
+                and 0 < budget <= 12 and budget <= elapsed <= budget + 2
+                and 0 < radius <= .75 and distance <= radius
+                and returned.get("reason") == reason
+                and abs(distance - float(returned["distance"])) <= .02
+                and snapshot.get("source_side_proven") is True)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def bounded_stall_settled_at_source(snapshot):
+    """No artificial return is needed when an entering probe never left source."""
+    reason = snapshot.get("failure_reason")
+    if reason != "authentication_physical_stall:entering":return False
+    events = snapshot.get("events", [])
+    names = [e.get("event") for e in events]
+    if (snapshot.get("inside_xy") is not None or "vehicle_fully_inside" in names
+            or not ordered(names,["doorway_physical_progress_expired",
+                                  "doorway_failure_settled_at_source",
+                                  "doorway_authentication_failed"])):return False
+    expired=next((e for e in events if e.get("event")=="doorway_physical_progress_expired"
+                  and e.get("phase")=="entering"),{})
+    settled=next((e for e in events if e.get("event")=="doorway_failure_settled_at_source"),{})
+    try:
+        source,pose=snapshot["source_xy"],settled["pose_xy"]
+        if len(source)!=2 or len(pose)!=2 or len(settled["source_xy"])!=2:return False
+        budget,elapsed=float(expired["timeout"]),float(expired["elapsed"])
+        depth=float(settled["signed_depth"]);distance=math.dist(source,pose)
+        radius=float(snapshot.get("return_radius",.75))
+        return (snapshot.get("source_side_proven") is True
+                and settled.get("reason")==reason and settled.get("phase")=="entering"
+                and all(math.isfinite(v) for v in (budget,elapsed,depth,distance,radius))
+                and 0<budget<=12 and budget<=elapsed<=budget+2
+                and depth<-.05 and 0<radius<=.75 and distance<=radius
+                and math.dist(source,settled["source_xy"])<1e-6
+                and math.dist(pose,expired["pose_xy"])<.02
+                and abs(distance-float(settled["distance"]))<=.02)
+    except (KeyError,TypeError,ValueError):return False
+
+
+def evidenced_rejection_returned(snapshot):
+    """Planner rejection or phase deadline needs explicit evidence and real return."""
+    events=snapshot.get("events", []);names=[e.get("event") for e in events]
+    reason=str(snapshot.get("failure_reason", ""))
+    proof_name=("doorway_interior_plan_unavailable" if reason == "no_reachable_interior_entry_goal"
+                else "doorway_navigation_phase_budget_expired")
+    if not ordered(names,[proof_name,"doorway_failure_return_started","returned_to_junction_node_after_failure"]):
+        return False
+    proof=next((e for e in events if e.get("event")==proof_name
+                and (proof_name=="doorway_interior_plan_unavailable"
+                     or reason=="navigation_route_failed:"+str(e.get("reason")))),None)
+    if proof is None:return False
+    returned=next(e for e in reversed(events) if e.get("event")=="returned_to_junction_node_after_failure")
+    try:
+        source,pose=snapshot["source_xy"],returned["pose_xy"]
+        if len(source)!=2 or len(pose)!=2:return False
+        distance=math.dist(source,pose);radius=float(snapshot.get("return_radius",.75))
+        physical=(all(math.isfinite(v) for v in (distance,radius)) and 0<radius<=.75
+                  and distance<=radius and abs(distance-float(returned["distance"]))<=.02
+                  and returned.get("reason")==reason and snapshot.get("source_side_proven") is True)
+        if not physical:return False
+        if proof_name=="doorway_interior_plan_unavailable":
+            clearance=float(proof["navigation_clearance"]);width=float(snapshot["opening_width"])
+            bounds=snapshot["physical_bounds"]
+            stamp,minimum,required=float(proof["map_stamp"]),float(proof["minimum_depth"]),float(snapshot["required_depth"])
+            return (proof["feasible_interior_goal_count"]==0 and stamp>0
+                    and all(math.isfinite(v) for v in (stamp,minimum,required)) and required>0
+                    and int(proof["map_epoch"])>0 and 0<clearance and math.isfinite(clearance)
+                    and math.isfinite(width) and width>=max(.65,2*clearance)
+                    and len(bounds)==2 and all(len(p)==2 for p in bounds)
+                    and math.dist(*bounds)>=2*clearance
+                    and all(math.isfinite(float(v)) for p in bounds for v in p)
+                    and float(proof["minimum_depth"])>=float(snapshot["required_depth"])+.1)
+        timeout,elapsed=float(proof["timeout"]),float(proof["elapsed"])
+        return (reason=="navigation_route_failed:"+str(proof["reason"])
+                and proof.get("phase")=="turning" and int(proof["route_id"])>0
+                and all(math.isfinite(v) for v in (timeout,elapsed))
+                and 0<timeout<=12 and timeout<=elapsed<=timeout+2)
+    except (KeyError,TypeError,ValueError,OverflowError,StopIteration):
+        return False
+
+
+def audit(path, junction_center=None, junction_radius=2.0, all_started_nodes=False):
     events = load_events(path)
-    named = [(name, data) for name, data in events if name.startswith(AUTH_PREFIX)]
+    latest_tree = None
+    for name, data in events:
+        if name == "gp_branch_tree":
+            latest_tree = data.get("tree") or latest_tree
+    target_node_ids = set()
+    if latest_tree:
+        for node in latest_tree.get("nodes", []):
+            if not node.get("junction_confirmed"):
+                continue
+            if junction_center is not None:
+                try:
+                    if math.dist(
+                        [float(v) for v in node.get("physical_xy", [])],
+                        [float(v) for v in junction_center],
+                    ) > float(junction_radius):
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            target_node_ids.add(int(node["id"]))
+    named = [(name, data) for name, data in events
+             if name.startswith(AUTH_PREFIX)
+             and (all_started_nodes or not target_node_ids or int(data.get("node_id", -1)) in target_node_ids)]
     explicit_starts = [data for name, data in named
                        if name == "portal_authentication_branch_started"]
     explicit_ids = {int(x["branch_id"]) for x in explicit_starts
@@ -53,6 +259,7 @@ def audit(path):
     evidence_by_id = {}
     inside_by_id = {}
     latest_auth_state = {}
+    same_place_rejections = {}
     latest_tree = None
     dedup = Counter()
     for name, data in events:
@@ -74,6 +281,17 @@ def audit(path):
             if data.get("branch_id") is not None:
                 evidence_by_id[int(data["branch_id"])] = snap
                 latest_auth_state[int(data["branch_id"])] = snap.get("state")
+        if name == "portal_candidate_rejected" and data.get("reason") == "known_free_bypass_within_current_place":
+            spatial = data.get("spatial_evidence") or {}
+            try:
+                source_label = int(spatial.get("source_label", 0))
+                destination_label = int(spatial.get("destination_label", 0))
+                entry_label = int(spatial.get("entry_label", 0))
+            except (TypeError, ValueError):
+                continue
+            if (data.get("branch_id") is not None and source_label > 0
+                    and source_label == destination_label == entry_label):
+                same_place_rejections[int(data["branch_id"])] = spatial
     tree_branches = {}
     if latest_tree:
         tree_branches = {int(b["id"]): b for b in latest_tree.get("branches", [])
@@ -110,14 +328,17 @@ def audit(path):
         inside = inside_evidence
         routes = [d for n, d in named if n == "portal_authentication_route_selected"
                   and int(d.get("branch_id", -1)) == branch_id]
-        turn_routes = [d for d in routes if d.get("phase") == "turning"]
+        turn_routes = [d for d in routes if d.get("phase") in ("turning", "returning")]
         target = inside.get("target_yaw")
         target_locked = bool(target is not None and turn_routes and all(
             d.get("target_yaw") is not None
             and abs(((float(d["target_yaw"]) - float(target) + 3.141592653589793)
                      % 6.283185307179586) - 3.141592653589793) < 0.03
             for d in turn_routes))
-        returned_failure = "returned_to_junction_node_after_failure" in names
+        returned_failure = (
+            "returned_to_junction_node_after_failure" in names
+            or ordered(names, ["returned_to_junction_node", "portal_candidate_rejected"])
+        )
         tree_branch = tree_branches.get(branch_id, {})
         parent_node = next((n for n in (latest_tree or {}).get("nodes", [])
                             if int(n.get("id", -1)) == int(tree_branch.get("node_id", -2))), {})
@@ -128,12 +349,32 @@ def audit(path):
         )
         failure_reason = finish.get("failure_reason") or snap.get("failure_reason")
         rejected_false_candidate = (
-            state == "failed" and failure_reason == "no_frontier_inside_doorway"
+            state == "failed"
+            and failure_reason in (
+                "no_frontier_inside_doorway",
+                "portal_source_side_geometry_unproven",
+            )
             and returned_failure and lineage_preserved
         )
+        rejected_same_place_candidate = (
+            state == "failed"
+            and failure_reason == "known_free_bypass_within_current_place"
+            and branch_id in same_place_rejections
+            and snap.get("source_side_proven") is True
+            and snap.get("return_gate_cleared") is True
+            and success_sequence and target_locked
+            and returned_failure and lineage_preserved
+        )
+        bounded_navigation_failure = (
+            state == "failed" and lineage_preserved
+            and (bounded_stall_returned(snap) or bounded_stall_settled_at_source(snap))
+        )
+        evidenced_returned_failure = (state == "failed" and lineage_preserved
+                                       and evidenced_rejection_returned(snap))
         passed_branch = (
             (state == "completed" and success_sequence and target_locked)
-            or rejected_false_candidate
+            or rejected_false_candidate or rejected_same_place_candidate or bounded_navigation_failure
+            or evidenced_returned_failure
         )
         branches.append({
             "branch_id": branch_id,
@@ -150,7 +391,9 @@ def audit(path):
                 "completed_full_cycle": bool(success_sequence),
                 "locked_turn_target": target_locked,
                 "rejected_false_candidate_and_returned": rejected_false_candidate,
+                "rejected_same_place_candidate_and_returned": rejected_same_place_candidate,
                 "tree_lineage_preserved": lineage_preserved,
+                "bounded_stall_failed_and_returned": bounded_navigation_failure,
             },
             "passed": bool(passed_branch),
         })
@@ -162,9 +405,21 @@ def audit(path):
     candidate_ids = []
     if latest_tree:
         nodes = {int(x["id"]): x for x in latest_tree.get("nodes", [])}
+        target_nodes = []
         for node in nodes.values():
             if not node.get("junction_confirmed"):
                 continue
+            if junction_center is not None:
+                try:
+                    if math.dist(
+                        [float(v) for v in node.get("physical_xy", [])],
+                        [float(v) for v in junction_center],
+                    ) > float(junction_radius):
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            target_nodes.append(node)
+        for node in target_nodes:
             for branch_id in node.get("branch_ids", []):
                 branch = next((x for x in latest_tree.get("branches", [])
                                if int(x.get("id", -1)) == int(branch_id)), None)
@@ -175,9 +430,15 @@ def audit(path):
                     and branch.get("state") != "return"
                     and branch.get("state") != "superseded"):
                     candidate_ids.append(int(branch_id))
+    candidate_history = {}
+    for name, data in events:
+        if name == "gp_branch_tree":
+            candidate_history = data.get("candidate_history") or candidate_history
+    observed_candidate_ids = observed_candidate_branch_ids(
+        candidate_history, junction_center, junction_radius)
     checks = {
         "gp_tree_recorded": latest_tree is not None,
-        "confirmed_junction_candidates_observed": bool(candidate_ids),
+        "confirmed_junction_candidates_observed": bool(observed_candidate_ids),
         "every_stable_candidate_started": set(candidate_ids).issubset(set(started_ids)),
         "no_branch_started_twice": not duplicate_starts,
         "all_started_branches_settled": bool(started_ids) and all(
@@ -192,6 +453,8 @@ def audit(path):
         "passed": all(checks.values()),
         "checks": checks,
         "candidate_branch_ids": sorted(set(candidate_ids)),
+        "observed_candidate_branch_ids": sorted(observed_candidate_ids),
+        "all_started_nodes": bool(all_started_nodes),
         "started_branch_ids": started_ids,
         "duplicate_started_branch_ids": duplicate_starts,
         "branches": branches,
@@ -204,8 +467,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("metrics_log", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--junction-center", nargs=2, type=float)
+    parser.add_argument("--junction-radius", type=float, default=2.0)
+    parser.add_argument("--all-started-nodes", action="store_true")
     args = parser.parse_args()
-    result = audit(args.metrics_log)
+    result = audit(
+        args.metrics_log, junction_center=args.junction_center,
+        junction_radius=args.junction_radius, all_started_nodes=args.all_started_nodes,
+    )
     rendered = json.dumps(result, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

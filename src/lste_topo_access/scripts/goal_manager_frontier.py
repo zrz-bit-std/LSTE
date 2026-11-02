@@ -319,6 +319,11 @@ class GoalManagerFrontierMixin:
                 else None
             ),
         )
+        from portal_authentication_turn_contract import authentication_turn_contract
+        self.global_frontier_authentication_turn_required = "authentication_turn" in payload
+        self.global_frontier_authentication_turn = authentication_turn_contract(
+            payload.get("authentication_turn"), route_id,
+            canonical_graph_transaction_id, self.global_frontier_lifecycle_transaction_id)
         self.global_frontier_transition_kind = str(
             payload.get("transition_kind", "unknown")
         ).strip().lower() or "unknown"

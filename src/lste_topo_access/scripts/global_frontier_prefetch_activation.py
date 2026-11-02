@@ -37,8 +37,6 @@ class GlobalFrontierPrefetchActivationMixin:
         self.active_frontier_region_id = None
         if not preserve_route_id:
             self.active_route_id += 1
-            if branch_id is not None and tree is not None:
-                self.commit_gp_branch_transaction(branch_id, self.active_route_id)
         region = None
         if getattr(self, "place_memory_enabled", True):
             region = self.activate_frontier_region(

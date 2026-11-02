@@ -14,24 +14,35 @@ HELPER = ROOT / "scripts/tests/targeted_navigation/readiness.sh"
 
 
 class TargetedNavigationReadinessTest(unittest.TestCase):
-    def _run_probe(self, nodes, topics, metrics="event=run_start data={}\n"):
+    def _run_probe(self, nodes, topics, metrics="event=run_start data={}\n", profile="endpoint", map_publisher=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             metrics_path = root / "metrics.log"
             metrics_path.write_text(metrics, encoding="utf-8")
             node_lines = "\\n".join(nodes)
             topic_lines = "\\n".join(topics)
+            publisher = "true" if map_publisher else "false"
             command = """
 source {helper}
 rosnode() {{ printf '%b\\n' {nodes}; }}
-rostopic() {{ printf '%b\\n' {topics}; }}
-readiness_check endpoint {metrics}
+rostopic() {{
+  if [[ "$1" == info ]]; then
+    printf 'Publishers:\\n'
+    if {publisher}; then printf ' * /lste_online_slam (http://localhost:1234/)\\n'; fi
+    printf 'Subscribers:\\n'
+  else
+    printf '%b\\n' {topics}
+  fi
+}}
+readiness_check {profile} {metrics}
 printf 'result=%s missing=%s\\n' "$?" "$(readiness_missing_summary)"
 """.format(
                 helper=shlex.quote(str(HELPER)),
                 nodes=shlex.quote(node_lines),
                 topics=shlex.quote(topic_lines),
                 metrics=shlex.quote(str(metrics_path)),
+                profile=shlex.quote(profile),
+                publisher=publisher,
             )
             result = subprocess.run(
                 ["bash", "-c", command],
@@ -41,6 +52,21 @@ printf 'result=%s missing=%s\\n' "$?" "$(readiness_missing_summary)"
                 text=True,
             )
         return result.stdout
+
+    def test_child_crash_is_distinguished_from_clean_spawn_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            launcher = Path(directory) / "launcher.log"
+            command = "source %s; readiness_child_process_failure %s" % (
+                shlex.quote(str(HELPER)), shlex.quote(str(launcher)),
+            )
+            for message, status in (
+                ("[spawn_pro3-4] process has finished cleanly\n", 1),
+                ("[lste_wedetect_det_node-15] process has died [exit code -11]\n", 0),
+                ("[lste_global_frontier-8] process has died [exit code 1]\n", 0),
+            ):
+                launcher.write_text(message, encoding="utf-8")
+                result = subprocess.run(["bash", "-c", command], capture_output=True)
+                self.assertEqual(result.returncode, status)
 
     def test_ready_inventory_is_based_on_ros_graph_state(self):
         output = self._run_probe(
@@ -54,6 +80,15 @@ printf 'result=%s missing=%s\\n' "$?" "$(readiness_missing_summary)"
             ],
         )
         self.assertIn("result=0 missing=none", output)
+
+    def test_t_junction_requires_live_online_slam_map_publisher(self):
+        nodes = ["/move_base", "/lste_global_frontier", "/lste_online_slam", "/lste_navigation_metrics"]
+        topics = ["/map", "/move_base/global_costmap/costmap", "/move_base/local_costmap/costmap", "/pro3/wheel_odom", "/pro3/rlscan"]
+        failed = self._run_probe(nodes, topics, profile="t_junction", map_publisher=False)
+        self.assertIn("map_publisher:/map:/lste_online_slam", failed)
+        self.assertIn("result=1", failed)
+        ready = self._run_probe(nodes, topics, profile="t_junction", map_publisher=True)
+        self.assertIn("result=0 missing=none", ready)
 
     def test_missing_topic_is_addressable_without_a_buffered_console_line(self):
         output = self._run_probe(

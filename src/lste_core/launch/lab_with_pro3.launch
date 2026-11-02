@@ -11,6 +11,7 @@
   <arg name="gui" default="true"/>
   <arg name="use_sim_time" default="true"/>
   <arg name="robot_name" default="pro3"/>
+  <arg name="robot_description_path" default="$(find pja)/urdf/pro3.xacro"/>
   <!-- 当 world 已自带机器人时，设置 spawn_pro3:=false 跳过重复 spawn -->
   <arg name="spawn_pro3" default="true"/>
 
@@ -32,6 +33,7 @@
 
   <include file="$(find lste_core)/launch/spawn_pro3.launch">
     <arg name="robot_name" value="$(arg robot_name)"/>
+    <arg name="robot_description_path" value="$(arg robot_description_path)"/>
     <arg name="x" value="$(arg x)"/>
     <arg name="y" value="$(arg y)"/>
     <arg name="z" value="$(arg z)"/>

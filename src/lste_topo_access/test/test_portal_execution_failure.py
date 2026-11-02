@@ -43,6 +43,17 @@ class BridgeFailureHarness(GlobalFrontierEventCallbacksMixin):
         self.portal_hypothesis_ledger.bind_destination(
             edge["id"], 2, now=2.0,
         )
+        self._bridge_dispatch_contracts = {
+            8: {
+                "route_id": 8, "action_generation": 1,
+                "route_kind": "portal_transition",
+                "mission_route_kind": "portal_transition",
+                "source": "global_slam_frontier", "priority": 0,
+                "lifecycle_transaction_id": 1, "graph_transaction_id": 1,
+                "map_epoch": 1, "origin_epoch": 1, "projection_epoch": 1,
+                "transaction_id": 1,
+            },
+        }
         self.events = []
 
     def publish_status(self, event, **fields):
@@ -50,12 +61,32 @@ class BridgeFailureHarness(GlobalFrontierEventCallbacksMixin):
 
 
 class PortalExecutionFailureTest(unittest.TestCase):
+    def test_repeated_execution_failures_defer_portal_until_later_map_epoch(self):
+        ledger = PortalHypothesisLedger()
+        edge, _created = ledger.certify(1, (2.0, 0.0), (2.0, 1.0), now=1.0)
+        for index in range(3):
+            ledger.execution_failed(edge["id"], now=2.0 + index, map_epoch=10)
+        record = ledger.get(edge["id"])
+        self.assertEqual(record["state"], "certified")
+        self.assertEqual(record["execution_failure_count"], 3)
+        self.assertEqual(record["navigation_deferred_until_epoch"], 110)
+        self.assertEqual(record["navigation_deferred_reason"], "repeated_controller_failure")
+
     def test_aborted_reverse_route_does_not_invalidate_crossed_portal(self):
         harness = BridgeFailureHarness()
         message = SimpleNamespace(
             data=json.dumps({
                 "event": "terminal",
                 "active_route_id": 8,
+                "route_id": 8,
+                "action_generation": 1,
+                "transaction_id": 1,
+                "lifecycle_transaction_id": 1,
+                "graph_transaction_id": 1,
+                "map_epoch": 1,
+                "origin_epoch": 1,
+                "projection_epoch": 1,
+                "intent_priority": 0,
                 "active_intent_source": "global_slam_frontier",
                 "active_route_kind": "portal_transition",
                 "active_mission_route_kind": "portal_transition",
@@ -86,6 +117,52 @@ class PortalExecutionFailureTest(unittest.TestCase):
         self.assertEqual(len(execution_events), 1)
         self.assertEqual(execution_events[0]["state"], "crossed")
         self.assertEqual(execution_events[0]["portal_id"], 1)
+
+    def test_aborted_unbound_portal_route_preserves_candidate_for_retry(self):
+        harness = BridgeFailureHarness()
+        record = harness.portal_hypothesis_ledger.get(1)
+        record["state"] = "certified"
+        record["destination_place_id"] = None
+        record.pop("last_crossed_at", None)
+        message = SimpleNamespace(
+            data=json.dumps({
+                "event": "terminal",
+                "active_route_id": 8,
+                "route_id": 8,
+                "action_generation": 1,
+                "transaction_id": 1,
+                "lifecycle_transaction_id": 1,
+                "graph_transaction_id": 1,
+                "map_epoch": 1,
+                "origin_epoch": 1,
+                "projection_epoch": 1,
+                "intent_priority": 0,
+                "active_intent_source": "global_slam_frontier",
+                "active_route_kind": "portal_transition",
+                "active_mission_route_kind": "portal_transition",
+                "status": 4,
+                "status_text": "ABORTED",
+            })
+        )
+
+        with patch.object(
+            rospy.Time,
+            "now",
+            return_value=SimpleNamespace(to_sec=lambda: 3.0),
+        ):
+            harness.on_bridge_status(message)
+
+        self.assertEqual(record["state"], "certified")
+        self.assertEqual(record["failure_count"], 0)
+        self.assertEqual(record["execution_failure_count"], 1)
+        self.assertFalse(any(
+            event == "portal_hypothesis_failed"
+            for event, _fields in harness.events
+        ))
+        self.assertTrue(any(
+            event == "portal_execution_failure_observed"
+            for event, _fields in harness.events
+        ))
 
 
 if __name__ == "__main__":

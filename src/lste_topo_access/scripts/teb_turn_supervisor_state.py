@@ -6,11 +6,13 @@ import tf
 from geometry_msgs.msg import Twist
 
 from teb_turn_supervisor_contract import STATE_PASS_THROUGH
+from teb_native_reseed import NativeTebReseed
 
 
 def initialize_turn_supervisor_state(supervisor):
     """Create all mutable state before ROS callbacks can observe it."""
     supervisor.lock = nullcontext()
+    supervisor.native_teb_reseed = NativeTebReseed(supervisor)
     supervisor.state = STATE_PASS_THROUGH
     supervisor.task_done = False
     supervisor.navigation_hold = False
@@ -26,6 +28,7 @@ def initialize_turn_supervisor_state(supervisor):
     supervisor.active_action_source_goal = None
     supervisor.active_action_route_kind = ""
     supervisor.active_action_source = "unknown"
+    supervisor.active_action_goal_context = None
     supervisor.active_action_priority = 0
     supervisor.active_action_goal_transaction_id = 0
     supervisor.active_action_target_track_id = ""
@@ -120,6 +123,7 @@ def initialize_turn_supervisor_state(supervisor):
     # this node.  A command can be blocked by the base, mux, or the physical
     # environment while the odom pose remains unchanged.
     supervisor.turn_last_odom_theta = None
+    supervisor.turn_odom_progress_anchor_theta = None
     supervisor.turn_last_odom_sample_wall = 0.0
     supervisor.turn_last_odom_progress_wall = 0.0
     supervisor.turn_odom_progress_epsilon = 0.0
@@ -141,6 +145,7 @@ def initialize_turn_supervisor_state(supervisor):
     # it exhausts its rotation budget, the route watchdog must own the failure;
     # re-entering the same turn would create an unbounded spin loop.
     supervisor.stalled_route_reorientation_attempted_identity = None
+    supervisor.stalled_route_turn_handoff_count = 0
     supervisor.turn_capped_releases = 0
     supervisor.turn_count = 0
     supervisor.turn_completed_count = 0

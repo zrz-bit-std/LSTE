@@ -29,6 +29,7 @@ class ObservationSupport:
     # two persistent cell sets source-compatible.
     anchor_xy: object = None
     normal_xy: object = None
+    boundary_xy: object = None
 
 
 def _components(mask, neighbours):
@@ -256,6 +257,7 @@ def observation_supports(
                     support_cells,
                     anchor_xy=anchor_xy,
                     normal_xy=normal_xy,
+                    boundary_xy=_physical_cell_xy(min(arc), cell_xy, map_to_physical_xy),
                 )
             )
     return tuple(supports)

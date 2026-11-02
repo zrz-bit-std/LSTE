@@ -63,12 +63,179 @@ class PortalExplorer(GlobalFrontierPortalLifecycleMixin):
         self.pending_portal_retry = None
         self.place_departure = SimpleNamespace(region_id=None)
         self.events = []
+        self.current_place_scope_valid = True
+        self._place_partition_key = ('old_raster',)
+        self.scope_states = []
 
     def publish_status(self, event, **fields):
         self.events.append((event, fields))
+        self.scope_states.append((event, self.current_place_scope_valid))
 
 
 class PortalPlaceArrivalTest(unittest.TestCase):
+    def test_handoff_retires_scope_but_preserves_exact_tf_and_unfinished_work(self):
+        explorer=PortalExplorer()
+        projector=lambda x,y:(x,y)
+        explorer._place_partition_projector=projector
+        explorer._place_partition_tf_key=('map',5.)
+        explorer.place_work_items=object()
+        ledger=explorer.place_work_items
+        explorer.current_place_scope_frontier_work_evidence={'pending_count':0}
+        explorer._invalidate_place_scope_for_handoff(7)
+        self.assertFalse(explorer.current_place_scope_valid)
+        self.assertIsNone(explorer._place_partition_key)
+        self.assertEqual(explorer.place_entry_rehydration_pending,7)
+        self.assertIsNone(explorer.current_place_scope_frontier_work_evidence)
+        self.assertIs(explorer.place_work_items,ledger)
+        self.assertIs(explorer._place_partition_projector,projector)
+        self.assertEqual(explorer._place_partition_tf_key,('map',5.))
+
+    def test_failed_projection_return_keeps_unresolved_work_and_does_not_close(self):
+        from global_frontier_place_dfs import PlaceDfsTraversal
+        from global_frontier_work_items import PlaceWorkItemLedger
+        explorer=PortalExplorer();explorer.place_dfs=PlaceDfsTraversal()
+        explorer.place_dfs.enter(1,3,12)
+        explorer.place_dfs.update_projection_recovery(3,False,0.,(4.,0.))
+        explorer.place_dfs.update_projection_recovery(3,False,30.,(4.,0.))
+        explorer.place_work_items=PlaceWorkItemLedger(merge_radius=.5)
+        item=explorer.place_work_items._new_item(3,(),0.)
+        room=dict(node_id=7,branch_id=4,portal_id=12,place_id=3,source_place_id=1)
+        explorer.active_semantic_rooms=[room];explorer.active_semantic_room=room
+        explorer._commit_semantic_room_return(room,12,1,5.,None,None,explorer.active_semantic_rooms)
+        self.assertEqual(explorer.place_work_items.unresolved_ids(3),[item['id']])
+        self.assertEqual(explorer.place_dfs.nodes[3]['state'],'failed')
+        self.assertFalse(explorer.current_place_scope_valid)
+        self.assertIsNone(explorer._place_partition_key)
+        self.assertEqual(explorer.place_entry_rehydration_pending,1)
+        self.assertEqual(explorer.place_dfs.stack,[1])
+        self.assertEqual(explorer.events[-1][0],'place_scope_recovery_returned')
+        self.assertFalse(explorer.events[-1][1]['place_closed'])
+        self.assertNotIn('semantic_room_closed',[name for name,_ in explorer.events])
+
+    def test_return_waits_for_unprojected_place_work(self):
+        explorer = PortalExplorer()
+        from global_frontier_work_items import PlaceWorkItemLedger
+        explorer.place_work_items = PlaceWorkItemLedger(merge_radius=0.5)
+        item = explorer.place_work_items._new_item(3, (), 0.0)
+        room = {"node_id": 7, "branch_id": 4, "portal_id": 12,
+                "place_id": 3, "source_place_id": 1}
+        explorer.active_semantic_rooms = [room]
+        explorer.active_semantic_room = room
+        explorer.pending_graph_resume_place_id = None
+        explorer.pending_graph_resume_portal_id = None
+        explorer.pending_graph_resume_destination_place_id = None
+
+        explorer._commit_semantic_room_return(room, 99, 1, 5.0, None, None,
+                                              explorer.active_semantic_rooms)
+
+        self.assertEqual(explorer.pending_graph_resume_place_id, 3)
+        self.assertEqual(explorer.place_work_items.unresolved_ids(3), [item["id"]])
+        self.assertIs(explorer.active_semantic_room, room)
+        self.assertEqual(explorer.events[-1][0], "semantic_room_return_incomplete")
+
+        explorer.place_work_items.resolve(item["id"], 6.0, reason="observed")
+        explorer._commit_semantic_room_return(room, 99, 1, 7.0, None, None,
+                                              explorer.active_semantic_rooms)
+        self.assertIsNone(explorer.pending_graph_resume_place_id)
+        self.assertEqual(explorer.place_work_items.unresolved_ids(3), [])
+        self.assertIsNone(explorer.active_semantic_room)
+        self.assertEqual(explorer.active_semantic_rooms, [])
+        self.assertEqual(explorer.events[-1][0], "semantic_room_closed")
+
+    def test_return_waits_while_scoped_work_attempt_is_active(self):
+        from global_frontier_work_items import PlaceWorkItemLedger
+        explorer = PortalExplorer()
+        explorer.place_work_items = PlaceWorkItemLedger(merge_radius=0.5)
+        item = explorer.place_work_items._new_item(3, (), 0.0, anchor_xy=[1.0, 0.0])
+        explorer.place_work_items.dispatch_existing(
+            item["id"], 1.0, viewpoint_xy=[0.5, 0.0],
+        )
+        room = {"node_id": 7, "branch_id": 4, "portal_id": 12,
+                "place_id": 3, "source_place_id": 1}
+        explorer.active_semantic_rooms = [room]
+        explorer.active_semantic_room = room
+        explorer.pending_graph_resume_place_id = None
+        explorer.pending_graph_resume_portal_id = None
+        explorer.pending_graph_resume_destination_place_id = None
+
+        explorer._commit_semantic_room_return(
+            room, 99, 1, 5.0, None, None, explorer.active_semantic_rooms,
+        )
+
+        self.assertEqual(explorer.pending_graph_resume_place_id, 3)
+        self.assertEqual(explorer.place_work_items.unresolved_ids(3), [item["id"]])
+        self.assertIs(explorer.active_semantic_room, room)
+        self.assertEqual(explorer.events[-1][0], "semantic_room_return_incomplete")
+
+    def test_return_cannot_close_place_while_any_direction_has_unfinished_work(self):
+        from global_frontier_work_items import PlaceWorkItemLedger
+        from global_frontier_room_scope import build_branch_scope
+        explorer = PortalExplorer()
+        explorer.place_work_items = PlaceWorkItemLedger(merge_radius=0.5)
+        room = {"node_id": 7, "branch_id": 4, "portal_id": 12,
+                "place_id": 3, "source_place_id": 1}
+        branches = [
+            {"id": 4, "map_geometry": {"direction": [1.0, 0.0]}},
+            {"id": 5, "map_geometry": {"direction": [0.0, 1.0]}},
+        ]
+        room["branch_scope"] = build_branch_scope([0.0, 0.0], branches, 4)
+        selected = explorer.place_work_items._new_item(
+            3, (), 0.0, anchor_xy=[4.0, 0.2],
+        )
+        sibling = explorer.place_work_items._new_item(
+            3, (), 0.0, anchor_xy=[0.2, 4.0],
+        )
+        explorer.place_work_items.resolve(selected["id"], 1.0, reason="observed")
+        explorer.active_semantic_rooms = [room]
+        explorer.active_semantic_room = room
+        explorer.pending_graph_resume_place_id = None
+        explorer.pending_graph_resume_portal_id = None
+        explorer.pending_graph_resume_destination_place_id = None
+
+        explorer._commit_semantic_room_return(
+            room, 12, 1, 5.0, None, None, explorer.active_semantic_rooms,
+        )
+
+        self.assertEqual(explorer.events[-1][0], "semantic_room_return_incomplete")
+        self.assertEqual(explorer.place_work_items.unresolved_ids(1), [])
+        self.assertEqual(explorer.place_work_items.unresolved_ids(3), [sibling["id"]])
+        self.assertEqual(explorer.active_semantic_rooms, [room])
+        self.assertEqual(explorer.pending_graph_resume_place_id, 3)
+
+    def test_returning_to_incomplete_place_resumes_without_pushing_duplicate_room(self):
+        explorer = PortalExplorer()
+        room = {"node_id": 7, "branch_id": 4, "portal_id": 12,
+                "place_id": 3, "source_place_id": 1}
+        explorer.active_semantic_rooms = [room]
+        explorer.active_semantic_room = room
+
+        resumed = explorer._resume_semantic_room_arrival(room, 3, 99)
+
+        self.assertTrue(resumed)
+        self.assertEqual(explorer.active_semantic_rooms, [room])
+        self.assertIs(explorer.active_semantic_room, room)
+        self.assertEqual(explorer.events[-1][0], "semantic_room_exploration_resumed")
+
+    def test_completed_nested_room_pops_to_outer_room_and_suppresses_its_entrance(self):
+        explorer = PortalExplorer()
+        from global_frontier_work_items import PlaceWorkItemLedger
+        from global_frontier_portal_belief import PortalHypothesisLedger
+        explorer.place_work_items = PlaceWorkItemLedger(merge_radius=0.5)
+        outer = {"node_id": 7, "branch_id": 4, "portal_id": 12,
+                 "place_id": 3, "source_place_id": 1}
+        portals = PortalHypothesisLedger()
+        portal, _ = portals.certify(3, (1, 0), (2, 0), now=1.0)
+        inner = {"node_id": 9, "branch_id": 5, "portal_id": portal["id"],
+                 "place_id": 4, "source_place_id": 3}
+        explorer.active_semantic_rooms = [outer, inner]
+        explorer.active_semantic_room = inner
+        explorer._commit_semantic_room_return(inner, 99, 3, 5.0, portals,
+                                              None, explorer.active_semantic_rooms)
+        self.assertIs(explorer.active_semantic_room, outer)
+        self.assertEqual(explorer.active_semantic_rooms, [outer])
+        self.assertTrue(portals.get(portal["id"])["exploration_suppressed"])
+        self.assertEqual(explorer.events[-1][0], "semantic_room_closed")
+
     def test_terminal_binds_next_selection_to_the_arrived_place(self):
         explorer = PortalExplorer()
 
@@ -208,8 +375,14 @@ class PortalPlaceArrivalTest(unittest.TestCase):
         )
 
         self.assertIsNotNone(entered)
+        self.assertFalse(explorer.current_place_scope_valid)
+        self.assertIsNone(explorer._place_partition_key)
+        self.assertTrue(all(not valid for event,valid in explorer.scope_states
+                            if event in ('portal_hypothesis_crossed','place_dfs_entered')))
         self.assertNotEqual(entered["id"], source["id"])
         self.assertEqual(entered["portal_arrivals"], 1)
+        self.assertEqual(entered["entry_portals"][0]["portal_id"], edge["id"])
+        self.assertEqual(entered["entry_portals"][0]["source_place_id"], source["id"])
         self.assertEqual(explorer.current_physical_place_id, entered["id"])
         self.assertEqual(edge["destination_place_id"], entered["id"])
         self.assertEqual(
@@ -259,6 +432,10 @@ class PortalPlaceArrivalTest(unittest.TestCase):
         )
 
         self.assertIsNotNone(entered)
+        self.assertFalse(explorer.current_place_scope_valid)
+        self.assertIsNone(explorer._place_partition_key)
+        self.assertTrue(all(not valid for event,valid in explorer.scope_states
+                            if event in ('portal_hypothesis_crossed','place_dfs_entered')))
         self.assertNotEqual(entered["id"], source["id"])
         self.assertEqual(explorer.current_physical_place_id, entered["id"])
         self.assertEqual(edge["destination_place_id"], entered["id"])
@@ -266,6 +443,83 @@ class PortalPlaceArrivalTest(unittest.TestCase):
             explorer.events[-1][1]["evidence_source"],
             "portal_identity_without_component",
         )
+
+    def test_pending_room_reentry_reuses_the_existing_place_identity(self):
+        explorer = PortalExplorer()
+        source_component = {
+            "epoch": 21, "label": 1, "cells": 80,
+            "center_x": 5.0, "center_y": 4.0,
+            "min_x": 4.0, "max_x": 6.0,
+            "min_y": 3.0, "max_y": 5.0,
+        }
+        room_component = {
+            **source_component, "label": 2, "center_x": 8.0,
+            "min_x": 7.0, "max_x": 9.0,
+        }
+        source, _ = explorer.region_memory.activate(
+            5.0, 4.0, 10.0, now=1.0, component=source_component,
+        )
+        room, _ = explorer.region_memory.activate(
+            8.0, 4.0, 10.0, now=2.0, component=room_component,
+        )
+        explorer.portal_hypothesis_ledger = PortalHypothesisLedger()
+        edge, _ = explorer.portal_hypothesis_ledger.certify(
+            source["id"], (7.2, 4.0), (8.5, 4.0), now=2.0,
+        )
+        explorer.portal_hypothesis_ledger.crossed(edge["id"], now=2.5)
+        explorer.portal_hypothesis_ledger.bind_destination(
+            edge["id"], room["id"], now=2.5,
+        )
+        explorer.last_portal_hypothesis_id = edge["id"]
+        explorer.portal_transaction = PortalTransaction()
+        explorer.portal_transaction.start(
+            explorer.active_route_id,
+            portal_id=edge["id"],
+            source_place_id=source["id"],
+            gate_xy=(7.2, 4.0),
+            destination_xy=(8.5, 4.0),
+            source_side_proven=True,
+        )
+        explorer.portal_transaction.crossing_verified(explorer.active_route_id)
+        active_room = {
+            "node_id": 4, "branch_id": 8, "portal_id": edge["id"],
+            "place_id": room["id"], "source_place_id": source["id"],
+        }
+        explorer.active_semantic_room = active_room
+        explorer.active_semantic_rooms = [active_room]
+        explorer.pending_graph_resume_place_id = room["id"]
+        explorer.pending_graph_resume_portal_id = edge["id"]
+        explorer.pending_graph_resume_destination_place_id = source["id"]
+        explorer.region_memory.endpoint_observed(
+            8.0, 4.0, now=2.8, component=room_component,
+            region_id=room["id"],
+        )
+        arrival = PendingPortalArrival(
+            route_id=explorer.active_route_id,
+            goal_xy=(8.0, 4.0),
+            terminal_time=3.0,
+            source_region_id=source["id"],
+            portal_gate_xy=(7.2, 4.0),
+            physical_goal_xy=(8.0, 4.0),
+            physical_portal_gate_xy=(7.2, 4.0),
+        )
+
+        entered = explorer.commit_portal_arrival(
+            arrival, room_component, 3.0, "route_terminal",
+        )
+
+        self.assertIsNotNone(entered)
+        self.assertFalse(explorer.current_place_scope_valid)
+        self.assertIsNone(explorer._place_partition_key)
+        self.assertTrue(all(not valid for event,valid in explorer.scope_states
+                            if event in ('portal_hypothesis_crossed','place_dfs_entered')))
+        self.assertEqual(entered["id"], room["id"])
+        self.assertEqual(len(explorer.region_memory.regions), 2)
+        self.assertEqual(explorer.current_physical_place_id, room["id"])
+        self.assertTrue(any(
+            event == "semantic_room_exploration_resumed"
+            for event, _fields in explorer.events
+        ))
 
     def test_verified_arrival_in_covered_place_is_recorded_without_reopening_it(self):
         explorer = PortalExplorer()
@@ -410,6 +664,8 @@ class PortalPlaceArrivalTest(unittest.TestCase):
             )
         )
         self.assertEqual(len(explorer.region_memory.regions), before)
+        self.assertTrue(explorer.current_place_scope_valid)
+        self.assertEqual(explorer._place_partition_key, ('old_raster',))
         self.assertEqual(
             explorer.events[-1][1]["reason"],
             "stale_or_mismatched_portal_transaction",

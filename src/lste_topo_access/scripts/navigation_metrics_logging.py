@@ -6,10 +6,13 @@ stable ``(task_id, target_track_id)`` pair.  This mixin keeps those two
 cross-cutting concerns out of the node composition root.
 """
 
+from contextlib import nullcontext
+
 import datetime
 import json
 
 import rospy
+from navigation_metrics_line_stream import MetricsIntegrityError
 
 
 class NavigationMetricsLoggingMixin:
@@ -32,7 +35,12 @@ class NavigationMetricsLoggingMixin:
             payload,
         )
         try:
-            self.stream.write(line)
+            with getattr(self, "log_write_lock", nullcontext()):
+                self.stream.write(line)
+        except MetricsIntegrityError as exc:
+            rospy.logfatal("Metrics evidence integrity failure: %s", exc)
+            rospy.signal_shutdown("metrics_evidence_integrity_failure")
+            raise
         except (AttributeError, ValueError):
             pass
 

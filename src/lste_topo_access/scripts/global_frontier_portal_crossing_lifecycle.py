@@ -17,24 +17,29 @@ class GlobalFrontierPortalCrossingLifecycleMixin:
             if getattr(self, "pose_odom", None) is None
             else (float(self.pose_odom.x), float(self.pose_odom.y))
         )
-        # Room-observation and controller endpoint radii intentionally do not
-        # enter this test.  They are much larger than a door and made a robot
-        # that had visibly passed through an opening wait indefinitely for an
-        # unrelated room-scale depth.  This is a pure doorway geometry fact.
-        minimum_depth = portal_crossing_depth(
-            getattr(self, "clearance", 0.0)
-        )
         transaction = getattr(self, "portal_transaction", None)
         transaction_snapshot = (
             None if transaction is None else transaction.snapshot()
         )
+        # GP-certified edges retain the full-body depth proved during their
+        # observation. Controller success cannot downgrade it to half-clearance.
+        portal_id = (getattr(transaction_snapshot, "portal_id", None)
+                     or getattr(self, "last_portal_hypothesis_id", None))
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        record = getattr(ledger, "get", lambda _id: None)(portal_id)
+        minimum_depth = portal_crossing_depth(getattr(self, "clearance", 0.0), record)
+        bounds = record.get("physical_bounds") if isinstance(record, dict) else None
+        gate = getattr(self, "active_portal_gate_odom_xy", None)
+        if bounds is not None and record.get("physical_gate") is not None:
+            gate = record["physical_gate"]
         # The route-local start can be at the doorway after a recovery retry.
         # Preserve the transaction-level source proof and feed the latest
         # signed distance into it as additional physical evidence.
         current_signed_distance = portal_signed_distance(
             terminal_xy,
-            getattr(self, "active_portal_gate_odom_xy", None),
+            gate,
             getattr(self, "active_portal_destination_odom_xy", None),
+            bounds_xy=bounds,
         )
         if transaction is not None and current_signed_distance is not None:
             transaction.observe_source_side(
@@ -45,7 +50,7 @@ class GlobalFrontierPortalCrossingLifecycleMixin:
             transaction_snapshot = transaction.snapshot()
         return portal_crossing_evidence(
             getattr(self, "active_start_odom_xy", None),
-            getattr(self, "active_portal_gate_odom_xy", None),
+            gate,
             getattr(self, "active_portal_destination_odom_xy", None),
             terminal_xy,
             getattr(self, "active_portal_gate_approached_at", None) is not None,
@@ -56,6 +61,7 @@ class GlobalFrontierPortalCrossingLifecycleMixin:
                 if transaction_snapshot is None
                 else bool(transaction_snapshot.source_side_proven)
             ),
+            bounds_xy=bounds,
         )
 
     def confirm_active_portal_crossing(self):

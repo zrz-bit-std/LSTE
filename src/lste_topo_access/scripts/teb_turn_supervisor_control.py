@@ -633,9 +633,19 @@ class TebTurnSupervisorControlMixin:
             completion_tolerance = max(
                 0.05, min(self.yaw_goal_tolerance, self.yaw_goal_tolerance * 0.25)
             )
+        if getattr(self, "turn_phase", "") == "portal_authentication_turn":
+            from portal_authentication_turn_contract import active_authentication_turn, directed_turn_error
+            contract = getattr(self, "turn_authentication_contract", None)
+            if contract is None or active_authentication_turn(self) != contract:
+                self._release_turn_locked("authentication_turn_identity_changed", completed=False)
+                return Twist()
         if abs(error) <= completion_tolerance:
             self._release_turn_locked("yaw_tolerance_reached", completed=True)
             return copy.deepcopy(self.latest_planner_command)
+
+        if getattr(self, "turn_phase", "") == "portal_authentication_turn":
+            error = directed_turn_error(
+                self.turn_target_yaw, self.pose.theta, contract["direction"])
 
         odom_rotation = float(getattr(self, "turn_abs_rotation", 0.0) or 0.0)
         rotation_cap = float(getattr(self, "turn_rotation_cap", 0.0) or 0.0)

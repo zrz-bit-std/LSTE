@@ -71,6 +71,9 @@ class ShortReverseEntryFixture(
         )
         self.latest_trajectory_command = twist(-0.01, 0.05)
         self.latest_trajectory_command_wall = time.monotonic()
+        self.latest_planner_command = twist(-0.01, 0.05)
+        self.latest_planner_command_wall = time.monotonic()
+        self.planner_command_timeout = 0.60
         self.trajectory_feedback_period_ema = None
         self.trajectory_feedback_timeout = 0.35
         self.trajectory_feedback_timeout_cap = 0.60

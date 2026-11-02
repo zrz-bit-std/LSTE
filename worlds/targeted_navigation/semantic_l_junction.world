@@ -2014,6 +2014,6 @@
     </link>
     
     <allow_auto_disable>1</allow_auto_disable>
-  <pose>2.8 18.8 0 0 0 0</pose><static>true</static></model>
+  <pose>-2.8 18.8 0 0 0 0</pose><static>true</static></model>
 </world>
 </sdf>

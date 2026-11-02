@@ -7,6 +7,7 @@ ROS console output, so comparisons remain reproducible after a run ends.
 """
 
 import argparse
+from collections import Counter
 import datetime
 import json
 import math
@@ -683,6 +684,14 @@ def failure_episode_summary(records, snapshots=None):
     }
 
 
+def bridge_event_counts(records):
+    names=[record.get("bridge_event", "unknown") for record in records]
+    if all(isinstance(name,str) for name in names):
+        return dict(Counter(names))
+    # Keep the legacy equality/string-key behavior for malformed old records.
+    return {str(name):sum(other==name for other in names) for name in names}
+
+
 def summarize(path):
     raw_records = load_records(path)
     completion_record = next(
@@ -1106,13 +1115,7 @@ def summarize(path):
         "controller_mode": last.get("controller_mode"),
         "goal_source": last.get("goal_source"),
         "task_done": last.get("task_done"),
-        "bridge_event_counts": {
-            str(record.get("bridge_event", "unknown")): sum(
-                1 for item in bridge_events
-                if item.get("bridge_event", "unknown") == record.get("bridge_event", "unknown")
-            )
-            for record in bridge_events
-        },
+        "bridge_event_counts": bridge_event_counts(bridge_events),
         "log_event_counts": events,
     }
     # Do not combine the global first-seen/follow/done counters above: a run

@@ -85,6 +85,11 @@ class PortalTransaction:
         return self._last.state
 
     @property
+    def portal_id(self):
+        """Expose the reserved identity used by route-rebind admission."""
+        return self._last.portal_id
+
+    @property
     def active(self):
         return self.state in _ACTIVE_STATES
 
@@ -157,6 +162,34 @@ class PortalTransaction:
                 return False
         return True
 
+    def source_evidence_matches(self, portal_id, source_place_id, gate_xy, destination_xy):
+        """Reuse source evidence only for the same unfinished directed edge."""
+        prior = self._last
+        if not (self.active or (
+            prior.state == PORTAL_TX_IDLE
+            and prior.last_reason == "portal_transaction_closed_before_retry"
+        )):
+            return False
+        try:
+            if (int(portal_id) != int(prior.portal_id)
+                    or int(source_place_id) != int(prior.source_place_id)
+                    or not prior.source_side_proven
+                    or not math.isfinite(float(prior.source_signed_distance))
+                    or float(prior.source_signed_distance) >= 0.0):
+                return False
+        except (TypeError, ValueError):
+            return False
+        gate, destination = _xy(gate_xy), _xy(destination_xy)
+        old_gate, old_destination = _xy(prior.gate_xy), _xy(prior.destination_xy)
+        if None in (gate, destination, old_gate, old_destination):
+            return False
+        if math.hypot(gate[0]-old_gate[0], gate[1]-old_gate[1]) > 0.1:
+            return False
+        left = (destination[0]-gate[0], destination[1]-gate[1])
+        right = (old_destination[0]-old_gate[0], old_destination[1]-old_gate[1])
+        scale = math.hypot(*left)*math.hypot(*right)
+        return scale > 1e-9 and (left[0]*right[0]+left[1]*right[1])/scale >= 0.99
+
     def start(
         self, route_id, portal_id=None, source_place_id=None,
         gate_xy=None, destination_xy=None, now=None,
@@ -192,6 +225,11 @@ class PortalTransaction:
             )
         except (TypeError, ValueError):
             normalized_source_id = None
+        if self.source_evidence_matches(
+            normalized_portal_id, normalized_source_id, gate_xy, destination_xy,
+        ):
+            source_side_proven = True
+            source_signed_distance = self._last.source_signed_distance
         transaction_id = self._next_transaction_id
         self._next_transaction_id += 1
         self._last = self._snapshot(
@@ -257,6 +295,19 @@ class PortalTransaction:
         )
         self._record = self._last
         return self._last
+
+    def release_unstarted_route(self, route_id, reason="portal_route_released_before_dispatch"):
+        """Detach a route that was canceled before a controller action started."""
+        if not self.active or self.state not in (
+            PORTAL_TX_SOURCE_PROBE, PORTAL_TX_THROAT
+        ) or not self._route_matches(route_id):
+            return None
+        return self._set(
+            self.state,
+            route_id=0,
+            reason=reason,
+            transition="unstarted_route_released",
+        )
 
     def bind_route(self, route_id, reason="portal_route_retry"):
         """Move the same edge lease to a fresh action route after egress."""

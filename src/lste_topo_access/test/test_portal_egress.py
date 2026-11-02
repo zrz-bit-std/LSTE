@@ -370,6 +370,26 @@ class PortalEgressTest(unittest.TestCase):
         self.assertEqual(reused["source_place_id"], 1)
         self.assertEqual(len(explorer.portal_hypothesis_ledger.snapshot()), 1)
 
+    def test_reverse_endpoint_rejects_nearest_cell_short_of_full_body_depth(self):
+        explorer = DurableEgressExplorer()
+        message = SimpleNamespace(info=SimpleNamespace(
+            resolution=0.1,
+            origin=SimpleNamespace(position=SimpleNamespace(x=0., y=0.)),
+        ))
+        steps = np.zeros((1, 5), dtype=int)
+        explorer.nearest_reachable_cell = lambda *_args: (0, 2)
+        explorer.cell_xy = lambda _msg, row, col: ((col+0.5)*0.1, 0.05)
+        # Every reachable cell is less than the required 1.3m from the gate.
+        self.assertIsNone(explorer._durable_egress_endpoint(
+            message, steps, (0., 0.), (-1., 0.), minimum_depth=1.3,
+        ))
+        steps = np.zeros((1, 25), dtype=int)
+        endpoint = explorer._durable_egress_endpoint(
+            message, steps, (0., 0.), (-1., 0.), minimum_depth=1.3,
+        )
+        self.assertIsNotNone(endpoint)
+        self.assertGreaterEqual(endpoint[2][0], 1.3+0.5+0.05)
+
     def test_known_entry_provides_egress_when_snapshot_has_no_portal_labels(self):
         explorer = DurableEgressExplorer()
         candidate = explorer.select_durable_portal_egress(snapshot())
@@ -382,6 +402,96 @@ class PortalEgressTest(unittest.TestCase):
             explorer.portal_hypothesis_ledger.get(1)["state"], "selected"
         )
         self.assertEqual(explorer.events[-1][0], "durable_portal_egress_selected")
+
+    def test_selected_crossed_portal_egress_ignores_forward_materialization_exclusion(self):
+        explorer = DurableEgressExplorer()
+        edge, _created = explorer.portal_hypothesis_ledger.certify(
+            1, (2.0, 0.0), (1.0, 0.0), now=1.0,
+        )
+        explorer.portal_hypothesis_ledger.crossed(edge["id"], now=1.5)
+        explorer.portal_hypothesis_ledger.bind_destination(
+            edge["id"], 4, now=2.0,
+        )
+        explorer.region["entry_portals"][0].update({
+            "portal_id": edge["id"],
+            "source_place_id": 1,
+        })
+        explorer.graph_route_portal_id = edge["id"]
+        explorer._graph_route_materialization_exclusions = (
+            lambda _epoch: ({edge["id"]}, set(), set())
+        )
+
+        candidate = explorer.select_durable_portal_egress(snapshot())
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate[10], "portal_transition")
+        self.assertEqual(candidate[11], (2.0, 0.0))
+
+    def test_bound_crossed_portal_uses_recorded_parent_when_geometry_lookup_misses(self):
+        explorer = DurableEgressExplorer()
+        parent = {"id": 1, "state": "open", "endpoint_observations": 0}
+        edge, _created = explorer.portal_hypothesis_ledger.certify(
+            1, (2.0, 0.0), (1.0, 0.0), now=1.0,
+        )
+        explorer.portal_hypothesis_ledger.crossed(edge["id"], now=1.5)
+        explorer.portal_hypothesis_ledger.bind_destination(
+            edge["id"], 4, now=2.0,
+        )
+        explorer.region["entry_portals"][0].update({
+            "portal_id": edge["id"],
+            "source_place_id": 1,
+        })
+        explorer.region_memory = SimpleNamespace(
+            by_id=lambda place_id: {1: parent, 4: explorer.region}.get(int(place_id)),
+            portal_exit_from_entry=lambda *_args, **_kwargs: None,
+        )
+        explorer.graph_route_portal_id = edge["id"]
+
+        candidate = explorer.select_durable_portal_egress(snapshot())
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate[10], "portal_transition")
+        self.assertEqual(explorer.events[-1][0], "durable_portal_egress_selected")
+        self.assertEqual(explorer.events[-1][1]["destination_place_id"], 1)
+
+    def test_bound_crossed_portal_still_requires_physical_source_side_proof(self):
+        explorer = DurableEgressExplorer()
+        parent = {"id": 1, "state": "open", "endpoint_observations": 0}
+        edge, _created = explorer.portal_hypothesis_ledger.certify(
+            1, (2.0, 0.0), (1.0, 0.0), now=1.0,
+        )
+        explorer.portal_hypothesis_ledger.crossed(edge["id"], now=1.5)
+        explorer.portal_hypothesis_ledger.bind_destination(
+            edge["id"], 4, now=2.0,
+        )
+        explorer.region["entry_portals"][0].update({
+            "portal_id": edge["id"],
+            "source_place_id": 1,
+        })
+        explorer.region_memory = SimpleNamespace(
+            by_id=lambda place_id: {1: parent, 4: explorer.region}.get(int(place_id)),
+            portal_exit_from_entry=lambda *_args, **_kwargs: None,
+        )
+        explorer.graph_route_portal_id = edge["id"]
+        wrong_side = snapshot()
+        wrong_side.robot_map = (3.0, 0.0)
+
+        candidate = explorer.select_durable_portal_egress(wrong_side)
+
+        self.assertIsNone(candidate)
+        self.assertEqual(
+            explorer.last_durable_portal_egress_unavailable["reason"],
+            "bound_entry_direction_unproven",
+        )
+        from global_frontier_portal_transaction import PortalTransaction
+        tx = PortalTransaction()
+        tx.start(9, portal_id=edge["id"], source_place_id=4,
+                 gate_xy=(2., 0.), destination_xy=(3., 0.),
+                 source_side_proven=True, source_signed_distance=-1.)
+        tx.abort("portal_retry_after_unconfirmed_standoff")
+        tx.finish("portal_transaction_closed_before_retry")
+        explorer.portal_transaction = tx
+        self.assertIsNotNone(explorer.select_durable_portal_egress(wrong_side))
 
     def test_target_claim_blocks_durable_egress(self):
         explorer = DurableEgressExplorer()
@@ -612,6 +722,59 @@ class PortalEgressTest(unittest.TestCase):
         )
         self.assertEqual(explorer.events[-1][0], "durable_portal_crossing_selected")
 
+    def test_bound_crossed_portal_reenters_known_place_without_frontier(self):
+        explorer = DurableEgressExplorer()
+        record, _created = explorer.portal_hypothesis_ledger.certify(
+            4, (2.0, 0.0), (3.0, 0.0), now=1.0,
+        )
+        explorer.portal_hypothesis_ledger.crossed(record["id"], now=2.0)
+        explorer.portal_hypothesis_ledger.bind_destination(
+            record["id"], 9, now=2.0,
+        )
+        explorer.graph_route_portal_id = record["id"]
+        explorer.portal_probe_ledger = SimpleNamespace(
+            snapshot=lambda: [{
+                "id": 17,
+                "portal_id": record["id"],
+                "state": "certified",
+            }],
+        )
+
+        candidate = explorer.select_durable_portal_crossing(crossing_snapshot())
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate[10], "portal_transition")
+        self.assertEqual(candidate[17], "cross_portal")
+        self.assertEqual(candidate[19], record["id"])
+        self.assertEqual(explorer.events[-1][1]["destination_place_id"], 9)
+        self.assertEqual(explorer.events[-1][1]["reason"], "known_place_reentry")
+
+    def test_bound_crossed_portal_respects_closed_room_entry_seal(self):
+        explorer = DurableEgressExplorer()
+        record, _created = explorer.portal_hypothesis_ledger.certify(
+            4, (2.0, 0.0), (3.0, 0.0), now=1.0,
+        )
+        explorer.portal_hypothesis_ledger.crossed(record["id"], now=2.0)
+        explorer.portal_hypothesis_ledger.bind_destination(
+            record["id"], 9, now=2.0,
+        )
+        explorer.graph_route_portal_id = record["id"]
+        explorer.portal_probe_ledger = SimpleNamespace(
+            snapshot=lambda: [{
+                "id": 17,
+                "portal_id": record["id"],
+                "state": "certified",
+            }],
+        )
+        explorer.sealed_portal_reentry = lambda *_args, **_kwargs: {"id": 9}
+
+        candidate = explorer.select_durable_portal_crossing(crossing_snapshot())
+
+        self.assertIsNone(candidate)
+        self.assertEqual(
+            explorer.events[-1][1]["reason"], "portal_entry_sealed",
+        )
+
     def test_destination_side_pose_is_explicitly_preobserved_crossing(self):
         explorer = DurableEgressExplorer()
         record, _created = explorer.portal_hypothesis_ledger.certify(
@@ -624,6 +787,61 @@ class PortalEgressTest(unittest.TestCase):
 
         self.assertIsNotNone(candidate)
         self.assertTrue(candidate[20])
+
+    def test_completed_gp_authentication_supplies_destination_view_evidence(self):
+        explorer = DurableEgressExplorer()
+        explorer.portal_probe_ledger = PortalProbeLedger()
+        record, _created = explorer.portal_hypothesis_ledger.certify(
+            4, (2.0, 0.0), (3.0, 0.0), now=1.0,
+        )
+        record.update({
+            "gp_authentication_state": "completed",
+            "gp_authentication_evidence": {"events": [
+                {"event": name} for name in (
+                    "doorway_entry_started", "vehicle_fully_inside",
+                    "inside_frontier_observed", "room_facing_turn_complete",
+                    "returned_to_junction_node",
+                )
+            ]},
+        })
+        explorer.graph_route_portal_id = record["id"]
+
+        candidate = explorer.select_durable_portal_crossing(
+            crossing_snapshot(robot_map=(0.0, 0.0))
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate[17], "cross_portal")
+
+    def test_completed_gp_auth_reuses_source_side_evidence_after_crossing_retry(self):
+        explorer = DurableEgressExplorer()
+        explorer.portal_probe_ledger = PortalProbeLedger()
+        record, _created = explorer.portal_hypothesis_ledger.certify(
+            4, (2.0, 0.0), (3.0, 0.0), now=1.0,
+        )
+        record.update({
+            "gp_authentication_state": "completed",
+            "physical_gate": [2.0, 0.0],
+            "physical_destination": [3.0, 0.0],
+            "gp_authentication_evidence": {
+                "source_xy": [1.0, 0.0],
+                "events": [{"event": name} for name in (
+                    "doorway_entry_started", "vehicle_fully_inside",
+                    "inside_frontier_observed", "room_facing_turn_complete",
+                    "returned_to_junction_node",
+                )],
+            },
+        })
+        explorer.graph_route_portal_id = record["id"]
+
+        candidate = explorer.select_durable_portal_crossing(
+            crossing_snapshot(robot_map=(2.1, 0.0))
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertFalse(candidate[20])
+        self.assertTrue(explorer.last_portal_source_side_proven)
+        self.assertEqual(candidate[17], "cross_portal")
 
     def test_destination_probe_reuses_durable_source_side_evidence(self):
         """A destination-side probe may finish the same Portal transaction."""

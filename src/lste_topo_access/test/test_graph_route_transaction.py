@@ -23,6 +23,8 @@ from global_frontier_graph_route_planner import (  # noqa: E402
 from global_frontier_graph_route_transaction import (  # noqa: E402
     GraphRouteActionTransaction,
     materialize_graph_route_action,
+    next_graph_route_transaction_id,
+    route_graph_transaction_identity,
     with_graph_action,
 )
 from global_frontier_portal_probes import PortalObservationProbe  # noqa: E402
@@ -142,6 +144,80 @@ class GraphRouteTransactionTest(unittest.TestCase):
         self.assertFalse(result.reconciled)
         self.assertEqual(result.plan.action, ACTION_OBSERVE_LOCAL_WORK)
         self.assertEqual(result.plan.obligation_id, 3)
+
+    def test_tsp_plan_rejects_same_place_non_head_work_item(self):
+        prepared = plan(
+            ACTION_OBSERVE_LOCAL_WORK,
+            obligation_id=29,
+            work_item_tour=(29, 28),
+        )
+        result = materialize_graph_route_action(
+            prepared,
+            route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=28),
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.reason, "tsp_work_item_head_mismatch")
+
+    def test_tsp_plan_selects_only_its_head_candidate(self):
+        harness = type("Harness", (), {})()
+        harness.active_semantic_room = None
+        harness.current_physical_place_id = 1
+        harness.graph_route_materialization_miss_count = 0
+        harness.graph_route_materialization_invalidated = False
+        harness.frontier_action_policy = "legacy_scalar"
+        harness.last_graph_selected_candidate = None
+        harness._select_graph_plan_candidate = (
+            GlobalFrontierSelectionPlannerMixin._select_graph_plan_candidate.__get__(harness)
+        )
+        prepared = plan(
+            ACTION_OBSERVE_LOCAL_WORK,
+            obligation_id=29,
+            work_item_tour=(29, 28),
+        )
+        sibling = candidate_from_route(
+            route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=28), place_id=1,
+        )
+        head = candidate_from_route(
+            route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=29), place_id=1,
+        )
+
+        selected = harness._select_graph_plan_candidate(
+            [sibling, head], prepared, request=None,
+        )
+
+        self.assertEqual(selected[12], 29)
+        self.assertEqual(harness.last_graph_selected_candidate.work_item_id, 29)
+
+    def test_tsp_bootstrap_selects_head_even_if_sibling_is_listed_first(self):
+        harness = type("Harness", (), {})()
+        harness.active_semantic_room = None
+        harness.current_physical_place_id = 1
+        harness.graph_route_materialization_miss_count = 0
+        harness.graph_route_materialization_invalidated = False
+        harness.frontier_action_policy = "legacy_scalar"
+        harness.last_graph_selected_candidate = None
+        harness._select_graph_plan_candidate = (
+            GlobalFrontierSelectionPlannerMixin._select_graph_plan_candidate.__get__(harness)
+        )
+        prepared = plan(
+            ACTION_BOOTSTRAP,
+            obligation_id=29,
+            work_item_tour=(29, 28),
+        )
+        sibling = candidate_from_route(
+            route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=28), place_id=1,
+        )
+        head = candidate_from_route(
+            route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=29), place_id=1,
+        )
+
+        selected = harness._select_graph_plan_candidate(
+            [sibling, head], prepared, request=None,
+        )
+
+        self.assertEqual(selected[12], 29)
+        self.assertEqual(harness.last_graph_selected_candidate.work_item_id, 29)
 
     def test_target_reinspection_commits_only_a_local_viewpoint(self):
         prepared = plan(
@@ -372,6 +448,56 @@ class GraphRouteTransactionTest(unittest.TestCase):
 
         self.assertFalse(result.accepted)
         self.assertEqual(result.reason, "portal_crossing_identity_changed")
+
+    def test_graph_transaction_id_advances_past_released_route_high_water(self):
+        self.assertEqual(next_graph_route_transaction_id(3, 11), 12)
+        self.assertEqual(next_graph_route_transaction_id(12, 11), 13)
+
+    def test_portal_authentication_route_gets_monotonic_graph_identity(self):
+        selection = SimpleNamespace(authentication_phase="entering")
+        graph_id, sequence = route_graph_transaction_identity(
+            selection, None, 106, 104,
+        )
+        self.assertEqual((graph_id, sequence), (107, 107))
+
+        ordinary = SimpleNamespace(authentication_phase=None)
+        graph_id, sequence = route_graph_transaction_identity(
+            ordinary, None, 106, 104,
+        )
+        self.assertEqual((graph_id, sequence), (0, 106))
+
+        committed = SimpleNamespace(graph_transaction_id=42)
+        graph_id, sequence = route_graph_transaction_identity(
+            selection, committed, 106, 104,
+        )
+        self.assertEqual((graph_id, sequence), (42, 106))
+
+    def test_semantic_room_keeps_selected_work_item_identity_during_materialization(self):
+        harness = type("Harness", (), {})()
+        harness.active_semantic_room = {"place_id": 2, "branch_id": 9}
+        harness.current_physical_place_id = 2
+        harness.graph_route_materialization_miss_count = 0
+        harness.frontier_action_policy = "legacy_scalar"
+        harness.last_graph_selected_candidate = None
+        harness._select_graph_plan_candidate = (
+            GlobalFrontierSelectionPlannerMixin._select_graph_plan_candidate.__get__(harness)
+        )
+        planned = plan(ACTION_OBSERVE_LOCAL_WORK, obligation_id=14, current_place_id=2)
+        sibling = candidate_from_route(
+            route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=10, reason="sibling"),
+            place_id=2,
+        )
+        selected = candidate_from_route(
+            route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=14, reason="room_item"),
+            place_id=2,
+        )
+
+        result = harness._select_graph_plan_candidate(
+            [sibling, selected], planned, request=None,
+        )
+
+        self.assertEqual(result[12], 14)
+        self.assertEqual(harness.last_graph_selected_candidate.work_item_id, 14)
 
     def test_transaction_commit_does_not_mutate_prepared_record(self):
         prepared_plan = plan(ACTION_OBSERVE_LOCAL_WORK)

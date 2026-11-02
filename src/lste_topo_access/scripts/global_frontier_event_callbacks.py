@@ -23,7 +23,7 @@ class GlobalFrontierEventCallbacksMixin:
         """Return whether room-entry completion owns the mission boundary."""
         return str(
             getattr(self, "target_done_policy", "visual_target") or ""
-        ).strip().lower() == "target_room_entry"
+        ).strip().lower() in ("target_room_entry", "graph_exploration")
 
     def _apply_target_done_policy(self, policy):
         """Apply the shared completion policy at the graph ownership boundary."""
@@ -32,17 +32,17 @@ class GlobalFrontierEventCallbacksMixin:
             "visual_target",
             "target_room_entry",
             "target_context",
+            "graph_exploration",
         ):
             return False
         previous = str(
             getattr(self, "target_done_policy", "visual_target") or ""
         ).strip().lower()
         self.target_done_policy = policy
-        if policy == "target_room_entry" and previous != policy:
-            # A room-entry benchmark measures topology, so any detector-driven
-            # target obligation already queued before the policy arrived must
-            # be discarded at the same ownership boundary. Generic environment
-            # labels remain valid exploration evidence.
+        if policy in ("target_room_entry", "graph_exploration") and previous != policy:
+            # Topology/graph exploration owns navigation; detector labels stay
+            # available as semantic room evidence, while visual target claims
+            # are cleared before they can steal route ownership.
             target_belief = getattr(self, "target_belief", None)
             if target_belief is not None:
                 target_belief.reset(getattr(self, "current_task_version", ""))
@@ -55,7 +55,11 @@ class GlobalFrontierEventCallbacksMixin:
             self.publish_status(
                 "target_visual_control_suppressed",
                 target_done_policy=policy,
-                reason="target_room_entry_completion_owns_mission",
+                reason=(
+                    "graph_exploration_owns_mission"
+                    if policy == "graph_exploration"
+                    else "target_room_entry_completion_owns_mission"
+                ),
             )
         return True
 
@@ -277,20 +281,41 @@ class GlobalFrontierEventCallbacksMixin:
                 )
 
     def gather_detections(self, message):
-        return GlobalFrontierEventCallbacksMixin._enqueue_or_apply(
-            self, EventType.DETECTIONS_UPDATED, message, self.apply_detections
-        )
+        # Capture the Portal observation transaction at ROS ingress. Lifecycle
+        # processing may occur after a branch boundary, which can misattribute
+        # the frame if the active branch is looked up later.
+        branch = getattr(self, "active_portal_authentication", lambda: None)()
+        context = None
+        if branch is not None and branch.state in ("turning", "returning"):
+            context = {
+                "node_id": int(branch.node_id),
+                "branch_id": int(branch.branch_id),
+                "state": str(branch.state),
+            }
+        enqueue = getattr(self, "_enqueue_lifecycle_event", None)
+        payload = (message, context)
+        if callable(enqueue):
+            return enqueue(EventType.DETECTIONS_UPDATED, payload)
+        return self.apply_detections(payload)
 
-    def on_detections(self, message):
+    def on_detections(self, message, portal_observation_context=None):
         """Associate semantic detections with the current physical Place."""
         task_id = str(getattr(message, "task_id", "") or "").strip()
         current_task_id = str(getattr(self, "current_task_id", "") or "").strip()
         if current_task_id and task_id and task_id != current_task_id:
             return
-        branch_semantics = getattr(self, "observe_gp_branch_semantics", None)
-        if branch_semantics is not None:
-            branch_semantics(message)
         labels, target_labels = self._detection_labels(message)
+        auth = getattr(self, "active_portal_authentication", lambda: None)()
+        observation_tree = getattr(self, "gp_observation_tree", None)
+        context = portal_observation_context
+        if context is None and auth is not None and auth.state in ("turning", "returning"):
+            context = {"node_id": auth.node_id, "branch_id": auth.branch_id, "state": auth.state}
+        if context is not None and observation_tree is not None:
+            detections = list(getattr(message, "target_dets", []) or []) + list(getattr(message, "env_dets", []) or [])
+            observation_tree.observe(
+                context["node_id"], context["branch_id"], detections,
+                self._semantic_stamp(message),
+            )
         if not labels:
             return
         if self._target_visual_control_suppressed():
@@ -684,6 +709,36 @@ class GlobalFrontierEventCallbacksMixin:
             ),
         }
 
+    def _sync_matching_bridge_transaction(self, contract):
+        """Advance only the semantic transaction of the same admitted lease.
+
+        GoalManager may advance its mission transaction after a release was
+        queued. Keep that release retry synchronized without changing any
+        route, graph, action, lifecycle or map/projection identity.
+        """
+        if contract.get("source") != "global_slam_frontier" or contract.get("priority") != 0:
+            return
+        transaction_id = int(contract.get("transaction_id", 0) or 0)
+        if transaction_id <= 0:
+            return
+        for name in ("active_route_dispatch_contract", "pending_controller_lease_release"):
+            record = getattr(self, name, None)
+            if not isinstance(record, dict):
+                continue
+            if any(record.get(field) != contract.get(field) for field in (
+                    "route_id", "action_generation", "lifecycle_transaction_id",
+                    "graph_transaction_id", "map_epoch", "origin_epoch", "projection_epoch")):
+                continue
+            if record.get("route_kind") not in (
+                    contract.get("route_kind"), contract.get("mission_route_kind")):
+                continue
+            if transaction_id <= int(record.get("transaction_id", 0) or 0):
+                continue
+            record["transaction_id"] = transaction_id
+            if (name == "pending_controller_lease_release"
+                    and int(getattr(self, "last_released_route_id", 0) or 0) == contract["route_id"]):
+                self.last_released_route_transaction_id = transaction_id
+
     def _remember_bridge_dispatch_contract(self, payload):
         """Remember only routes admitted by the bridge execution boundary."""
         event = str(payload.get("event", "")).strip()
@@ -701,7 +756,10 @@ class GlobalFrontierEventCallbacksMixin:
             or contract["source"] != "global_slam_frontier"
             or contract["priority"] != 0
             or contract["route_kind"]
-            not in {"frontier_endpoint", "portal_transition", "local_egress"}
+            not in {
+                "frontier_endpoint", "frontier_turn_connector",
+                "portal_transition", "local_egress",
+            }
         ):
             return None
         contracts = getattr(self, "_bridge_dispatch_contracts", None)
@@ -725,6 +783,7 @@ class GlobalFrontierEventCallbacksMixin:
                     merged[field] = value
             if merged:
                 self.active_route_dispatch_contract = merged
+        self._sync_matching_bridge_transaction(contracts[contract["route_id"]])
         # Route IDs are monotonic. Keep the evidence lookup bounded during a
         # long exploration run.
         for route_id in sorted(contracts)[:-64]:
@@ -764,8 +823,6 @@ class GlobalFrontierEventCallbacksMixin:
             and received_transaction_id < expected_transaction_id
         ):
             return False, "dispatch_contract_transaction_id_mismatch"
-        if received_transaction_id > expected_transaction_id:
-            expected["transaction_id"] = received_transaction_id
         if (
             expected.get("map_epoch") is not None
             and contract.get("map_epoch") != expected.get("map_epoch")
@@ -780,6 +837,9 @@ class GlobalFrontierEventCallbacksMixin:
                 and int(received_epoch) != int(expected_epoch)
             ):
                 return False, "dispatch_contract_%s_mismatch" % field
+        if received_transaction_id > expected_transaction_id:
+            expected["transaction_id"] = received_transaction_id
+        self._sync_matching_bridge_transaction(contract)
         return True, "matched"
 
     def on_bridge_status(self, message):
@@ -865,25 +925,19 @@ class GlobalFrontierEventCallbacksMixin:
             failure_event = "portal_hypothesis_failed"
             if ledger is not None and portal_id > 0:
                 record = getattr(ledger, "get", lambda _id: None)(portal_id)
-                is_crossed = (
-                    isinstance(record, dict)
-                    and str(record.get("state", "")).strip().lower()
-                    == "crossed"
-                )
+                # A terminal navigation status is execution evidence, not
+                # proof that the doorway itself is invalid. Preserve
+                # certified/unbound Portal state so semantic entry work can
+                # retry after recovery.
                 recorder = getattr(ledger, "execution_failed", None)
-                if is_crossed:
-                    failed = (
-                        record
-                        if not callable(recorder)
-                        else recorder(
-                            portal_id, now=rospy.Time.now().to_sec(),
-                        )
-                    )
-                    failure_event = "portal_execution_failure_observed"
-                else:
-                    failed = ledger.failed(
+                failed = (
+                    record
+                    if not callable(recorder)
+                    else recorder(
                         portal_id, now=rospy.Time.now().to_sec(),
                     )
+                )
+                failure_event = "portal_execution_failure_observed"
             if failed is not None:
                 self.publish_status(
                     failure_event,
@@ -1256,6 +1310,9 @@ class GlobalFrontierEventCallbacksMixin:
             self.turn_supervisor_state = (
                 str(payload.get("state", "UNKNOWN")).strip().upper() or "UNKNOWN"
             )
+            # The supervisor heartbeats at ~1 Hz.  Remember when this latch was
+            # refreshed so a dead publisher cannot pin the progress clock.
+            self.turn_supervisor_status_monotonic = now_for(self)
             self.turn_supervisor_route_kind = str(
                 payload.get("active_route_kind", payload.get("route_kind", ""))
             ).strip().lower()
@@ -1283,6 +1340,11 @@ class GlobalFrontierEventCallbacksMixin:
                 self.turn_connector_released = False
             elif turn_event == "turn_completed":
                 self.turn_connector_released = True
+                complete_auth_turn = getattr(
+                    self, "complete_portal_turn_from_supervisor", None
+                )
+                if callable(complete_auth_turn):
+                    complete_auth_turn(payload)
                 previous_key = payload.get("previous_key")
                 if (
                     self.post_turn_stall_timeout is None
@@ -1340,8 +1402,14 @@ class GlobalFrontierEventCallbacksMixin:
     def apply_task(self, message):
         return GlobalFrontierEventCallbacksMixin.on_task(self, message)
 
-    def apply_detections(self, message):
-        return GlobalFrontierEventCallbacksMixin.on_detections(self, message)
+    def apply_detections(self, payload):
+        if isinstance(payload, tuple) and len(payload) == 2:
+            message, portal_observation_context = payload
+        else:
+            message, portal_observation_context = payload, None
+        return GlobalFrontierEventCallbacksMixin.on_detections(
+            self, message, portal_observation_context=portal_observation_context
+        )
 
     def apply_goal_arbitration(self, message):
         return GlobalFrontierEventCallbacksMixin.on_goal_arbitration(

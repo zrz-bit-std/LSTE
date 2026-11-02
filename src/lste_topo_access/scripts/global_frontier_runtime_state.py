@@ -205,11 +205,17 @@ class GlobalFrontierRuntimeStateMixin:
         self.pending_graph_resume_place_id = None
         self.pending_graph_resume_portal_id = None
         self.pending_graph_resume_destination_place_id = None
+        from global_frontier_place_dfs import PlaceDfsTraversal
+        self.place_dfs = PlaceDfsTraversal()
+        self.active_semantic_rooms = []
+        self.active_semantic_room = None
         self.active_work_item_id = None
         self.active_work_item_attempt_id = None
         self.active_work_item_place_id = None
         self.active_work_item_goal = None
         self.active_work_item_route_kind = None
+        self.active_work_item_normal_xy = None
+        self.active_work_item_map_yaw = None
         self.active_work_item_dispatch_announced = False
         self.active_portal_probe_id = None
         # Explicit information phase for the active physical doorway probe.
@@ -615,7 +621,7 @@ class GlobalFrontierRuntimeStateMixin:
         # Portal geometry is recomputed from each SLAM snapshot, but its
         # physical doorway identity persists across those snapshots.
         self.portal_hypothesis_ledger = PortalHypothesisLedger(
-            match_radius=self.region_memory.portal_entry_match_radius,
+            match_radius=self.region_memory.portal_entry_merge_radius,
         )
         self.portal_probe_ledger = PortalProbeLedger(
             match_radius=self.region_memory.portal_entry_match_radius,
@@ -627,6 +633,7 @@ class GlobalFrontierRuntimeStateMixin:
         # A Portal route is an edge transaction, not another frontier point.
         # Keep its phase/ownership independent from snapshot-local map labels.
         self.portal_transaction = PortalTransaction()
+        self.portal_transaction_route_rebind_pending = False
         self.last_portal_hypothesis_id = 0
         # A structural-place core uses a little more clearance than the actual
         # navigation route. This cuts a normal doorway into a topological gate

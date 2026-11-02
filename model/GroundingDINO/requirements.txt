@@ -8,3 +8,4 @@ numpy
 opencv-python
 supervision>=0.22.0
 pycocotools
+netifaces>=0.11.0

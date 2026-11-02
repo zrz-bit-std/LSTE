@@ -70,6 +70,13 @@ class RegionMemory:
         self.regions = list(regions)
 
 
+def graph_snapshot(epoch=1):
+    return SimpleNamespace(
+        map_context=SimpleNamespace(components=SimpleNamespace(epoch=epoch)),
+        route_graph=SimpleNamespace(validation=None),
+    )
+
+
 class AdapterFixture(GlobalFrontierGraphRouteAdapterMixin):
     def __init__(self, portals=(), probes=(), work_items=()):
         self.graph_route_planner_enabled = True
@@ -78,6 +85,8 @@ class AdapterFixture(GlobalFrontierGraphRouteAdapterMixin):
             fromlist=["GraphRoutePlanner"],
         ).GraphRoutePlanner()
         self.current_physical_place_id = 1
+        self.last_graph_snapshot_projection_complete = True
+        self.last_graph_snapshot_epoch = 1
         self.branch_first_enabled = True
         self.region_memory = RegionMemory([
             {"id": 1, "state": "open", "endpoint_observations": 1},
@@ -99,6 +108,120 @@ class AdapterFixture(GlobalFrontierGraphRouteAdapterMixin):
 
 
 class GraphRouteAdapterTest(unittest.TestCase):
+    def test_probe_candidate_work_lineage_is_not_a_local_wi_projection(self):
+        from global_frontier_selection_planner import GlobalFrontierSelectionPlannerMixin
+        route=[None]*20;route[12]=18;route[17]="probe_portal"
+        probe=SimpleNamespace(work_item_id=18,portal_id=22,route=tuple(route))
+        local_route=list(route);local_route[17]="observe_local_work"
+        local=SimpleNamespace(work_item_id=19,portal_id=None,route=tuple(local_route))
+        work,probes,portals=GlobalFrontierSelectionPlannerMixin._graph_snapshot_identity_sets([probe,local])
+        self.assertEqual(work,{19})
+        self.assertEqual(probes,{22})
+
+    def test_reverse_portal_retry_commits_monotonic_graph_identity(self):
+        from global_frontier_portal_transaction import PortalTransaction
+        fixture=AdapterFixture(portals=[dict(id=5,source_place_id=2,
+            destination_place_id=3,state="crossed")])
+        fixture.current_physical_place_id=3
+        fixture.last_portal_hypothesis_id=5
+        fixture.last_released_route_graph_transaction_id=109
+        fixture.portal_transaction=PortalTransaction()
+        fixture.portal_transaction.start(53,portal_id=5,source_place_id=3,
+            gate_xy=(-2.,0.),destination_xy=(0.,0.),
+            source_side_proven=True,source_signed_distance=-12.)
+        candidate=(1,2,0.,0.,10.,0.,0.,0.,None,1,"portal_transition",(-2.,0.))
+        result=fixture._commit_portal_recovery_retry(graph_snapshot(426),candidate)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[19],5)
+        transaction=fixture.graph_route_action_transaction
+        self.assertEqual(transaction.transaction_id,110)
+        self.assertEqual(transaction.phase,"committed")
+        self.assertEqual(transaction.map_epoch,426)
+        self.assertEqual(transaction.plan.target_place_id,2)
+        self.assertEqual(transaction.plan.current_place_id,3)
+        self.assertEqual(transaction.plan.first_portal_id,5)
+        fixture.last_portal_hypothesis_id=6
+        self.assertIsNone(fixture._commit_portal_recovery_retry(graph_snapshot(427),candidate))
+
+    def test_invalid_scope_wait_is_bounded_across_committed_map_plans(self):
+        from unittest.mock import patch
+        from global_frontier_place_dfs import PlaceDfsTraversal
+        fixture=AdapterFixture(portals=[dict(id=10,source_place_id=1,
+            destination_place_id=2,state='crossed',gp_authentication_state='completed')])
+        fixture.current_physical_place_id=2
+        fixture.current_place_scope_id=2;fixture.current_place_scope_valid=False
+        fixture.active_semantic_room=dict(source_place_id=1,place_id=2,portal_id=10)
+        fixture.place_dfs=PlaceDfsTraversal();fixture.place_dfs.enter(1,2,10)
+        with patch('global_frontier_graph_route_adapter.time.monotonic',side_effect=[0.,31.]):
+            fixture._plan_durable_graph_route(map_epoch=1)
+            plan=fixture._plan_durable_graph_route(map_epoch=2)
+        self.assertEqual(plan.first_portal_id,10)
+        self.assertEqual(plan.reason,'dfs_invalid_projection_recovery_return')
+        self.assertEqual(fixture.place_dfs.nodes[2]['state'],'recovery_returning')
+        self.assertIn('place_scope_recovery_started',[name for name,_ in fixture.events])
+
+    def test_tsp_inputs_keep_physical_frame_despite_slam_reprojection(self):
+        fixture = AdapterFixture(work_items=[
+            {"id": 51, "place_id": 1, "state": "unresolved",
+             "anchor_xy": (2.0, 3.0), "normal_xy": (1.0, 0.0)},
+        ])
+        fixture.pose_odom = SimpleNamespace(x=1.0, y=2.0, theta=0.0)
+        fixture.map_msg = SimpleNamespace(
+            header=SimpleNamespace(frame_id="map")
+        )
+        fixture.planar_xy_projector = lambda _target, _source: (
+            lambda x, y: (10.0 - y, 20.0 + x)
+        )
+
+        items, robot_pose = fixture._graph_route_tsp_inputs(
+            fixture.place_work_items
+        )
+
+        self.assertEqual(robot_pose[:2], (1.0, 2.0))
+        self.assertAlmostEqual(robot_pose[2], 0.0)
+        self.assertEqual(items[0]["anchor_xy"], (2.0, 3.0))
+        self.assertEqual(items[0]["normal_xy"], (1.0, 0.0))
+        self.assertEqual(fixture.place_work_items.records[0]["anchor_xy"], (2.0, 3.0))
+
+    def test_slam_projection_cannot_move_sibling_work_into_room_tsp(self):
+        from global_frontier_graph_route_planner import GraphRoutePlanner
+        fixture = AdapterFixture(work_items=[
+            {"id": 51, "place_id": 1, "state": "unresolved", "anchor_xy": (2.0, 3.0)},
+            {"id": 52, "place_id": 1, "state": "unresolved", "anchor_xy": (-3.0, 2.0)},
+        ])
+        fixture.pose_odom = SimpleNamespace(x=1.0, y=2.0, theta=0.0)
+        fixture.map_msg = SimpleNamespace(header=SimpleNamespace(frame_id="map"))
+        fixture.planar_xy_projector = lambda _target, _source: (
+            lambda x, y: (10.0 - y, 20.0 + x))
+        items, pose = fixture._graph_route_tsp_inputs(fixture.place_work_items)
+        plan = GraphRoutePlanner().plan(
+            1, places=[{"id": 1, "state": "open", "endpoint_observations": 1}],
+            portals=(), work_items=items, robot_pose=pose,
+            room_work_item_only=True,
+            room_branch_scope={"origin_xy": [1.0, 2.0], "selected_branch_id": 1,
+                               "directions": [{"branch_id": 1, "direction_xy": [1.0, 0.0]},
+                                              {"branch_id": 2, "direction_xy": [-1.0, 0.0]}]},
+        )
+        self.assertEqual(plan.obligation_id, 51)
+        self.assertEqual(plan.work_item_tour, (51,))
+
+    def test_only_certified_reverse_edge_uses_durable_egress(self):
+        fixture = AdapterFixture(portals=[{
+            "id": 11, "source_place_id": 1, "destination_place_id": 2,
+            "state": "crossed",
+        }])
+        fixture.current_physical_place_id = 2
+        plan = GraphRoutePlan(PLAN_READY, ACTION_CROSS_PORTAL,
+                              current_place_id=2, target_place_id=1,
+                              obligation_kind="portal_edge", obligation_id=11,
+                              first_portal_id=11, portal_path=(11,))
+        self.assertTrue(fixture._graph_plan_requires_durable_egress(plan))
+        fixture.portal_hypothesis_ledger.records[0]["state"] = "certified"
+        self.assertFalse(fixture._graph_plan_requires_durable_egress(plan))
+        fixture.portal_hypothesis_ledger.records[0]["state"] = "crossed"
+        fixture.current_physical_place_id = 1
+        self.assertFalse(fixture._graph_plan_requires_durable_egress(plan))
+
     def test_stage_only_plan_does_not_create_transaction(self):
         fixture = AdapterFixture(
             portals=[
@@ -148,6 +271,7 @@ class GraphRouteAdapterTest(unittest.TestCase):
             obligation_kind="portal_probe",
             obligation_id=7,
             first_portal_id=7,
+            portal_probe_phase="source",
         )
         fixture.graph_route_plan_lease_active = True
         fixture.graph_route_plan_lease_signature = (
@@ -162,6 +286,98 @@ class GraphRouteAdapterTest(unittest.TestCase):
         self.assertEqual(plan.status, PLAN_BLOCKED)
         self.assertFalse(fixture.graph_route_plan_lease_active)
         self.assertIsNone(fixture.graph_route_probe_id)
+
+    def test_semantic_room_scope_covers_descendant_places_until_junction_return(self):
+        fixture = AdapterFixture()
+        scope = {
+            "selected_branch_id": 8,
+            "origin_xy": [0.0, 0.0],
+            "directions": [
+                {"branch_id": 8, "direction_xy": [0.0, 1.0]},
+            ],
+        }
+        fixture.active_semantic_room = {
+            "branch_id": 8,
+            "place_id": 3,
+            "source_place_id": 1,
+            "branch_scope": scope,
+        }
+        fixture.current_physical_place_id = 6
+        captured = {}
+
+        def plan(*_args, **kwargs):
+            captured.update(kwargs)
+            return GraphRoutePlan(
+                PLAN_BLOCKED, "hold", current_place_id=6
+            )
+
+        fixture.graph_route_planner.plan = plan
+        fixture._plan_durable_graph_route(map_epoch=1, commit=False)
+
+        self.assertTrue(captured["room_work_item_only"])
+        self.assertIsNone(captured["room_branch_scope"])
+
+        fixture.current_physical_place_id = 1
+        captured.clear()
+        fixture._plan_durable_graph_route(map_epoch=1, commit=False)
+        self.assertFalse(captured["room_work_item_only"])
+
+    def test_suspended_work_item_identity_reaches_planner_after_room_cycles(self):
+        fixture = AdapterFixture(work_items=[{
+            "id": 31, "place_id": 1, "state": "unresolved",
+            "active_attempt_id": None,
+        }])
+        fixture.suspended_work_item_id = 31
+        captured = {}
+        fixture.graph_route_planner.plan = lambda *_args, **kwargs: (
+            captured.update(kwargs)
+            or GraphRoutePlan(PLAN_BLOCKED, "hold", current_place_id=1)
+        )
+
+        fixture._plan_durable_graph_route(map_epoch=1, commit=False)
+
+        self.assertEqual(captured["resume_work_item_id"], 31)
+
+    def test_suspended_parent_work_item_is_not_resumed_inside_active_room(self):
+        fixture = AdapterFixture(work_items=[{
+            "id": 31, "place_id": 1, "state": "unresolved",
+            "active_attempt_id": None,
+        }])
+        fixture.suspended_work_item_id = 31
+        fixture.current_physical_place_id = 2
+        fixture.active_semantic_room = {
+            "place_id": 2, "source_place_id": 1,
+            "branch_scope": {"selected_branch_id": 8},
+        }
+        captured = {}
+        fixture.graph_route_planner.plan = lambda *_args, **kwargs: (
+            captured.update(kwargs)
+            or GraphRoutePlan(PLAN_BLOCKED, "hold", current_place_id=2)
+        )
+
+        fixture._plan_durable_graph_route(map_epoch=1, commit=False)
+
+        self.assertIsNone(captured["resume_work_item_id"])
+        self.assertTrue(captured["room_work_item_only"])
+        self.assertEqual(fixture.suspended_work_item_id, 31)
+
+    def test_resolved_suspended_work_item_clears_stale_resume_marker(self):
+        fixture = AdapterFixture(work_items=[{
+            "id": 31, "place_id": 1, "state": "resolved",
+            "active_attempt_id": None,
+        }])
+        fixture.suspended_work_item_id = 31
+        captured = {}
+        fixture.graph_route_planner.plan = lambda *_args, **kwargs: (
+            captured.update(kwargs)
+            or GraphRoutePlan(PLAN_BLOCKED, "hold", current_place_id=1)
+        )
+
+        fixture._plan_durable_graph_route(map_epoch=1, commit=False)
+
+        self.assertIsNone(captured["resume_work_item_id"])
+        self.assertIsNone(fixture.suspended_work_item_id)
+        self.assertEqual(fixture.events[-1][0], "work_item_resume_cleared")
 
     def test_explicit_reinspection_event_reaches_graph_planner(self):
         fixture = AdapterFixture()
@@ -184,13 +400,48 @@ class GraphRouteAdapterTest(unittest.TestCase):
             ],
         )
 
-        plan, candidate = fixture._prepare_graph_route_action(SimpleNamespace())
+        plan, candidate = fixture._prepare_graph_route_action(graph_snapshot())
 
         self.assertIsNone(candidate)
         self.assertEqual(plan.portal_path, (11, 12))
         self.assertEqual(fixture.graph_route_portal_id, 11)
         self.assertEqual(fixture.events[-1][0], "graph_route_plan_selected")
         self.assertEqual(fixture.events[-1][1]["first_portal_id"], 11)
+
+    def test_bound_forward_portal_uses_durable_crossing_materializer(self):
+        fixture = AdapterFixture(
+            portals=[
+                {"id": 11, "source_place_id": 1, "destination_place_id": 2, "state": "crossed"},
+                {"id": 12, "source_place_id": 2, "destination_place_id": 3, "state": "crossed"},
+            ],
+            work_items=[
+                {"id": 31, "place_id": 3, "state": "unresolved", "active_attempt_id": None},
+            ],
+        )
+        fixture._graph_snapshot_projection_is_current = lambda _epoch: True
+        candidate = (1, 2, 3.0, 4.0, 1.2, 0.0, 0.0, 0.0, None, 0, "portal_transition")
+        attempts = []
+        fixture.select_durable_portal_crossing = lambda snapshot: (
+            attempts.append(snapshot) or candidate
+        )
+        fixture._commit_graph_route_candidate = lambda *_args, **_kwargs: True
+        fixture._publish_graph_route_materialized = lambda *_args, **_kwargs: None
+        snapshot = SimpleNamespace(
+            map_context=SimpleNamespace(components=SimpleNamespace(epoch=1)),
+            route_graph=SimpleNamespace(validation=None),
+        )
+
+        plan, selected = fixture._prepare_graph_route_action(
+            snapshot,
+            visible_work_item_ids=(31,),
+            visible_portal_ids=(11, 12),
+        )
+
+        self.assertEqual(plan.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(plan.first_portal_id, 11)
+        self.assertIs(selected, candidate)
+        self.assertEqual(attempts, [snapshot])
+        self.assertIsNone(fixture.graph_route_portal_id)
 
     def test_probe_plan_is_materialized_without_inventing_destination(self):
         fixture = AdapterFixture(
@@ -206,7 +457,7 @@ class GraphRouteAdapterTest(unittest.TestCase):
         candidate = (1, 2, 3.0, 4.0, 1.2, 0.0, 0.0, 0.0, None, 0, "frontier_endpoint")
         fixture.select_durable_portal_probe = lambda _snapshot: candidate
 
-        plan, selected = fixture._prepare_graph_route_action(SimpleNamespace())
+        plan, selected = fixture._prepare_graph_route_action(graph_snapshot())
 
         self.assertEqual(plan.first_portal_id, 7)
         self.assertIs(selected, candidate)
@@ -243,15 +494,15 @@ class GraphRouteAdapterTest(unittest.TestCase):
         )
         fixture.select_durable_portal_crossing = lambda _snapshot: candidate
 
-        plan, selected = fixture._prepare_graph_route_action(SimpleNamespace())
+        plan, selected = fixture._prepare_graph_route_action(graph_snapshot())
 
         self.assertEqual(plan.action, ACTION_CROSS_PORTAL)
         self.assertIs(selected, candidate)
-        self.assertFalse(fixture.graph_route_plan_lease_active)
+        self.assertTrue(fixture.graph_route_plan_lease_active)
         self.assertEqual(fixture.events[-1][0], "graph_route_edge_materialized")
 
-    def test_unavailable_crossing_replans_to_local_work_in_same_map_epoch(self):
-        """A rejected Portal must not retain a graph lease indefinitely."""
+    def test_unavailable_crossing_waits_for_a_new_map_epoch(self):
+        """A same-epoch geometry failure preserves the durable Portal action."""
         fixture = AdapterFixture(
             portals=[{
                 "id": 11,
@@ -284,6 +535,7 @@ class GraphRouteAdapterTest(unittest.TestCase):
             )
             or None
         )
+        fixture.last_graph_snapshot_epoch = 7
         snapshot = SimpleNamespace(
             map_context=SimpleNamespace(components=SimpleNamespace(epoch=7)),
             route_graph=SimpleNamespace(validation=None),
@@ -292,16 +544,16 @@ class GraphRouteAdapterTest(unittest.TestCase):
         plan, candidate = fixture._prepare_graph_route_action(snapshot)
 
         self.assertIsNone(candidate)
-        self.assertEqual(plan.action, "observe_local_work")
-        self.assertEqual(plan.obligation_id, 31)
-        self.assertFalse(fixture.graph_route_plan_lease_active)
-        self.assertIsNone(fixture.graph_route_portal_id)
+        self.assertEqual(plan.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(plan.first_portal_id, 11)
+        self.assertTrue(fixture.graph_route_plan_lease_active)
+        self.assertEqual(fixture.graph_route_portal_id, 11)
         self.assertEqual(
             fixture.portal_hypothesis_ledger.get(11)["rejected_map_epoch"],
             7,
         )
         self.assertEqual(
-            fixture.events[-1][0], "graph_route_materialization_replanned"
+            fixture.events[-1][0], "graph_route_materialization_retry_deferred"
         )
 
     def test_terminal_materialization_reuses_prepared_plan(self):
@@ -315,13 +567,25 @@ class GraphRouteAdapterTest(unittest.TestCase):
             portal_path=(11,),
             first_portal_id=11,
         )
+        prepared = GraphRoutePlan(
+            prepared.status,
+            prepared.action,
+            map_epoch=1,
+            current_place_id=prepared.current_place_id,
+            target_place_id=prepared.target_place_id,
+            obligation_kind=prepared.obligation_kind,
+            portal_path=prepared.portal_path,
+            first_portal_id=prepared.first_portal_id,
+        )
         fixture.last_graph_route_plan = prepared
+        fixture.last_graph_snapshot_visible_portal_ids = (11,)
+        fixture._retain_graph_route_plan_lease(prepared, "test_wait")
         fixture.graph_route_planner.plan = lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("terminal must not replan the prepared action")
         )
 
         plan, selected = fixture._prepare_graph_route_action(
-            SimpleNamespace(), reuse_existing_plan=True,
+            graph_snapshot(), reuse_existing_plan=True,
         )
 
         self.assertIs(plan, prepared)
@@ -339,7 +603,7 @@ class GraphRouteAdapterTest(unittest.TestCase):
                 },
             ],
         )
-        prepared, _unused = fixture._prepare_graph_route_action(SimpleNamespace())
+        prepared, _unused = fixture._prepare_graph_route_action(graph_snapshot())
         fixture._retain_graph_route_plan_lease(prepared, "test_wait")
 
         def planner_must_not_replan(*_args, **_kwargs):
@@ -347,7 +611,7 @@ class GraphRouteAdapterTest(unittest.TestCase):
 
         fixture.graph_route_planner.plan = planner_must_not_replan
         reused, selected = fixture._prepare_graph_route_action(
-            SimpleNamespace(),
+            graph_snapshot(),
             reuse_existing_plan=True,
             visible_work_item_ids=(),
             visible_probe_ids=(),
@@ -400,13 +664,13 @@ class GraphRouteAdapterTest(unittest.TestCase):
 
         fixture.graph_route_planner.plan = replan
         replanned, selected = fixture._prepare_graph_route_action(
-            SimpleNamespace(), reuse_existing_plan=True,
+            graph_snapshot(), reuse_existing_plan=True,
         )
 
-        self.assertIs(replanned, replacement)
+        self.assertEqual(replanned.portal_probe_phase, "destination")
+        self.assertEqual(replanned.map_epoch, 1)
         self.assertIsNone(selected)
         self.assertTrue(calls)
-        self.assertEqual(replanned.portal_probe_phase, "destination")
         self.assertFalse(fixture.graph_route_plan_lease_active)
 
     def test_waiting_local_lease_replans_when_snapshot_materializes_another_item(self):
@@ -447,13 +711,14 @@ class GraphRouteAdapterTest(unittest.TestCase):
 
         fixture.graph_route_planner.plan = replan
         replanned, selected = fixture._prepare_graph_route_action(
-            SimpleNamespace(),
+            graph_snapshot(),
             reuse_existing_plan=True,
             visible_work_item_ids=(32,),
             visible_probe_ids=(),
         )
 
-        self.assertIs(replanned, replacement)
+        self.assertEqual(replanned.obligation_id, replacement.obligation_id)
+        self.assertEqual(replanned.map_epoch, 1)
         self.assertIsNone(selected)
         self.assertTrue(calls)
         self.assertFalse(fixture.graph_route_plan_lease_active)
@@ -469,12 +734,12 @@ class GraphRouteAdapterTest(unittest.TestCase):
                 },
             ],
         )
-        prepared, _unused = fixture._prepare_graph_route_action(SimpleNamespace())
+        prepared, _unused = fixture._prepare_graph_route_action(graph_snapshot())
         fixture._retain_graph_route_plan_lease(prepared, "test_wait")
         fixture.current_physical_place_id = 2
 
         replanned, selected = fixture._prepare_graph_route_action(
-            SimpleNamespace(), reuse_existing_plan=True,
+            graph_snapshot(), reuse_existing_plan=True,
         )
 
         self.assertIsNot(replanned, prepared)
@@ -511,7 +776,7 @@ class GraphRouteAdapterTest(unittest.TestCase):
         fixture.current_physical_place_id = 2
 
         replanned, selected = fixture._prepare_graph_route_action(
-            SimpleNamespace(), reuse_existing_plan=True,
+            graph_snapshot(), reuse_existing_plan=True,
         )
 
         self.assertIsNot(replanned, prepared)
@@ -663,6 +928,49 @@ class GraphRouteMaterializationTest(unittest.TestCase):
             now=0.0,
         )
 
+    def test_authentication_can_preempt_only_an_unstarted_portal_reservation(self):
+        from global_frontier_portal_transaction import PortalTransaction
+        for started, crossing_observed in ((False, False), (True, False), (False, True)):
+            fixture = GraphRouteSelectionFixture(None)
+            fixture.portal_authentication_owns_navigation = lambda: True
+            fixture.active_portal_crossing_observed = crossing_observed
+            tx = PortalTransaction()
+            tx.start(22, portal_id=11, source_place_id=1,
+                     gate_xy=(1, 0), destination_xy=(2, 0))
+            if not started:
+                tx.release_unstarted_route(22)
+            fixture.portal_transaction = tx
+            gp_candidate = ("observation_candidate",)
+            fixture._choose_frontier_for_new_action = lambda *_args, **_kwargs: gp_candidate
+            candidate, mode, wait = fixture.select_next_active_frontier(self.snapshot())
+            if not started and not crossing_observed:
+                self.assertEqual(candidate, gp_candidate)
+                self.assertEqual(mode, "gp_portal_authentication")
+                self.assertFalse(wait)
+                self.assertFalse(tx.active)
+                self.assertEqual(tx.state, "idle")
+                self.assertEqual(tx.snapshot().portal_id, 11)
+                self.assertFalse(fixture.portal_transaction_route_rebind_pending)
+            else:
+                self.assertIsNone(candidate)
+                self.assertEqual(mode, "portal_transaction_wait")
+                self.assertTrue(wait)
+                self.assertTrue(tx.active)
+
+    def test_normal_exploration_cannot_preempt_unstarted_portal_reservation(self):
+        from global_frontier_portal_transaction import PortalTransaction
+        fixture = GraphRouteSelectionFixture(None)
+        fixture.portal_authentication_owns_navigation = lambda: False
+        tx = PortalTransaction()
+        tx.start(22, portal_id=11, source_place_id=1)
+        tx.release_unstarted_route(22)
+        fixture.portal_transaction = tx
+        candidate, mode, wait = fixture.select_next_active_frontier(self.snapshot())
+        self.assertIsNone(candidate)
+        self.assertEqual(mode, "portal_transaction_wait")
+        self.assertTrue(wait)
+        self.assertTrue(tx.active)
+
     def test_ready_cross_plan_waits_instead_of_generic_frontier(self):
         plan = GraphRoutePlan(
             PLAN_READY,
@@ -682,11 +990,11 @@ class GraphRouteMaterializationTest(unittest.TestCase):
         )
 
         self.assertIsNone(candidate)
-        self.assertEqual(mode, "graph_route_materialization_wait")
+        self.assertEqual(mode, "graph_route_rehydration_wait")
         self.assertTrue(wait)
         self.assertFalse(fixture.generic_fallback_called)
         self.assertEqual(
-            fixture.events[-1][0], "graph_route_materialization_wait"
+            fixture.events[-1][0], "graph_route_rehydration_wait"
         )
 
     def test_ready_probe_plan_has_the_same_no_substitution_contract(self):
@@ -707,7 +1015,7 @@ class GraphRouteMaterializationTest(unittest.TestCase):
         )
 
         self.assertIsNone(candidate)
-        self.assertEqual(mode, "graph_route_materialization_wait")
+        self.assertEqual(mode, "graph_route_rehydration_wait")
         self.assertTrue(wait)
         self.assertFalse(fixture.generic_fallback_called)
 
@@ -724,6 +1032,8 @@ class GraphRouteMaterializationTest(unittest.TestCase):
         )
         fixture = GraphRoutePendingValidationFixture(plan)
         fixture.last_graph_route_plan = plan
+        fixture._graph_snapshot_projection_is_current = lambda _epoch: True
+        fixture._graph_snapshot_projection_ids = lambda: ({67}, set(), set())
 
         candidate, mode, wait = fixture.select_next_active_frontier(
             self.snapshot()
@@ -769,6 +1079,77 @@ class GraphRouteMaterializationTest(unittest.TestCase):
         self.assertTrue(materialization.accepted)
         self.assertEqual(materialization.candidate_work_item_id, 67)
         self.assertEqual(materialization.plan.obligation_id, 67)
+
+    def test_semantic_room_work_item_projection_failure_retries_on_next_epoch(self):
+        fixture = AdapterFixture(work_items=[
+            {"id": 20, "place_id": 6, "state": "unresolved"},
+        ])
+        fixture.active_semantic_room = {
+            "place_id": 6, "source_place_id": 1, "branch_id": 7,
+        }
+        plan = GraphRoutePlan(
+            PLAN_READY,
+            "observe_local_work",
+            current_place_id=6,
+            target_place_id=6,
+            obligation_kind="work_item",
+            obligation_id=20,
+        )
+
+        self.assertIsNone(
+            fixture._remember_graph_route_materialization_invalidation(plan)
+        )
+        negative = fixture._record_graph_route_negative_evidence(
+            plan, map_epoch=370, reason="graph_route_materialization_expired",
+            miss_count=3, epoch_span=2,
+        )
+        self.assertTrue(negative["work_item_negative_evidence"]["excluded_in_map_epoch"])
+        self.assertEqual(fixture._graph_route_materialization_exclusions(370)[1], (20,))
+        self.assertEqual(fixture._graph_route_materialization_exclusions(371)[1], ())
+        self.assertEqual(
+            getattr(fixture, "graph_route_materialization_invalidated_obligations", set()),
+            set(),
+        )
+
+    def test_non_room_work_item_materialization_failure_remains_run_scoped(self):
+        fixture = AdapterFixture(work_items=[
+            {"id": 20, "place_id": 6, "state": "unresolved"},
+        ])
+        plan = GraphRoutePlan(
+            PLAN_READY,
+            "observe_local_work",
+            current_place_id=6,
+            target_place_id=6,
+            obligation_kind="work_item",
+            obligation_id=20,
+        )
+
+        key = fixture._remember_graph_route_materialization_invalidation(plan)
+
+        self.assertEqual(key, ("obligation", "work_item", 20))
+        self.assertEqual(fixture._graph_route_materialization_exclusions(371)[1], (20,))
+
+    def test_fresh_projection_reopens_parked_wi_but_not_same_epoch_or_portal(self):
+        fixture = AdapterFixture()
+        work_plan = GraphRoutePlan(
+            PLAN_READY, "observe_local_work", current_place_id=6,
+            obligation_kind="work_item", obligation_id=20,
+        )
+        portal_plan = GraphRoutePlan(
+            PLAN_READY, ACTION_CROSS_PORTAL, current_place_id=6,
+            obligation_kind="portal_edge", obligation_id=11, first_portal_id=11,
+        )
+        fixture._remember_graph_route_materialization_invalidation(work_plan)
+        fixture._remember_graph_route_materialization_invalidation(portal_plan)
+        fixture._remember_graph_route_materialization_exclusion(370, "work_item_ids", 20)
+        fixture._reopen_projected_work_items(370, (20,))
+        self.assertEqual(fixture._graph_route_materialization_exclusions(370)[1], (20,))
+        fixture._reopen_projected_work_items(371, ())
+        self.assertEqual(fixture._graph_route_materialization_exclusions(371)[1], (20,))
+        fixture._reopen_projected_work_items(371, (20,))
+        excluded_portals, excluded_work, _ = fixture._graph_route_materialization_exclusions(371)
+        self.assertEqual(excluded_work, ())
+        self.assertIn(11, excluded_portals)
 
     def test_place_entry_waits_for_rehydration_before_graph_transit(self):
         """A newly entered Place cannot use an empty pre-reconciliation ledger."""

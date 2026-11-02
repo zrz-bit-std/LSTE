@@ -145,6 +145,42 @@ def candidate_matches_graph_plan(plan, candidate):
     return False
 
 
+def candidate_matches_tsp_work_item(plan, candidate):
+    """Match the TSP head while allowing its same-item bootstrap projection.
+
+    Bootstrap can be materialized by the WorkItem adapter as an ordinary
+    local-observation route. Keep the exact WorkItem and Place identity while
+    accepting that typed action transition; never admit a sibling WorkItem.
+    """
+    if candidate_matches_graph_plan(plan, candidate):
+        return True
+    if (
+        plan is None
+        or getattr(plan, "action", None) != ACTION_BOOTSTRAP
+        or str(getattr(plan, "obligation_kind", "") or "") != "work_item"
+    ):
+        return False
+    try:
+        tour = tuple(getattr(plan, "work_item_tour", ()) or ())
+        planned_id = _positive_id(getattr(plan, "obligation_id", None))
+        head_id = _positive_id(tour[0]) if tour else None
+    except (TypeError, ValueError, IndexError):
+        return False
+    if planned_id is None or head_id != planned_id:
+        return False
+    route = _route(candidate)
+    if route is None or len(route) <= 17:
+        return False
+    if _positive_id(route[12] if len(route) > 12 else None) != head_id:
+        return False
+    candidate_place = _candidate_place_id(candidate)
+    planned_place = _positive_id(getattr(plan, "current_place_id", None))
+    if candidate_place is not None and planned_place is not None:
+        if candidate_place != planned_place:
+            return False
+    return route[17] == ACTION_OBSERVE_LOCAL_WORK
+
+
 def candidate_refines_graph_plan(plan, candidate):
     """Allow an explicit same-place refinement before transaction commit.
 

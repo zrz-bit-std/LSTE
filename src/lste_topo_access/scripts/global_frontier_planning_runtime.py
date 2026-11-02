@@ -7,6 +7,7 @@ from contextlib import nullcontext
 import rospy
 
 from global_frontier_planning_contract import PlanningProposal
+from clock_provider import now_for
 
 
 class GlobalFrontierPlanningRuntimeMixin:
@@ -18,7 +19,10 @@ class GlobalFrontierPlanningRuntimeMixin:
 
     def planning_should_preempt(self):
         """Return whether the current snapshot has lost execution ownership."""
-        return bool(getattr(self, "planning_preempt_requested", False))
+        if getattr(self, "planning_preempt_requested", False):
+            return True
+        due = getattr(self, "portal_authentication_physical_budget_due", None)
+        return bool(callable(due) and due(now_for(self)))
 
     def request_planning_preempt(self, reason="execution_boundary"):
         """Invalidate the current snapshot from a callback-safe boundary.
@@ -81,6 +85,12 @@ class GlobalFrontierPlanningRuntimeMixin:
             if drain_terminals is not None:
                 drain_terminals()
             self._clear_planning_preempt_if_drained()
+            # Cooperative compute checkpoints only yield. Apply the same
+            # physical failure/necessary return at this serialized owner edge,
+            # after real terminal/arrival facts had their chance to settle.
+            progress = getattr(self, "check_portal_authentication_physical_progress", None)
+            if callable(progress):
+                progress(now_for(self))
         self.planning_cycle_proposal = None
 
     def _prepare_planning_cycle(self):
@@ -117,6 +127,19 @@ class GlobalFrontierPlanningRuntimeMixin:
                 )
                 if now - last_report >= 1.0:
                     self.last_controller_lease_wait_report_wall = now
+                    pending_release = (
+                        pending_for_route(current_route_id)
+                        if callable(pending_for_route) and current_route_id > 0
+                        else getattr(self, "pending_controller_lease_release", None)
+                    )
+                    if isinstance(pending_release, dict):
+                        self.publish_status(
+                            "controller_lease_released",
+                            **dict(pending_release),
+                            released_route_id=int(pending_release.get("route_id", 0) or 0),
+                            released_route_kind=str(pending_release.get("route_kind", "") or ""),
+                            release_reason="controller_lease_release_retry",
+                        )
                     self.publish_status(
                         "controller_lease_release_wait",
                         active_route_id=current_route_id,
@@ -194,6 +217,12 @@ class GlobalFrontierPlanningRuntimeMixin:
         self.planning_cycle_started_wall = started
         try:
             try:
+                recovery = getattr(self, "_update_place_execution_recovery", None)
+                if callable(recovery) and recovery():
+                    return
+                auth_progress = getattr(self, "check_portal_authentication_physical_progress", None)
+                if callable(auth_progress) and auth_progress(now_for(self)):
+                    return
                 token, skip = self._prepare_planning_cycle()
                 if skip:
                     return

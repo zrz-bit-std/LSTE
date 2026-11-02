@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from global_frontier_models import PortalTransitionRetry
+from global_frontier_graph_route_transaction import route_graph_transaction_identity
 
 
 def load_methods(source, class_name, names, namespace):
@@ -55,7 +56,8 @@ ACTIVATION_METHODS = load_methods(
     ACTIVATION_SOURCE,
     "GlobalFrontierActivationMixin",
     {"initialize_active_frontier_route"},
-    {"math": math, "copy_component_evidence": lambda value: value},
+    {"math": math, "copy_component_evidence": lambda value: value,
+     "route_graph_transaction_identity": route_graph_transaction_identity},
 )
 
 
@@ -136,7 +138,7 @@ class PortalFailureExplorer:
     def publish_failed_route_invalidation(self, *args):
         self.published.append(args)
 
-    def release_active_frontier(self):
+    def release_active_frontier(self, **_kwargs):
         self.released = True
 
 

@@ -1,8 +1,12 @@
 <launch>
+  <arg name="place_navigation_constraints" default="false"/>
   <!-- Production TEB stack for the online-SLAM LSTE pipeline.
        gmapping is started by online_slam_frontier.launch; this file owns only
        move_base and the final-goal bridge. -->
   <arg name="scan_topic" default="/pro3/rlscan"/>
+  <!-- Optional raw-cloud obstacle layer, independent of the GP/SLAM scan. -->
+  <arg name="body_cloud_obstacles" default="$(optenv LSTE_BODY_CLOUD_OBSTACLES false)"/>
+  <arg name="body_cloud_topic" default="/pro3/os_cloud_node/points"/>
   <arg name="odom_topic" default="/pro3/wheel_odom"/>
   <arg name="global_frame" default="map"/>
   <arg name="max_linear_speed" default="0.50"/>
@@ -29,10 +33,10 @@
        left and right route hypotheses before it can choose one.  Keep this
        as a launch-level capability switch so experiments can compare the
        single-band and multi-topology architectures without code changes. -->
-  <!-- The capability is retained for controlled experiments.  The default
-       stays on the validated single-band route until the recovery supervisor
-       below can hand off a blocked route without a stop/restart race. -->
-  <arg name="teb_homotopy_class_planning" default="false"/>
+  <!-- Explore distinct local path topologies inside the same move_base action.
+       This addresses repeated single-band infeasibility at corners without
+       changing route identity, controller lease, footprint, or obstacle rules. -->
+  <arg name="teb_homotopy_class_planning" default="true"/>
   <!-- The raw rolling costmap is the production obstacle representation.
        The DBSMCCH converter remains available for an explicit A/B, but its
        polygons were observed to make TEB stall near a valid endpoint in the
@@ -264,6 +268,7 @@
     <param name="global_costmap/robot_base_frame" value="base_footprint"/>
     <param name="global_costmap/update_frequency" value="2.0"/>
     <param name="global_costmap/publish_frequency" value="1.0"/>
+    <param name="global_costmap/always_send_full_costmap" value="true"/>
     <param name="global_costmap/transform_tolerance" value="0.5"/>
     <param name="global_costmap/static_map" value="true"/>
     <param name="global_costmap/track_unknown_space" value="true"/>
@@ -282,6 +287,7 @@
     <param name="local_costmap/robot_base_frame" value="base_footprint"/>
     <param name="local_costmap/update_frequency" value="10.0"/>
     <param name="local_costmap/publish_frequency" value="5.0"/>
+    <param name="local_costmap/always_send_full_costmap" value="true"/>
     <param name="local_costmap/transform_tolerance" value="0.5"/>
     <param name="local_costmap/static_map" value="false"/>
     <param name="local_costmap/rolling_window" value="true"/>
@@ -301,6 +307,19 @@
     <param name="local_costmap/obstacle_layer/laser/obstacle_range" value="8.0"/>
     <param name="local_costmap/obstacle_layer/laser/raytrace_range" value="10.0"/>
 
+    <!-- Retain low body-height hits that the SLAM scan's height slice omits.
+         Voxel ray clearing preserves low obstacles when higher rays pass over
+         them. World models and Portal discovery inputs remain untouched. -->
+    <rosparam if="$(arg body_cloud_obstacles)" command="load"
+              file="$(find lste_topo_access)/config/body_cloud_costmap.yaml"/>
+    <rosparam if="$(arg place_navigation_constraints)" command="load"
+              file="$(find lste_topo_access)/config/place_navigation_costmap.yaml"/>
+    <param if="$(arg body_cloud_obstacles)" name="global_costmap/obstacle_layer/body_cloud/topic" value="$(arg body_cloud_topic)"/>
+    <param if="$(arg body_cloud_obstacles)" name="local_costmap/obstacle_layer/body_cloud/topic" value="$(arg body_cloud_topic)"/>
+    <param if="$(arg body_cloud_obstacles)" name="global_costmap/obstacle_layer/body_cloud_clear/topic" value="$(arg body_cloud_topic)"/>
+    <param if="$(arg body_cloud_obstacles)" name="local_costmap/obstacle_layer/body_cloud_clear/topic" value="$(arg body_cloud_topic)"/>
+    <param if="$(arg body_cloud_obstacles)" name="local_costmap/obstacle_layer/observation_sources" value="laser body_cloud body_cloud_clear"/>
+
     <!-- TEB settings are deliberately forward-only. The robot can turn in
          place instead of reversing toward unseen space at a wall corner. -->
     <param name="TebLocalPlannerROS/max_vel_x" value="$(arg max_linear_speed)"/>
@@ -308,11 +327,12 @@
          backwards limit made TEB repeatedly command -0.05 m/s while its
          forward trajectory was blocked, which looked like safety braking and
          kept it oscillating near the obstacle. -->
-    <!-- TEB's optimizer requires a positive reverse bound.  Keep it below
-         one centimetre/s so a blocked forward trajectory turns in place, and
-         make penalty_epsilon smaller than the bound (equal values trigger a
-         TEB warning and weaken the forward-drive penalty). -->
-    <param name="TebLocalPlannerROS/max_vel_x_backwards" value="0.001"/>
+    <!-- Keep launch values inside the installed Noetic dynamic-reconfigure
+         contract.  max_vel_x_backwards has a 0.01 minimum; values below that
+         are silently clamped by TEB and make the parameter-server dump differ
+         from the optimizer's effective bound.  The actuator mux still rejects
+         all negative commands, so this does not enable reverse motion. -->
+    <param name="TebLocalPlannerROS/max_vel_x_backwards" value="0.01"/>
     <param name="TebLocalPlannerROS/penalty_epsilon" value="0.0005"/>
     <param name="TebLocalPlannerROS/max_vel_theta" value="0.65"/>
     <param name="TebLocalPlannerROS/acc_lim_x" value="0.60"/>
@@ -424,7 +444,7 @@
          order to recover around a stale or incomplete online map. -->
     <param name="TebLocalPlannerROS/viapoints_all_candidates" value="false"/>
     <param name="TebLocalPlannerROS/weight_kinematics_nh" value="1000.0"/>
-    <param name="TebLocalPlannerROS/weight_kinematics_forward_drive" value="5000.0"/>
+    <param name="TebLocalPlannerROS/weight_kinematics_forward_drive" value="1000.0"/>
     <param name="TebLocalPlannerROS/weight_obstacle" value="45.0"/>
     <param name="TebLocalPlannerROS/weight_inflation" value="0.20"/>
     <param name="TebLocalPlannerROS/footprint_model/type" value="circular"/>
@@ -532,16 +552,14 @@
     <param name="turn_rotation_cap_factor" value="1.6"/>
     <param name="turn_settle_duration" value="0.35"/>
     <param name="endpoint_alignment_enabled" value="$(arg teb_frontier_pre_route_alignment)"/>
-    <!-- Production leaves local trajectory recovery to TEB. The optional
-         external stalled-route rotation is retained only for a controlled
-         comparison: it can complete its yaw phase while TEB still rejects the
-         subsequent band, so it must not become a second local controller. -->
     <!-- When TEB has a valid global path but emits a persistent near-zero
          command because its first tangent is behind the base, let the
          execution adapter perform one bounded in-place turn. This keeps the
          recovery in the controller layer and prevents move_base from spending
          every recovery behavior inside the same room. -->
     <param name="stalled_route_reorientation_enabled" value="true"/>
+    <!-- After an owned bounded turn, ask native TEB to rebuild its band once. -->
+    <param name="native_teb_reseed_enabled" value="true"/>
     <param name="stalled_route_reorientation_delay" value="0.80"/>
     <param name="stalled_route_reorientation_heading_deg" value="45.0"/>
     <param name="stalled_route_reorientation_linear" value="0.03"/>

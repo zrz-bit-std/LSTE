@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": {
+    "all_models_resolved": true,
+    "rigid_rotation_preserves_room_geometry": true,
+    "central_junction_matches_suite_center": true
+  },
+  "world": "worlds/targeted_navigation/semantic_t_junction_focused_rotated.world",
+  "scene_model_count": 2297,
+  "missing_models": [],
+  "source_layout": "semantic_t_junction_focused.json",
+  "rotation_radians": 0.7853981633974483
+}

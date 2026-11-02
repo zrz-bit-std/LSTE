@@ -8,6 +8,8 @@ one correlated episode when a navigation failure is observed.  It never
 publishes a command and never changes the navigation state machine.
 """
 
+from contextlib import nullcontext
+
 import datetime
 import fcntl
 import json
@@ -2205,16 +2207,16 @@ class NavigationMetricsFailureEvidenceMixin:
                 self._failure_existing_sequence(run_timestamp),
             )
             log_mode = "a" if self.failure_log_path.exists() else "w"
-            self.failure_stream = self.failure_log_path.open(
-                log_mode, encoding="utf-8", buffering=1
-            )
+            from navigation_metrics_line_stream import VerifiedAsciiAppendLog
+            self.failure_stream = VerifiedAsciiAppendLog(self.failure_log_path)
         except (OSError, AttributeError):
             self.failure_stream = None
 
     def _close_failure_evidence_log(self):
         try:
             if self.failure_stream is not None:
-                self.failure_stream.close()
+                with getattr(self, "log_write_lock", nullcontext()):
+                    self.failure_stream.close()
         except (OSError, ValueError):
             pass
         self.failure_stream = None
@@ -2255,8 +2257,15 @@ class NavigationMetricsFailureEvidenceMixin:
             payload,
         )
         try:
-            self.failure_stream.write(line)
-        except (OSError, ValueError):
+            with getattr(self, "log_write_lock", nullcontext()):
+                self.failure_stream.write(line)
+        except OSError as exc:
+            from navigation_metrics_line_stream import MetricsIntegrityError
+            if isinstance(exc, MetricsIntegrityError):
+                rospy.logfatal("Failure evidence integrity failure: %s", exc)
+                rospy.signal_shutdown("metrics_evidence_integrity_failure")
+                raise
+        except ValueError:
             pass
 
     def _write_failure_artifact(self, snapshot):

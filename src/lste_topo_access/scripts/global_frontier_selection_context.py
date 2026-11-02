@@ -11,6 +11,8 @@ import numpy as np
 from global_frontier_models import FrontierSelectionContext
 from global_frontier_topology import grid_reachable_without_closed_places
 from global_frontier_work_item_components import observation_supports
+from global_frontier_place_partition import (partition_place, branch_opening_width,
+    leaking_portal_sides, clip_place_mask_to_portal_side)
 
 
 class GlobalFrontierSelectionContextMixin:
@@ -134,6 +136,160 @@ class GlobalFrontierSelectionContextMixin:
                     work_pending = True
                     break
         return work_pending
+
+    def _update_place_partition(self, message, known_free, frontier, source_place_id,
+                                seed_xy, epoch):
+        """Cut Place-bound Portal gates in SLAM for WI ownership.
+
+        A completed GP certification bounds source-side WI ownership even
+        before crossing. Its far side stays unassigned until the physical
+        crossing binds a destination Place; discovery alone supplies no cut.
+        """
+        if source_place_id is None or not callable(getattr(self, "transform_xy", None)):
+            return None
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        snapshot = getattr(ledger, "snapshot", None)
+        records = snapshot() if callable(snapshot) else ()
+        frame = message.header.frame_id or "map"
+        # A SLAM map and its physical Portal witnesses must share a TF epoch.
+        # A newer map->odom correction can move an otherwise valid entry seed
+        # metres into unknown cells of the still-current raster.
+        factory = getattr(self, "planar_xy_projector", None)
+        if callable(factory):
+            stamp = message.header.stamp
+            tf_key = (frame, stamp.to_sec())
+            projector = getattr(self, "_place_partition_projector", None)
+            if tf_key != getattr(self, "_place_partition_tf_key", None) or projector is None:
+                projector = factory(frame, "odom", stamp=stamp)
+                self._place_partition_tf_key = tf_key
+                self._place_partition_projector = projector
+            # The raster keeps its original TF snapshot even after the TF
+            # buffer evicts that time. A new raster never reuses this closure.
+            project = (lambda *xy: None) if projector is None else projector
+        else:
+            project = lambda *xy: self.transform_xy(frame, "odom", *xy)
+        # A Place is a persistent side of its entry gate, not whichever
+        # component happens to contain the robot during a detour or return.
+        dfs = getattr(self, "place_dfs", None)
+        entry_portal_id = getattr(dfs, "nodes", {}).get(int(source_place_id), {}).get("portal_id")
+        seed_source = "live_pose"
+        if entry_portal_id is not None:
+            entry = next((record for record in records
+                          if record.get("id") == entry_portal_id
+                          and record.get("destination_place_id") == int(source_place_id)), None)
+            inside = None if entry is None else entry.get("physical_destination")
+            seed_xy = None if inside is None else project(*inside)
+            seed_source = "entry_portal_destination"
+        portals = []
+        for record in records:
+            if (getattr(self, "gp_portal_assistance_enabled", False)
+                    and record.get("gp_authentication_state") != "completed"):
+                continue
+            if (int(source_place_id) not in (record.get("source_place_id"), record.get("destination_place_id"))
+                    or record.get("state") not in ("certified", "selected", "crossed")):
+                continue
+            if (record.get("destination_place_id") is None
+                    and record.get("gp_authentication_state") != "completed"):
+                continue
+            # A completed, measured certification already bounds source WI
+            # ownership. Its far side remains unassigned until real crossing;
+            # omitting this cut lets ordinary parent WI explore a child arm
+            # before the graph has performed that crossing.
+            gate, destination = record.get("physical_gate"), record.get("physical_destination")
+            if gate is None or destination is None:
+                continue
+            projected_gate = project(*gate)
+            projected_dest = project(*destination)
+            # A Portal without measured opening width cannot supply a map cut.
+            width = record.get("opening_width")
+            if width is None:
+                tree = getattr(self, "gp_exploration_tree", None)
+                branches = getattr(tree, "branches", {}).values()
+                width = next((branch_opening_width(b) for b in branches
+                              if b.get("canonical_portal_id") == record.get("id")), None)
+            if projected_gate is not None and projected_dest is not None and width:
+                bounds = record.get("physical_bounds")
+                if not bounds or len(bounds)!=2 or any(point is None for point in bounds):
+                    tree = getattr(self, "gp_exploration_tree", None)
+                    branches = getattr(tree, "branches", {}).values()
+                    updated = next((b for b in branches if b.get("canonical_portal_id")==record["id"]), None)
+                    if updated is not None:
+                        bounds = (updated.get("map_geometry") or {}).get("physical_bounds") or bounds
+                projected_bounds = (None if not bounds else [
+                    None if point is None else project(*point)
+                    for point in bounds])
+                portals.append(dict(id=record["id"], gate=projected_gate,
+                                    destination=projected_dest, width=float(width), bounds=projected_bounds,
+                                    source_place_id=record.get("source_place_id"),
+                                    destination_place_id=record.get("destination_place_id")))
+        from global_frontier_place_partition import refine_portal_cut
+        origin = message.info.origin.position
+        portals = [refine_portal_cut(p, known_free, float(message.info.resolution),
+                    (origin.x, origin.y)) for p in portals]
+        key = (epoch, int(source_place_id), None if seed_xy is None else tuple(seed_xy), tuple((p['id'], tuple(p['gate']), tuple(p['destination']),
+               p['width'], None if not p['bounds'] else tuple(None if b is None else tuple(b) for b in p['bounds'])) for p in portals))
+        if key != getattr(self, "_place_partition_key", None):
+            origin = message.info.origin.position
+            mask, components, label, cuts = partition_place(
+                known_free, message.info.resolution, (origin.x, origin.y), seed_xy,
+                portals, epoch or 1)
+            leaks = leaking_portal_sides(mask, known_free, message.info.resolution,
+                                         (origin.x,origin.y), portals)
+            if leaks:
+                for portal in portals:
+                    if int(portal["id"]) in leaks:
+                        mask = clip_place_mask_to_portal_side(
+                            mask, portal, source_place_id,
+                            message.info.resolution, (origin.x, origin.y),
+                        )
+                # A side clip can sever paths that previously joined remote
+                # fragments through the other Place. Retain only the fixed
+                # entrance's four-connected component, including its labels.
+                mask, components, label, _ = partition_place(
+                    mask, message.info.resolution, (origin.x, origin.y),
+                    seed_xy, (), epoch or 1)
+                leaks = leaking_portal_sides(
+                    mask, known_free, message.info.resolution,
+                    (origin.x, origin.y), portals,
+                )
+            if leaks or (entry_portal_id is not None and entry_portal_id not in cuts):
+                # A missing entry cut cannot authorize the whole free map.
+                # Never dispatch a "local" WI through a known gap in its
+                # Place boundary. A later map/boundary refinement can retry.
+                mask=np.zeros_like(mask);label=0
+            self.current_place_scope_leaking_portal_ids = leaks
+            self._place_partition_key = key
+            self.current_place_scope_mask = mask
+            self.current_place_scope_components = components
+            self.current_place_scope_label = label
+            self.current_place_scope_id = int(source_place_id)
+            self.current_place_scope_epoch = epoch
+            self.current_place_scope_portal_ids = cuts
+            stamp = getattr(message.header, "stamp", None)
+            self.current_place_scope_map_stamp = stamp.to_sec() if stamp is not None else None
+            self.current_place_scope_seed_xy = None if seed_xy is None else list(seed_xy)
+            self.current_place_scope_seed_source = seed_source
+            self.current_place_scope_entry_portal_id = entry_portal_id
+            self.current_place_scope_projected_portals = portals
+        mask = self.current_place_scope_mask
+        self.current_place_scope_frontier_count = int(np.count_nonzero(frontier & mask))
+        self.current_place_scope_pending_frontier_count = self.current_place_scope_frontier_count
+        self.current_place_scope_frontier_work_evidence = None
+        # Counts describe this exact map even when its unchanged free component
+        # can reuse the previous mask. Never pair new evidence with an old stamp.
+        stamp = getattr(message.header, "stamp", None)
+        self.current_place_scope_map_stamp = stamp.to_sec() if stamp is not None else None
+        self.current_place_scope_valid = self.current_place_scope_label > 0
+        if self.current_place_scope_valid:
+            self.current_place_scope_invalidated_reason = None
+        self.current_place_scope_message = message
+        constraints = getattr(self, "place_navigation_constraints", None)
+        if constraints is not None:
+            constraints.update_scope(self)
+        dfs = getattr(self, "place_dfs", None)
+        if dfs is not None:
+            dfs.bootstrap(source_place_id)
+        return self.current_place_scope_components, self.current_place_scope_label
 
     def _scope_observation_supports_to_source_place(
         self, supports, components, source_label
@@ -424,8 +580,32 @@ class GlobalFrontierSelectionContextMixin:
             if horizon is None or horizon <= 0.0:
                 horizon = getattr(self, "scan_range_max", None)
             self.last_work_item_sensor_horizon_m = horizon
+            partition = self._update_place_partition(
+                message, known_free, frontier, source_place_id, route_anchor_xy,
+                getattr(components, "epoch", None))
+            ownership_components, ownership_label = (
+                partition if partition is not None else (components, source_label))
+            scope_mask = getattr(self, "current_place_scope_mask", None) if partition is not None else None
+            self.current_place_scope_observed_at = float(now)
+            transfer = getattr(ledger, "transfer_observation_work_to_place", None)
+            if scope_mask is not None and callable(transfer):
+                def contains_boundary(physical):
+                    xy = self.transform_xy(message.header.frame_id or "map", "odom", *physical)
+                    if xy is None:
+                        return False
+                    col = int(np.floor((xy[0]-message.info.origin.position.x)/message.info.resolution))
+                    row = int(np.floor((xy[1]-message.info.origin.position.y)/message.info.resolution))
+                    return (0 <= row < scope_mask.shape[0] and 0 <= col < scope_mask.shape[1]
+                            and bool(scope_mask[row,col]))
+                moved = transfer(source_place_id, contains_boundary, now)
+                if moved:
+                    self.publish_status("place_work_items_rebound", place_id=int(source_place_id),
+                                        moved_work_items=moved, reason="certified_slam_place_ownership")
+            from global_frontier_work_item_map_evidence import settle_observed_place_work
+            settle_observed_place_work(self, message, known_free, unknown, scope_mask,
+                                       source_place_id, now)
             supports = observation_supports(
-                frontier,
+                frontier if scope_mask is None else frontier & scope_mask,
                 unknown,
                 cell_xy=lambda row, col: self.cell_xy(message, row, col),
                 map_to_physical_xy=map_to_physical_xy,
@@ -434,8 +614,8 @@ class GlobalFrontierSelectionContextMixin:
             )
             supports = self._scope_observation_supports_to_source_place(
                 supports,
-                components,
-                source_label,
+                ownership_components,
+                ownership_label,
             )
             supports = self._suppress_crossed_portal_supports(
                 source_place_id,
@@ -446,6 +626,12 @@ class GlobalFrontierSelectionContextMixin:
                 supports,
                 now=now,
             )
+            if scope_mask is not None and self.current_place_scope_map_stamp is not None:
+                from global_frontier_work_item_map_evidence import frontier_work_evidence
+                proof = frontier_work_evidence(frontier, scope_mask, work_item_cells,
+                    work_item_details, self.current_place_scope_map_stamp)
+                self.current_place_scope_frontier_work_evidence = proof
+                self.current_place_scope_pending_frontier_count = proof["pending_count"]
             for detail in work_item_details.values():
                 if detail["match"] == "created":
                     self.last_work_item_created += 1
@@ -453,6 +639,15 @@ class GlobalFrontierSelectionContextMixin:
                     self.last_work_item_inherited += 1
                 elif detail["match"] == "resolved_descendant":
                     self.last_work_item_resolved_descendant_skips += 1
+        if (not source_place_observed and source_place_id is not None
+                and getattr(self, "current_place_scope_valid", False)):
+            from global_frontier_work_item_map_evidence import observe_empty_place_scope
+            if observe_empty_place_scope(
+                    self, message, known_free, unknown,
+                    getattr(self, "current_place_scope_mask", None), source_place_id, now):
+                source_place_observed = True
+                action_tiers = (("adjacent", "probe", "local") if place_graph_ready
+                                else ("unconstrained",))
         pending_entry = getattr(self, "place_entry_rehydration_pending", None)
         if pending_entry is not None:
             try:

@@ -53,6 +53,21 @@ class GlobalFrontierCandidateWorkItemMixin:
                 "lateral_right",
                 (source[0] - depth * tangent[0], source[1] - depth * tangent[1]),
             ),
+            (
+                "lateral_left_far",
+                (source[0] + 2.0 * depth * tangent[0],
+                 source[1] + 2.0 * depth * tangent[1]),
+            ),
+            (
+                "lateral_right_far",
+                (source[0] - 2.0 * depth * tangent[0],
+                 source[1] - 2.0 * depth * tangent[1]),
+            ),
+            (
+                "normal_far",
+                (anchor[0] - 1.7 * depth * normal[0],
+                 anchor[1] - 1.7 * depth * normal[1]),
+            ),
         )
 
     def _work_item_map_anchor(self, request, item):
@@ -78,6 +93,31 @@ class GlobalFrontierCandidateWorkItemMixin:
         # and physical coordinates. Production callers keep the physical frame
         # contract by providing the inverse TF projector above.
         return anchor if request.map_to_physical_xy is None else None
+
+    def _work_item_map_normal(self, request, item):
+        """Rotate a durable odom-frame boundary normal into the map frame."""
+        normal = self._finite_normal(item.get("normal_xy"))
+        anchor = self._finite_xy(item.get("anchor_xy"))
+        if normal is None or anchor is None:
+            return normal
+        header = getattr(request.message, "header", None)
+        map_frame = getattr(header, "frame_id", "map") or "map"
+        projector_factory = getattr(self, "planar_xy_projector", None)
+        if projector_factory is None:
+            # Geometry-only fixtures may deliberately share both frames.
+            return normal if request.map_to_physical_xy is None else None
+        projector = projector_factory(map_frame, "odom")
+        if projector is None:
+            # The anchor may have a map-local fallback, but its physical normal
+            # cannot be used safely without the matching frame rotation.
+            return None
+        base = self._finite_xy(projector(anchor[0], anchor[1]))
+        tip = self._finite_xy(projector(
+            anchor[0] + normal[0], anchor[1] + normal[1],
+        ))
+        if base is None or tip is None:
+            return None
+        return self._finite_normal((tip[0] - base[0], tip[1] - base[1]))
 
     def pending_local_work_item_candidates(
         self, request, context, frontier, approach_cells,
@@ -112,8 +152,23 @@ class GlobalFrontierCandidateWorkItemMixin:
             None if probe_ledger is None
             else getattr(probe_ledger, "probe_for_work_item", None)
         )
+        active_room = getattr(self, "active_semantic_room", None)
+        room_work_item_only = False
+        if isinstance(active_room, dict):
+            try:
+                room_work_item_only = (
+                    int(active_room.get("place_id", -1)) == int(place_id)
+                    and int(active_room.get("source_place_id", -2))
+                    != int(place_id)
+                )
+            except (TypeError, ValueError):
+                room_work_item_only = False
         message = request.message
         steps = request.steps
+        mask = getattr(self, "current_place_scope_mask", None)
+        if (mask is not None and getattr(self, "current_place_scope_id", None) == place_id
+                and steps is not None and getattr(steps, "shape", None) == mask.shape):
+            steps = np.where(mask, steps, -1)
         if steps is None or not hasattr(steps, "shape"):
             return []
         reassociate = getattr(self, "nearest_reachable_cell", None)
@@ -168,13 +223,22 @@ class GlobalFrontierCandidateWorkItemMixin:
                 report["item_audit"].append(audit)
                 reject("attempt_active")
                 continue
-            if callable(probe_for_work) and probe_for_work(item_id) is not None:
+            if (
+                callable(probe_for_work)
+                and probe_for_work(item_id) is not None
+                and not room_work_item_only
+                and not getattr(self, "gp_portal_assistance_enabled", False)
+            ):
+                # During ordinary graph exploration, PortalProbe owns source
+                # doorway evidence. During a semantic-room visit, the room's
+                # WorkItems are the only executable goals; keep a probe-bound
+                # boundary WorkItem in the local queue so it cannot pin egress.
                 audit["reason"] = "owned_by_portal_probe"
                 report["item_audit"].append(audit)
                 reject("owned_by_portal_probe")
                 continue
             anchor = self._work_item_map_anchor(request, item)
-            normal = self._finite_normal(item.get("normal_xy"))
+            normal = self._work_item_map_normal(request, item)
             normal_source = "durable_unknown_side"
             if anchor is None:
                 audit["reason"] = "physical_anchor_projection_unavailable"
@@ -267,31 +331,271 @@ class GlobalFrontierCandidateWorkItemMixin:
                 retry = bool(
                     ledger.has_failed_viewpoint(item_id, map_epoch=map_epoch)
                 )
+                candidate = FrontierCandidateRoute(
+                    row=int(row),
+                    col=int(col),
+                    action_tier="local",
+                    place_hops=0,
+                    x=float(x),
+                    y=float(y),
+                    path_distance=path_distance,
+                    score_path_distance=path_distance,
+                    work_item_id=item_id,
+                    work_item_match="rehydrated_work_item",
+                    work_item_support_cells=int(item.get("support_cell_count", 0)),
+                    work_item_normal_xy=normal,
+                    viewpoint_retry=retry,
+                    graph_action="retry_viewpoint" if retry else "observe_local_work",
+                    graph_action_reason="durable_work_item_rehydrated_%s" % strategy,
+                )
+                admit = getattr(self, "_candidate_region_pool", None)
+                if callable(admit):
+                    information = self.frontier_information(request.unknown, row, col)
+                    if admit(request, candidate, context, information) is None:
+                        view_audit["cell"] = [int(row), int(col)]
+                        view_audit["reason"] = "place_lifecycle_admission_failed"
+                        report["item_audit"].append(view_audit)
+                        reject(view_audit["reason"])
+                        continue
                 selected = (
                     row, col, x, y, costmap_distance, path_distance, physical,
-                    strategy, retry,
+                    strategy, retry, candidate,
                 )
                 break
             if selected is None:
+                # The fixed six-point ladder can collapse several desired
+                # viewpoints onto one reachable grid cell. If that cell has
+                # already failed, search nearby reachable cells in this same
+                # Place instead of retrying the identical physical viewpoint
+                # forever or dropping the durable WorkItem.
+                info = getattr(message, "info", None)
+                origin = getattr(info, "origin", None)
+                origin_position = getattr(origin, "position", None)
+                try:
+                    origin_x = float(origin_position.x)
+                    origin_y = float(origin_position.y)
+                except (AttributeError, TypeError, ValueError):
+                    origin_x = origin_y = None
+                # A failed local path may be caused by a nearby inflated obstacle.
+                # Search farther inside the same Place for a distinct view of this
+                # boundary; the Place-limited Navfn steps still forbid crossing
+                # another Portal or leaving the current spatial owner.
+                radius = max(5.0, 5.0 * depth)
+                robot_map = self._finite_xy(
+                    getattr(request, "robot_map", None)
+                )
+                if robot_map is None:
+                    robot_map = self._finite_xy(
+                        getattr(request, "route_anchor_xy", None)
+                    )
+                if robot_map is not None:
+                    # A Place can be a long connected space. A durable WI may
+                    # be several metres from the entry seed after SLAM has
+                    # expanded the same Place; keep an alternate view within
+                    # robot-to-WI range instead of silently ending the local
+                    # search at an arbitrary 5 m radius. The Place-masked Navfn
+                    # field remains the hard spatial boundary.
+                    radius = max(
+                        radius,
+                        math.hypot(
+                            float(anchor[0]) - robot_map[0],
+                            float(anchor[1]) - robot_map[1],
+                        ) + max(1.0, 2.0 * depth),
+                    )
+                if origin_x is not None and origin_y is not None:
+                    center_col = int(math.floor(
+                        (anchor[0] - origin_x) / resolution
+                    ))
+                    center_row = int(math.floor(
+                        (anchor[1] - origin_y) / resolution
+                    ))
+                    radius_cells = int(math.ceil(radius / resolution))
+                    row_start = max(0, center_row - radius_cells)
+                    row_end = min(steps.shape[0], center_row + radius_cells + 1)
+                    col_start = max(0, center_col - radius_cells)
+                    col_end = min(steps.shape[1], center_col + radius_cells + 1)
+                    local_steps = steps[row_start:row_end, col_start:col_end]
+                    reachable = np.argwhere(local_steps >= 0)
+                    fallback_cells = []
+                    for local_row, local_col in reachable:
+                        row = row_start + int(local_row)
+                        col = col_start + int(local_col)
+                        x, y = self.cell_xy(message, row, col)
+                        dx = float(anchor[0]) - float(x)
+                        dy = float(anchor[1]) - float(y)
+                        distance = math.hypot(dx, dy)
+                        known_side = dx * normal[0] + dy * normal[1]
+                        if (
+                            distance < max(0.20, 1.5 * resolution)
+                            or distance > radius
+                            or known_side < max(0.10, resolution)
+                        ):
+                            continue
+                        # Prefer the normal observation range, then views
+                        # with more clearance into the known side.
+                        score = abs(distance - depth) + 0.25 * abs(
+                            known_side - depth
+                        )
+                        fallback_cells.append((score, row, col, x, y))
+                    fallback_cells.sort(key=lambda value: (
+                        value[0], value[1], value[2]
+                    ))
+                    for _score, row, col, x, y in fallback_cells[:256]:
+                        costmap_distance = self.candidate_costmap_distance(
+                            request.validation, x, y,
+                        )
+                        if (
+                            request.validation is not None
+                            and costmap_distance is None
+                        ):
+                            reject("fallback_costmap_route_unreachable")
+                            continue
+                        physical = (
+                            (x, y)
+                            if request.map_to_physical_xy is None
+                            else request.map_to_physical_xy(x, y)
+                        )
+                        if not ledger.viewpoint_is_available(
+                            item_id, physical, map_epoch=map_epoch,
+                        ):
+                            reject("fallback_viewpoint_already_attempted")
+                            continue
+                        path_distance = (
+                            float(costmap_distance)
+                            if costmap_distance is not None
+                            else float(steps[row, col]) * resolution
+                        )
+                        retry = bool(
+                            ledger.has_failed_viewpoint(
+                                item_id, map_epoch=map_epoch,
+                            )
+                        )
+                        candidate = FrontierCandidateRoute(
+                            row=int(row),
+                            col=int(col),
+                            action_tier="local",
+                            place_hops=0,
+                            x=float(x),
+                            y=float(y),
+                            path_distance=path_distance,
+                            score_path_distance=path_distance,
+                            work_item_id=item_id,
+                            work_item_match="rehydrated_work_item",
+                            work_item_support_cells=int(
+                                item.get("support_cell_count", 0)
+                            ),
+                            work_item_normal_xy=normal,
+                            viewpoint_retry=retry,
+                            graph_action=(
+                                "retry_viewpoint" if retry else "observe_local_work"
+                            ),
+                            graph_action_reason=(
+                                "durable_work_item_rehydrated_reachable_same_place"
+                            ),
+                        )
+                        admit = getattr(self, "_candidate_region_pool", None)
+                        if callable(admit):
+                            information = self.frontier_information(
+                                request.unknown, row, col,
+                            )
+                            if admit(request, candidate, context, information) is None:
+                                reject("fallback_place_lifecycle_admission_failed")
+                                continue
+                        strategy = "reachable_same_place_fallback"
+                        selected = (
+                            row, col, x, y, costmap_distance, path_distance,
+                            physical, strategy, retry, candidate,
+                        )
+                        report["item_audit"].append({
+                            "work_item_id": item_id,
+                            "strategy": strategy,
+                            "cell": [int(row), int(col)],
+                            "viewpoint_map": [
+                                round(float(x), 3), round(float(y), 3),
+                            ],
+                            "reason": "executable",
+                        })
+                        report["candidate_count"] += 1
+                        break
+            if selected is None and robot_map is not None and origin_x is not None and origin_y is not None:
+                # SLAM may later establish free cells on the former unknown
+                # side of a durable frontier. If no source-side view remains,
+                # reobserve from that side only when the current Place-masked
+                # Navfn field says the cell is reachable.
+                for local_row, local_col in reachable:
+                    row = row_start + int(local_row)
+                    col = col_start + int(local_col)
+                    x, y = self.cell_xy(message, row, col)
+                    dx = float(anchor[0]) - float(x)
+                    dy = float(anchor[1]) - float(y)
+                    distance = math.hypot(dx, dy)
+                    side = dx * normal[0] + dy * normal[1]
+                    if (
+                        distance < max(0.20, 1.5 * resolution)
+                        or distance > radius
+                        or side >= -max(0.10, resolution)
+                    ):
+                        continue
+                    physical = (
+                        (x, y) if request.map_to_physical_xy is None
+                        else request.map_to_physical_xy(x, y)
+                    )
+                    if not ledger.viewpoint_is_available(
+                        item_id, physical, map_epoch=map_epoch,
+                    ):
+                        reject("opposite_side_fallback_viewpoint_already_attempted")
+                        continue
+                    costmap_distance = self.candidate_costmap_distance(
+                        request.validation, x, y,
+                    )
+                    if request.validation is not None and costmap_distance is None:
+                        reject("opposite_side_fallback_costmap_route_unreachable")
+                        continue
+                    path_distance = (
+                        float(costmap_distance) if costmap_distance is not None
+                        else float(steps[row, col]) * resolution
+                    )
+                    retry = bool(ledger.has_failed_viewpoint(
+                        item_id, map_epoch=map_epoch,
+                    ))
+                    candidate = FrontierCandidateRoute(
+                        row=int(row), col=int(col), action_tier="local",
+                        place_hops=0, x=float(x), y=float(y),
+                        path_distance=path_distance,
+                        score_path_distance=path_distance,
+                        work_item_id=item_id,
+                        work_item_match="rehydrated_work_item",
+                        work_item_support_cells=int(item.get("support_cell_count", 0)),
+                        work_item_normal_xy=normal,
+                        viewpoint_retry=retry,
+                        graph_action=("retry_viewpoint" if retry else "observe_local_work"),
+                        graph_action_reason="durable_work_item_rehydrated_opposite_side_same_place",
+                    )
+                    admit = getattr(self, "_candidate_region_pool", None)
+                    if callable(admit):
+                        information = self.frontier_information(
+                            request.unknown, row, col,
+                        )
+                        if admit(request, candidate, context, information) is None:
+                            reject("opposite_side_fallback_place_lifecycle_admission_failed")
+                            continue
+                    selected = (
+                        row, col, x, y, costmap_distance, path_distance,
+                        physical, "reachable_same_place_opposite_side_fallback",
+                        retry, candidate,
+                    )
+                    report["item_audit"].append({
+                        "work_item_id": item_id,
+                        "strategy": "reachable_same_place_opposite_side_fallback",
+                        "cell": [int(row), int(col)],
+                        "viewpoint_map": [round(float(x), 3), round(float(y), 3)],
+                        "reason": "executable",
+                    })
+                    report["candidate_count"] += 1
+                    break
+            if selected is None:
                 continue
-            row, col, x, y, costmap_distance, path_distance, physical, strategy, retry = selected
-            candidate = FrontierCandidateRoute(
-                row=int(row),
-                col=int(col),
-                action_tier="local",
-                place_hops=0,
-                x=float(x),
-                y=float(y),
-                path_distance=path_distance,
-                score_path_distance=path_distance,
-                work_item_id=item_id,
-                work_item_match="rehydrated_work_item",
-                work_item_support_cells=int(item.get("support_cell_count", 0)),
-                work_item_normal_xy=normal,
-                viewpoint_retry=retry,
-                graph_action="retry_viewpoint" if retry else "observe_local_work",
-                graph_action_reason="durable_work_item_rehydrated_%s" % strategy,
-            )
+            row, col, x, y, costmap_distance, path_distance, physical, strategy, retry, candidate = selected
             candidates.append((int(row), int(col), candidate))
             report["candidate_count"] += 1
             audit["strategy"] = strategy

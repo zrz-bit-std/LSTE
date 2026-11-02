@@ -688,14 +688,13 @@ class PortalHypothesisLedger:
         record["last_failed_at"] = float(now)
         return record
 
-    def execution_failed(self, portal_id, now=0.0):
+    def execution_failed(self, portal_id, now=0.0, map_epoch=None):
         """Record controller failure without invalidating a crossed Portal.
 
-        A failed source-side probe is negative evidence about an un-crossed
-        doorway and belongs in :meth:`failed`.  Once the physical edge has
-        crossed successfully, a later reverse-egress/controller failure says
-        nothing about doorway validity; preserve ``state=crossed`` so the graph
-        can still use that edge as transit after an explicit recovery route.
+        Repeated navigation failures defer this edge temporarily so an
+        unproductive crossing attempt cannot monopolize planning at one pose.
+        The defer expires on a later map epoch; doorway evidence and semantic
+        priority remain intact, so the Portal is retried after local progress.
         """
         record = self._by_id(portal_id)
         if record is None:
@@ -704,6 +703,14 @@ class PortalHypothesisLedger:
             record.get("execution_failure_count", 0)
         ) + 1
         record["last_execution_failed_at"] = float(now)
+        if record["execution_failure_count"] >= 3 and map_epoch is not None:
+            try:
+                epoch = int(map_epoch)
+            except (TypeError, ValueError):
+                epoch = None
+            if epoch is not None and epoch >= 0:
+                record["navigation_deferred_until_epoch"] = epoch + 100
+                record["navigation_deferred_reason"] = "repeated_controller_failure"
         return record
 
     def get(self, portal_id):

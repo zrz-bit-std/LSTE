@@ -55,6 +55,7 @@ class Fixture(GPBranchFrontierMixin):
         self.awaiting_controller_lease_release_ack = False
         self.pending_controller_lease_releases = {}
         self.portal_authentication_history = []
+        self.active_portal_authentication = lambda: None
         self.events = []
         self.tree = SimpleNamespace(
             current_node_id=node_id,
@@ -137,6 +138,29 @@ class PinnedObservationExpiryTest(unittest.TestCase):
             [],
         )
         self.assertEqual(fixture.events, [])
+
+
+class PerCycleExpiryTest(unittest.TestCase):
+    """The planning cycle must conclude a pinned task, not only discovery."""
+
+    def test_physical_progress_check_expires_a_watching_task(self):
+        task = pinned_task()
+        fixture = Fixture(task)
+        fixture.pose_odom = SimpleNamespace(x=0.0, y=0.0, theta=0.0)
+        fixture.map_msg = None
+        # No active branch: active_portal_authentication() returns None, so the
+        # old early-return skipped the expiry entirely.
+        self.assertFalse(fixture.check_portal_authentication_physical_progress(100.0))
+        self.assertEqual(task.phase, "watching")
+        self.assertTrue(
+            fixture.check_portal_authentication_physical_progress(100.0 + TIMEOUT + 1.0)
+        )
+        self.assertTrue(task.all_finished())
+        self.assertEqual(task.phase, "complete")
+        self.assertIn(
+            "portal_authentication_observation_expired",
+            [event for event, _fields in fixture.events],
+        )
 
 
 class CallerOrderingTest(unittest.TestCase):

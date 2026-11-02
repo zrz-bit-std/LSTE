@@ -1,0 +1,78 @@
+# Navfn and TEB must avoid the same low body-height obstacles. GP and gmapping keep /pro3/rlscan.
+# Height is evaluated after transformation into the costmap's global frame.
+# The Kinect collision box reaches 0.634 m; include its obstacle band too.
+# A chassis-only 0.45 m cap misses foliage that can hit the camera at 0.6 m.
+global_costmap:
+  plugins:
+    - {name: static_layer, type: "costmap_2d::StaticLayer"}
+    - {name: obstacle_layer, type: "costmap_2d::VoxelLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+  obstacle_layer:
+    origin_z: 0.0
+    z_resolution: 0.10
+    z_voxels: 16
+    unknown_threshold: 15
+    mark_threshold: 0
+    observation_sources: laser body_cloud body_cloud_clear
+    laser:
+      data_type: LaserScan
+      topic: /pro3/rlscan
+      marking: true
+      clearing: true
+      obstacle_range: 8.0
+      raytrace_range: 10.0
+    body_cloud:
+      data_type: PointCloud2
+      marking: true
+      clearing: false
+      min_obstacle_height: 0.03
+      max_obstacle_height: 0.70
+      obstacle_range: 8.0
+      raytrace_range: 10.0
+    # Floor returns must clear old low voxels even though they must never
+    # mark obstacles. Filtering them from the marking buffer alone leaves
+    # transient low-height marks permanently uncleared by the high 2-D scan.
+    body_cloud_clear:
+      data_type: PointCloud2
+      marking: false
+      clearing: true
+      min_obstacle_height: -0.20
+      max_obstacle_height: 1.60
+      obstacle_range: 8.0
+      raytrace_range: 10.0
+  inflation_layer:
+    inflation_radius: 0.70
+    cost_scaling_factor: 5.0
+local_costmap:
+  plugins:
+    - {name: obstacle_layer, type: "costmap_2d::VoxelLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+  obstacle_layer:
+    origin_z: 0.0
+    z_resolution: 0.10
+    z_voxels: 16
+    unknown_threshold: 15
+    mark_threshold: 0
+    observation_sources: laser body_cloud body_cloud_clear
+    body_cloud:
+      data_type: PointCloud2
+      marking: true
+      clearing: false
+      min_obstacle_height: 0.03
+      max_obstacle_height: 0.70
+      obstacle_range: 8.0
+      raytrace_range: 10.0
+    # Floor returns must clear old low voxels even though they must never
+    # mark obstacles. Filtering them from the marking buffer alone leaves
+    # transient low-height marks permanently uncleared by the high 2-D scan.
+    body_cloud_clear:
+      data_type: PointCloud2
+      marking: false
+      clearing: true
+      min_obstacle_height: -0.20
+      max_obstacle_height: 1.60
+      obstacle_range: 8.0
+      raytrace_range: 10.0
+  inflation_layer:
+    inflation_radius: 0.55
+    cost_scaling_factor: 3.0

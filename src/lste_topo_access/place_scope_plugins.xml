@@ -1,0 +1,5 @@
+<library path="lib/liblste_place_scope_layer">
+  <class name="lste_topo_access::PlaceScopeLayer" type="lste_topo_access::PlaceScopeLayer" base_class_type="costmap_2d::Layer">
+    <description>Same-frame physical Place exclusion raster retained across master resize; never lowers physical obstacle costs.</description>
+  </class>
+</library>

@@ -18,6 +18,9 @@ class GlobalFrontierRouteStateMixin:
 
     def apply_map(self, message):
         self.map_msg = message
+        constraints = getattr(self, "place_navigation_constraints", None)
+        if constraints is not None:
+            constraints.bootstrap(message,self)
         scheduler = getattr(self, "decision_wake_scheduler", None)
         if scheduler is not None:
             scheduler.observe_map(message)
@@ -305,9 +308,18 @@ class GlobalFrontierRouteStateMixin:
         )
         if frame != self.active_route_history_frame:
             return None
+        admissible = None
+        if (getattr(self, "current_place_scope_mask", None) is not None
+                and self.active_route_kind != "portal_transition"):
+            from global_frontier_place_partition import point_in_place_scope
+            map_frame = (self.map_msg.header.frame_id or "map") if self.map_msg is not None else "map"
+            def admissible(point):
+                mapped = point if frame == map_frame else self.transform_xy(map_frame, frame, *point)
+                return mapped is not None and point_in_place_scope(self, mapped) is not False
         anchor = self.active_route_history.nearest_exit_anchor(
             current_pose,
             max(self.waypoint_release_radius, self.frontier_approach_distance),
+            admissible=admissible,
         )
         if anchor is None or frame == "map":
             return anchor
@@ -374,6 +386,65 @@ class GlobalFrontierRouteStateMixin:
         self.prefetched_work_item_match = None
         self.prefetched_work_item_support_cells = 0
 
+    @staticmethod
+    def controller_release_requires_ack(route_id, action_generation, terminal_received):
+        """Wait only for a route lease that reached the controller."""
+        try:
+            route_id = int(route_id or 0)
+            action_generation = int(action_generation or 0)
+        except (TypeError, ValueError):
+            return False
+        return bool(route_id > 0 and (action_generation > 0 or terminal_received))
+
+    @staticmethod
+    def merge_route_release_contract(
+        released_route_id,
+        bridge_dispatch_contract=None,
+        active_route_dispatch_contract=None,
+        terminal_contract=None,
+        active_terminal_contract=None,
+    ):
+        """Merge one route's release identity without letting callbacks rewrite it.
+
+        The bridge dispatch record is authoritative for the controller lease.
+        Terminal/graph callbacks may fill fields that were never assigned, but
+        cannot replace a nonzero action or transaction identity with a newer
+        semantic transaction from another layer.
+        """
+        try:
+            released_route_id = int(released_route_id or 0)
+        except (TypeError, ValueError):
+            released_route_id = 0
+
+        def identity_int(value, fallback=0):
+            try:
+                return int(value or fallback)
+            except (TypeError, ValueError):
+                return int(fallback)
+
+        contract = {}
+        candidates = (
+            bridge_dispatch_contract,
+            active_route_dispatch_contract,
+            terminal_contract,
+            active_terminal_contract,
+        )
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_route_id = identity_int(
+                candidate.get("route_id"), released_route_id
+            )
+            if candidate_route_id not in (0, released_route_id):
+                continue
+            for key, value in candidate.items():
+                if key not in contract or contract.get(key) in (None, "", 0):
+                    if value not in (None, "", 0):
+                        contract[key] = value
+            if "route_id" not in contract:
+                contract["route_id"] = released_route_id
+        return contract
+
     def release_active_frontier(
         self,
         discard_prefetch=False,
@@ -395,6 +466,7 @@ class GlobalFrontierRouteStateMixin:
         terminal_received = bool(
             getattr(self, "active_terminal_received", False)
         )
+
         def identity_int(value, fallback=0):
             try:
                 return int(value or fallback)
@@ -402,32 +474,18 @@ class GlobalFrontierRouteStateMixin:
                 return int(fallback)
 
         # A graph snapshot may be replaced before this release callback runs.
-        # Merge all route-matching immutable records and fill only fields that
-        # the first record left unset. This preserves the exact predecessor
-        # identity without reading successor graph state as its contract.
-        candidates = [
-            terminal_contract,
-            getattr(self, "active_terminal_contract", None),
+        # The controller's route-keyed dispatch record is authoritative; later
+        # terminal callbacks can enrich missing metadata but cannot substitute
+        # their semantic transaction for the admitted action identity.
+        contract = self.merge_route_release_contract(
+            released_route_id,
             (getattr(self, "_bridge_dispatch_contracts", None) or {}).get(
                 released_route_id
             ),
             getattr(self, "active_route_dispatch_contract", None),
-        ]
-        contract = {}
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            candidate_route_id = identity_int(
-                candidate.get("route_id"), released_route_id
-            )
-            if candidate_route_id not in (0, released_route_id):
-                continue
-            for key, value in candidate.items():
-                if key not in contract or contract.get(key) in (None, "", 0):
-                    if value not in (None, "", 0):
-                        contract[key] = value
-            if "route_id" not in contract:
-                contract["route_id"] = released_route_id
+            terminal_contract,
+            getattr(self, "active_terminal_contract", None),
+        )
 
         release_lifecycle_id = identity_int(
             contract.get(
@@ -484,9 +542,12 @@ class GlobalFrontierRouteStateMixin:
                 release_origin_epoch = value
             else:
                 release_projection_epoch = value
+        controller_lease_exists = self.controller_release_requires_ack(
+            released_route_id, release_action_generation, terminal_received,
+        )
         if await_controller_release_ack is None:
             await_release_ack = bool(
-                released_route_id > 0
+                controller_lease_exists
                 and (
                     (
                         not queue_successor
@@ -500,7 +561,7 @@ class GlobalFrontierRouteStateMixin:
             )
         else:
             await_release_ack = bool(
-                await_controller_release_ack and released_route_id > 0
+                await_controller_release_ack and controller_lease_exists
             )
         # In persistent mode this method ends the graph lease before the
         # action client necessarily reaches DONE. Preserve the identity and
@@ -512,7 +573,7 @@ class GlobalFrontierRouteStateMixin:
         self.last_released_route_terminal_received = bool(
             terminal_received
         )
-        self.last_released_route_controller_pending = released_route_id > 0
+        self.last_released_route_controller_pending = controller_lease_exists
         self.last_released_route_transaction_id = release_transaction_id
         self.last_released_route_lifecycle_transaction_id = release_lifecycle_id
         self.last_released_route_action_generation = release_action_generation
@@ -533,8 +594,19 @@ class GlobalFrontierRouteStateMixin:
             "origin_epoch": release_origin_epoch,
             "projection_epoch": release_projection_epoch,
             "terminal_received": terminal_received,
-            "controller_pending": released_route_id > 0,
+            "controller_pending": controller_lease_exists,
         }
+        if await_release_ack and getattr(
+            self, "_controller_release_ack_matches", lambda _contract: False
+        )(release_contract):
+            # A repeated terminal callback can arrive after the exact ACK.
+            # Do not recreate a lease that the bridge has already closed.
+            await_release_ack = False
+            self.last_released_route_controller_pending = False
+            self.publish_status(
+                "controller_lease_release_already_acknowledged",
+                **release_contract,
+            )
         if await_release_ack:
             remember_release = getattr(
                 self, "_remember_controller_release_contract", None
@@ -616,8 +688,32 @@ class GlobalFrontierRouteStateMixin:
                         retry_count=int(transition.retry_count),
                     )
             elif transaction.state in ("source_probe", "throat"):
-                transition = transaction.abort("portal_route_released_before_crossing")
-                if transition is not None:
+                # A fresh SLAM structural fact can supersede a committed
+                # candidate before the controller accepts its action. Preserve
+                # the same physical edge in that case; an action-generation
+                # identity or terminal means the robot actually started and
+                # must use the normal failure/recovery path.
+                unstarted = (
+                    not terminal_received
+                    and int(release_action_generation or 0) <= 0
+                )
+                transition = (
+                    transaction.release_unstarted_route(released_route_id)
+                    if unstarted
+                    else transaction.abort("portal_route_released_before_crossing")
+                )
+                if transition is not None and unstarted:
+                    self.portal_transaction_route_rebind_pending = True
+                    self.publish_status(
+                        "portal_transaction_phase",
+                        transaction_id=int(transition.transaction_id),
+                        route_id=int(transition.route_id),
+                        state=transition.state,
+                        transition=transition.last_transition,
+                        reason=transition.last_reason,
+                        rebind_pending=True,
+                    )
+                elif transition is not None:
                     self.publish_status(
                         "portal_transaction_aborted",
                         transaction_id=int(transition.transaction_id),
@@ -626,6 +722,7 @@ class GlobalFrontierRouteStateMixin:
                         reason=transition.last_reason,
                     )
                     transaction.finish("portal_transaction_aborted")
+                    self.portal_transaction_route_rebind_pending = False
             elif transaction.state == "destination_standoff":
                 # A standoff that never proved the destination side is not a
                 # legal transaction rebind point. Close that incomplete
@@ -726,6 +823,11 @@ class GlobalFrontierRouteStateMixin:
         self, message, known_free, unknown, row, col, robot_map, distance,
     ):
         """Prove an ordinary endpoint was observed from the current standoff."""
+        # GP authentication owns entry depth, locked turn and physical node
+        # return. A known-free waypoint is not completion evidence for those
+        # phases; ordinary WI map coverage must not cancel that motion.
+        if str(getattr(self, "active_portal_authentication_phase", "") or ""):
+            return False
         if (
             self.active_route_kind == "portal_transition"
             or self.scan_range_max is None

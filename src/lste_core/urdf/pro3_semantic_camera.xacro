@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<robot name="pro3_semantic_camera" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find pja)/urdf/pro3.xacro"/>
+  <!-- The current Pro3 Gazebo conversion drops the fixed Kinect link's sensor.
+       Keep the semantic-test camera directly on base_link so WeDetect receives
+       the same /kinect/hd/image_color_rect stream expected by the real stack. -->
+  <gazebo reference="base_link">
+    <sensor name="semantic_rgb_camera" type="camera">
+      <always_on>true</always_on>
+      <update_rate>15.0</update_rate>
+      <camera name="semantic_rgb_camera">
+        <horizontal_fov>1.5708</horizontal_fov>
+        <image><width>640</width><height>360</height><format>R8G8B8</format></image>
+        <clip><near>0.1</near><far>20.0</far></clip>
+      </camera>
+      <plugin name="semantic_rgb_camera_controller" filename="libgazebo_ros_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <update_rate>15.0</update_rate>
+        <cameraName>kinect</cameraName>
+        <imageTopicName>hd/image_color_rect</imageTopicName>
+        <cameraInfoTopicName>hd/camera_info</cameraInfoTopicName>
+        <frameName>base_link</frameName>
+        <robotNamespace>/</robotNamespace>
+      </plugin>
+    </sensor>
+  </gazebo>
+</robot>

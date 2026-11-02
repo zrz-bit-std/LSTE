@@ -194,6 +194,10 @@ class TebGoalBridgeActionHealthMixin:
             "epoch": epoch,
             "epoch_source": epoch_source if epoch is not None else "unavailable",
             "map_epoch": raw_map_epoch if contract is not None else raw_epoch,
+            "origin_epoch": (contract.get("origin_epoch") if contract is not None
+                             else getattr(self, "active_origin_epoch", None)),
+            "projection_epoch": (contract.get("projection_epoch") if contract is not None
+                                 else getattr(self, "active_projection_epoch", None)),
             "source": source.strip().lower() or "unknown",
             "route_kind": route_kind.strip().lower(),
             "mission_route_kind": mission_route_kind.strip().lower(),

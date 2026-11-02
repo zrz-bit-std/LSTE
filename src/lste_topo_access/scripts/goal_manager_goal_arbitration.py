@@ -564,6 +564,8 @@ class GoalManagerGoalArbitrationMixin:
         """
         if self.task_done_published:
             return
+        if getattr(self, "target_done_policy", "visual_target") == "graph_exploration":
+            return
         if getattr(self, "target_done_policy", "visual_target") == "target_room_entry":
             if self.target_room_entry_completion_ready(now):
                 self._complete_target_room_entry(now)

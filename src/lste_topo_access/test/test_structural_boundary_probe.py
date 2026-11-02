@@ -102,6 +102,14 @@ class _CrossPlaceProbeHarness(_CandidateHarness):
 
 
 class StructuralBoundaryProbeTest(unittest.TestCase):
+    def test_gp_mode_keeps_both_legacy_probe_collectors_inactive(self):
+        owner=_CandidateHarness()
+        owner.gp_portal_assistance_enabled=True
+        before=owner.portal_probe_ledger.next_id
+        self.assertEqual(owner.pending_portal_probe_candidates(None,None,None,None),[])
+        self.assertEqual(owner.structural_boundary_probe_candidates(None,None,None),[])
+        self.assertEqual(owner.portal_probe_ledger.next_id,before)
+
     def doorway_snapshot(self, *, closed=False):
         known_free = np.zeros((41, 61), dtype=bool)
         known_free[5:36, 5:56] = True

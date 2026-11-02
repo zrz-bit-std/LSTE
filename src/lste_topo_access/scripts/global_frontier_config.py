@@ -34,6 +34,7 @@ class GlobalFrontierConfigurationMixin(
             "visual_target",
             "target_room_entry",
             "target_context",
+            "graph_exploration",
         ):
             rospy.logwarn(
                 "Global frontier received unsupported target_done_policy=%r; "

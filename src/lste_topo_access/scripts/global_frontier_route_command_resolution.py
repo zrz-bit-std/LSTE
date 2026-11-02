@@ -33,12 +33,17 @@ class GlobalFrontierRouteCommandResolutionMixin(
         # arrives. Replacing its command inside the release radius creates a
         # mid-action preemption and loses the local map observation that the
         # next segment is meant to use.
+        authentication_approach_pending = bool(
+            getattr(self, "active_portal_authentication_phase", "") == "entering"
+            and getattr(self, "active_portal_authentication_entry_approach", False)
+        )
         connector_terminal_pending = (
             not self.mission_endpoint_only
             and self.active_route_kind not in (
                 "frontier_turn_connector",
                 "local_egress",
             )
+            and not authentication_approach_pending
         )
         mission_endpoint_is_frozen = (
             (
@@ -53,10 +58,18 @@ class GlobalFrontierRouteCommandResolutionMixin(
                 and self.turn_connector_released
             )
         )
+        mission_endpoint_is_frozen = (
+            mission_endpoint_is_frozen and not authentication_approach_pending
+        )
+        approach_release_radius = (
+            max(float(self.waypoint_release_radius), 0.50)
+            if authentication_approach_pending
+            else float(self.waypoint_release_radius)
+        )
         should_hold = (
             mission_endpoint_is_frozen
             or connector_terminal_pending
-            or previous_distance > self.waypoint_release_radius
+            or previous_distance > approach_release_radius
             or turn_still_pending
         )
         return should_hold, previous_distance, turn_still_pending
@@ -71,7 +84,19 @@ class GlobalFrontierRouteCommandResolutionMixin(
             float(route_steps[active_cell[0], active_cell[1]])
             * float(message.info.resolution)
         )
-        if held_waypoint_map is not None:
+        auth = getattr(self, "active_portal_authentication", lambda: None)()
+        authentication_turn_pending = bool(
+            getattr(self, "active_portal_authentication_phase", "") == "turning"
+            and auth is not None and getattr(auth, "target_yaw", None) is not None
+        )
+        # A frozen exploration endpoint must yield to the doorway-auth turn:
+        # the turn keeps one fixed XY anchor, but its yaw is a new action phase.
+        authentication_approach_pending = bool(
+            getattr(self, "active_portal_authentication_phase", "") == "entering"
+            and getattr(self, "active_portal_authentication_entry_approach", False)
+        )
+        if (held_waypoint_map is not None and not authentication_turn_pending
+                and not authentication_approach_pending):
             return ActiveRouteCommand(
                 mission_xy=mission_xy,
                 command_xy=held_waypoint_map,
@@ -85,7 +110,7 @@ class GlobalFrontierRouteCommandResolutionMixin(
         should_hold, previous_distance, turn_still_pending = (
             self.should_hold_active_waypoint(robot_map)
         )
-        if should_hold:
+        if should_hold and not authentication_turn_pending:
             rospy.loginfo_throttle(
                 3.0,
                 "Global frontier holding route command kind=%s "
@@ -162,6 +187,23 @@ class GlobalFrontierRouteCommandResolutionMixin(
             )
         else:
             inserted_turn_connector = False
+        work_normal = getattr(self, "active_work_item_normal_xy", None)
+        if getattr(self, "active_work_item_id", None) is not None and work_normal is not None:
+            view_yaw = getattr(self, "active_work_item_map_yaw", None)
+            if view_yaw is None:
+                frame = message.header.frame_id or "map"
+                origin_map = self.transform_xy(frame, "odom", 0.0, 0.0)
+                normal_map = self.transform_xy(
+                    frame, "odom", float(work_normal[0]), float(work_normal[1]),
+                )
+                if origin_map is not None and normal_map is not None:
+                    view_yaw = math.atan2(
+                        normal_map[1] - origin_map[1],
+                        normal_map[0] - origin_map[0],
+                    )
+                    self.active_work_item_map_yaw = view_yaw
+            if view_yaw is not None:
+                command_yaw = float(view_yaw)
         if getattr(self, "active_portal_authentication_phase", "") == "turning":
             auth = getattr(self, "active_portal_authentication", lambda: None)()
             if auth is not None and auth.target_yaw is not None:
@@ -174,16 +216,19 @@ class GlobalFrontierRouteCommandResolutionMixin(
                 inside_map = self.transform_xy(frame, "odom", *inside)
                 target_map = self.transform_xy(frame, "odom", *target_odom)
                 if inside_map is not None and target_map is not None:
-                    # Convert the locked odom heading into the current map
-                    # frame; SLAM may rotate map->odom between snapshots.
-                    # Observe in place. Reusing the frontier XY can leave a
-                    # small SLAM/odom offset that is outside the waypoint
-                    # release radius while already inside TEB's goal tolerance,
-                    # freezing the robot before it turns.
-                    pose = getattr(self, "pose_odom", None)
-                    current_map = (None if pose is None else self.transform_xy(
-                        frame, "odom", float(pose.x), float(pose.y)))
-                    command_xy = mission_xy if current_map is None else current_map
+                    # Keep one map-frame waypoint for this atomic turn. Using
+                    # the latest robot pose here changes the action identity on
+                    # every SLAM update, so the supervisor cancels the fixed-yaw
+                    # turn before it can make progress.
+                    command_xy = getattr(auth, "turn_map_xy", None)
+                    if command_xy is None:
+                        pose = getattr(self, "pose_odom", None)
+                        current_map = (None if pose is None else self.transform_xy(
+                            frame, "odom", float(pose.x), float(pose.y)))
+                        command_xy = tuple(
+                            inside_map if current_map is None else current_map
+                        )
+                        auth.turn_map_xy = command_xy
                     command_yaw = math.atan2(
                         target_map[1] - inside_map[1],
                         target_map[0] - inside_map[0],

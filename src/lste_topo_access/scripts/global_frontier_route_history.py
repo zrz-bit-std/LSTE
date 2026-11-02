@@ -28,7 +28,7 @@ class ReachedRouteHistory:
         ):
             self._points.append(point)
 
-    def nearest_exit_anchor(self, current_pose, minimum_distance):
+    def nearest_exit_anchor(self, current_pose, minimum_distance, admissible=None):
         """Return the nearest reached point that exits the current local trap."""
         if current_pose is None:
             return None
@@ -37,6 +37,7 @@ class ReachedRouteHistory:
             (self._distance(point, current), point)
             for point in self._points
             if self._distance(point, current) >= float(minimum_distance)
+            and (admissible is None or admissible(point))
         ]
         if not candidates:
             return None

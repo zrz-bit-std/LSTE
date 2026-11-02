@@ -21,6 +21,7 @@ from global_frontier_planning_navfn import (  # noqa: E402
 class _SlowNavfnExplorer(GlobalFrontierPlanningNavfnMixin):
     def __init__(self):
         self.navfn_plan_validation = True
+        self.lifecycle_transaction_id = lambda: 0
         self.persistent_execution = False
         self.navfn_make_plan_service = "/fake_navfn"
         self.navfn_make_plan_timeout = 0.05
@@ -97,6 +98,52 @@ class NavfnAsyncValidationTest(unittest.TestCase):
         navfn_module.rospy.loginfo_throttle = self.info_throttle
         navfn_module.rospy.logwarn = self.warn
         navfn_module.rospy.loginfo = self.info
+
+    def test_navfn_local_path_must_stay_inside_current_place(self):
+        import numpy as np
+        explorer = _SlowNavfnExplorer()
+        explorer.current_place_scope_mask = np.zeros((10, 10), dtype=bool)
+        explorer.current_place_scope_mask[:, :5] = True
+        explorer.current_place_scope_valid = True
+        explorer.current_place_scope_id = 2
+        explorer.current_physical_place_id = 2
+        explorer.current_place_scope_message = SimpleNamespace(
+            info=SimpleNamespace(resolution=1.0,
+                origin=SimpleNamespace(position=SimpleNamespace(x=0.0,y=0.0)))
+        )
+        self.assertTrue(explorer._navfn_path_in_local_place([(1.2,1.2),(3.2,1.2)],2))
+        self.assertFalse(explorer._navfn_path_in_local_place([(1.2,1.2),(8.2,1.2)],2))
+
+    def test_navfn_local_path_checks_interpolated_points_between_plan_poses(self):
+        import numpy as np
+        explorer = _SlowNavfnExplorer()
+        explorer.current_place_scope_mask = np.zeros((10, 10), dtype=bool)
+        explorer.current_place_scope_mask[:, :5] = True
+        explorer.current_place_scope_valid = True
+        explorer.current_place_scope_id = 2
+        explorer.current_physical_place_id = 2
+        explorer.current_place_scope_message = SimpleNamespace(
+            info=SimpleNamespace(resolution=1.0,
+                origin=SimpleNamespace(position=SimpleNamespace(x=0.0,y=0.0)))
+        )
+        self.assertFalse(explorer._navfn_path_in_local_place([(1.2,1.2),(8.2,1.2)],2))
+        explorer.current_place_scope_valid = False
+        self.assertIsNone(explorer._navfn_path_in_local_place([(1.2,1.2)],2))
+
+    def test_only_local_place_owned_goal_binds_a_path_to_scope(self):
+        import numpy as np
+        explorer = _SlowNavfnExplorer()
+        explorer.current_place_scope_mask = np.zeros((10, 10), dtype=bool)
+        explorer.current_place_scope_mask[:, :5] = True
+        explorer.current_place_scope_valid = True
+        explorer.current_place_scope_id = 2
+        explorer.current_physical_place_id = 2
+        explorer.current_place_scope_message = SimpleNamespace(
+            info=SimpleNamespace(resolution=1.0,
+                origin=SimpleNamespace(position=SimpleNamespace(x=0.0,y=0.0)))
+        )
+        self.assertEqual(explorer._navfn_local_goal_place((2.2,3.2)),2)
+        self.assertIsNone(explorer._navfn_local_goal_place((7.2,3.2)))
 
     def test_slow_service_does_not_block_planning_call(self):
         explorer = _SlowNavfnExplorer()

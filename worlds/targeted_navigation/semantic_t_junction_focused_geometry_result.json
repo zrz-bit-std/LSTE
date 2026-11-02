@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checks": {
+    "models_resolved": true,
+    "all_objects_inside_rooms": true,
+    "every_room_doorway_reachable_with_040m_clearance": true,
+    "at_least_10_objects_per_room": true
+  },
+  "reachable_room_doors": {
+    "east": true,
+    "north": true
+  },
+  "missing_models": [],
+  "outside_room_objects": []
+}

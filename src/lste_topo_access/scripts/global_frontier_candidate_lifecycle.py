@@ -42,8 +42,10 @@ class GlobalFrontierCandidateLifecycleMixin:
         target_observation_pending = bool(
             getattr(context, "target_observation_work_pending", False)
         )
+        gp_portal_only = bool(getattr(self, "gp_portal_assistance_enabled", False))
         if (
-            context.source_place_observed
+            not gp_portal_only
+            and context.source_place_observed
             and item_id is not None
             and not target_observation_pending
         ):
@@ -52,7 +54,7 @@ class GlobalFrontierCandidateLifecycleMixin:
             )
             if probe is not None:
                 self.last_portal_probe_candidates += 1
-        if bound_probe is not None and probe is None:
+        if bound_probe is not None and probe is None and not gp_portal_only:
             # The dedicated rehydration pass can still select this durable
             # probe by physical identity. Returning no local WorkItem here is
             # the typed ownership boundary that prevents a generic endpoint
@@ -104,6 +106,16 @@ class GlobalFrontierCandidateLifecycleMixin:
             # not get implicit benefit from room ownership, observation rays,
             # or SLAM-component re-identification.
             return "new", None
+        mask = getattr(self, "current_place_scope_mask", None)
+        if (mask is not None and getattr(self, "current_place_scope_id", None) == context.source_place_id
+                and candidate.place_hops == 0 and not is_portal_probe):
+            origin = request.message.info.origin.position
+            resolution = float(request.message.info.resolution)
+            col = int((candidate.x-origin.x)//resolution)
+            row = int((candidate.y-origin.y)//resolution)
+            if not (0 <= row < mask.shape[0] and 0 <= col < mask.shape[1] and mask[row,col]):
+                self.last_work_item_place_scope_skips += 1
+                return None
         components = request.components
         component = (
             None
@@ -218,7 +230,8 @@ class GlobalFrontierCandidateLifecycleMixin:
                         candidate.work_item_id
                     )
                 if (
-                    probe_for_work is not None
+                    not getattr(self, "gp_portal_assistance_enabled", False)
+                    and probe_for_work is not None
                     and probe_for_work.get("state") == "source_arrived"
                     and not is_portal_probe
                 ):

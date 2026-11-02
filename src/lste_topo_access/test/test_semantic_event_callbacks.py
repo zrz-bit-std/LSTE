@@ -6,15 +6,19 @@ import json
 import sys
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-# The callback module only needs rospy for the asynchronous bridge callbacks;
-# this test exercises task/detection input with a lightweight stand-in.
-sys.modules.setdefault("rospy", SimpleNamespace())
+# Use ROS's real module when available; only provide a lightweight stand-in
+# in environments without ROS so this file does not poison other test modules.
+try:
+    import rospy  # noqa: F401
+except ImportError:
+    sys.modules["rospy"] = SimpleNamespace()
 
 from global_frontier_event_callbacks import GlobalFrontierEventCallbacksMixin
 import global_frontier_event_callbacks
@@ -79,6 +83,93 @@ def make_detection(labels, target_labels=()):
 
 
 class SemanticCallbackTest(unittest.TestCase):
+    def test_queued_detection_keeps_portal_observation_ingress_identity(self):
+        from gp_observation_tree import JunctionObservationTree
+
+        harness = CallbackHarness()
+        harness.gp_observation_tree = JunctionObservationTree()
+        harness.gp_observation_tree.begin(8, 31, 0.0)
+        harness.gp_observation_tree.begin(8, 32, 1.0)
+        old_branch = SimpleNamespace(node_id=8, branch_id=31, state="turning")
+        next_branch = SimpleNamespace(node_id=8, branch_id=32, state="returning")
+        harness.active_portal_authentication = lambda: old_branch
+        queued = []
+        harness._enqueue_lifecycle_event = lambda event_type, payload: queued.append((event_type, payload))
+
+        harness.gather_detections(make_detection(["chair"]))
+        old_branch.state = "completed"
+        harness.active_portal_authentication = lambda: next_branch
+        event_type, payload = queued.pop()
+        harness.apply_detections(payload)
+
+        rooms = harness.gp_observation_tree.junctions[8]["rooms"]
+        self.assertEqual(len(rooms[31]["frames"]), 1)
+        self.assertEqual(len(rooms[32]["frames"]), 0)
+        self.assertEqual(rooms[31]["frames"][0]["signature"], ("chair",))
+
+    def test_lifecycle_detection_ingress_preserves_portal_branch_identity(self):
+        from gp_observation_tree import JunctionObservationTree
+        from global_frontier_lifecycle import GlobalFrontierLifecycleMixin
+
+        harness = CallbackHarness()
+        harness.gp_observation_tree = JunctionObservationTree()
+        harness.gp_observation_tree.begin(8, 31, 0.0)
+        harness.gp_observation_tree.begin(8, 32, 1.0)
+        old_branch = SimpleNamespace(node_id=8, branch_id=31, state="turning")
+        next_branch = SimpleNamespace(node_id=8, branch_id=32, state="returning")
+        harness.active_portal_authentication = lambda: old_branch
+        queued = []
+        harness._enqueue_lifecycle_event = lambda event_type, payload: queued.append((event_type, payload))
+
+        GlobalFrontierLifecycleMixin.on_detections(
+            harness, make_detection(["table"])
+        )
+        old_branch.state = "completed"
+        harness.active_portal_authentication = lambda: next_branch
+        _event_type, payload = queued.pop()
+        harness.apply_detections(payload)
+
+        rooms = harness.gp_observation_tree.junctions[8]["rooms"]
+        self.assertEqual(len(rooms[31]["frames"]), 1)
+        self.assertEqual(len(rooms[32]["frames"]), 0)
+        self.assertEqual(rooms[31]["frames"][0]["signature"], ("table",))
+
+    def test_graph_exploration_keeps_semantics_but_suppresses_visual_control(self):
+        harness = CallbackHarness()
+        harness.on_task(make_task())
+        harness.pending_target_track_ids = ["yellow_cup:cup:1"]
+        harness.pending_target_belief_observations = [object()]
+
+        self.assertTrue(harness._apply_target_done_policy("graph_exploration"))
+        self.assertTrue(harness._target_visual_control_suppressed())
+        self.assertEqual(harness.pending_target_track_ids, [])
+        self.assertEqual(harness.pending_target_belief_observations, [])
+        self.assertEqual(
+            harness.published[-1],
+            ("target_visual_control_suppressed", {
+                "target_done_policy": "graph_exploration",
+                "reason": "graph_exploration_owns_mission",
+            }),
+        )
+
+        harness.on_detections(make_detection(["chair", "desk"]))
+        evidence = harness.semantic_place_belief.evidence(4)
+        self.assertEqual(evidence["observations"], 1)
+        self.assertEqual(evidence["labels"], ["chair", "desk"])
+
+    def test_graph_exploration_policy_is_accepted_by_goal_manager_detection(self):
+        from goal_manager_detection import handle_detections
+
+        manager = SimpleNamespace(
+            target_done_policy="graph_exploration",
+            target_detection_for_track=lambda _message: self.fail(
+                "graph exploration must not create a visual target claim"
+            ),
+        )
+        message = make_detection([], target_labels=["yellow cup"])
+        handle_detections(manager, message)
+        self.assertIs(manager.latest_dets, message)
+
     def test_repeated_same_concept_does_not_flood_evidence_events(self):
         harness = CallbackHarness()
         harness.on_task(make_task())
@@ -127,9 +218,15 @@ class SemanticCallbackTest(unittest.TestCase):
     def test_goal_manager_bearing_binds_to_the_current_target_track(self):
         harness = CallbackHarness()
         harness.on_task(make_task())
-        global_frontier_event_callbacks.rospy.Time = SimpleNamespace(
-            now=lambda: SimpleNamespace(to_sec=lambda: 3.0)
-        )
+        with patch.object(
+            global_frontier_event_callbacks.rospy,
+            "Time",
+            SimpleNamespace(now=lambda: SimpleNamespace(to_sec=lambda: 3.0)),
+            create=True,
+        ):
+            self._exercise_goal_manager_bearing(harness)
+
+    def _exercise_goal_manager_bearing(self, harness):
         harness.active_work_item_id = 11
         harness.last_portal_hypothesis_id = None
         harness.on_goal_arbitration(SimpleNamespace(data=json.dumps({

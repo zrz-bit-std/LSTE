@@ -33,6 +33,10 @@ class GlobalFrontierRosInterfacesMixin:
         self.hard_reset_ack_publisher = rospy.Publisher(
             HARD_RESET_ACK_TOPIC, String, queue_size=20
         )
+        self.place_navigation_constraints = None
+        if rospy.get_param("~place_navigation_constraints", False):
+            from global_frontier_place_navigation import PlaceNavigationConstraints
+            self.place_navigation_constraints = PlaceNavigationConstraints()
         rospy.Subscriber(self.map_topic, OccupancyGrid, self.on_map, queue_size=1)
         rospy.Subscriber(self.costmap_topic, OccupancyGrid, self.on_costmap, queue_size=1)
         rospy.Subscriber(
@@ -43,7 +47,7 @@ class GlobalFrontierRosInterfacesMixin:
         )
         rospy.Subscriber(self.pose_topic, Pose2D, self.on_pose, queue_size=1)
         rospy.Subscriber(self.scan_topic, LaserScan, self.on_scan, queue_size=1)
-        if getattr(self, "exploration_method", "") == "gp_branch_tree":
+        if getattr(self, "gp_portal_assistance_enabled", False):
             rospy.Subscriber(
                 rospy.get_param("~branch_camera_info_topic", "/kinect/hd/camera_info"),
                 CameraInfo, lambda msg: setattr(self, "gp_branch_camera_info", msg),

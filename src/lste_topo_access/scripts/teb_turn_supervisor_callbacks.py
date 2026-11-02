@@ -602,6 +602,26 @@ class TebTurnSupervisorCallbacksMixin:
             # future states until the matching Bridge action status arrives;
             # otherwise a valid successor boundary is rejected by comparing
             # its lifecycle with the predecessor's lifecycle.
+            if self._active_contract_matches_released_route_locked(
+                identity, identity["state"], identity["producer"]
+            ):
+                self.publish_status_locked(
+                    "planner_contract_pending_ignored",
+                    reason="planner_active_contract_for_released_route",
+                    planner_contract_identity=dict(identity),
+                )
+                return
+            if self._terminal_contract_matches_release_ack_locked(
+                identity, identity["state"], identity["producer"]
+            ):
+                accepted = self._apply_planner_contract_locked(
+                    identity,
+                    command,
+                    identity["state"],
+                    reason,
+                    identity["producer"],
+                )
+                return
             if self._planner_contract_alignment_pending_locked(identity):
                 self._queue_planner_contract_pending_locked(
                     identity,
@@ -622,11 +642,160 @@ class TebTurnSupervisorCallbacksMixin:
             if accepted and identity["state"] == PlannerCommandContract.STATE_ACTIVE:
                 self._clear_recovery_execution_locked("active_planner_contract")
 
+    def _terminal_contract_matches_release_ack_locked(
+        self, identity, state, producer
+    ):
+        """Allow a terminal contract through only after its exact lease ACK.
+
+        Future ACTIVE contracts must remain queued until Bridge adopts them.
+        An INVALIDATED terminal from that same Bridge route is different: if
+        its exact route, lifecycle and successor generation have a matching
+        release ACK, waiting for a future active action can hold the planner
+        boundary indefinitely even though the old lease is already gone.
+        """
+        if state != PlannerCommandContract.STATE_INVALIDATED:
+            return False
+        if str(producer or "").strip().lower() != "teb_goal_bridge":
+            return False
+        if bool(getattr(self, "active_action", False)):
+            return False
+        if not isinstance(identity, dict):
+            return False
+        acknowledgements = getattr(
+            self, "bridge_release_ack_history", None
+        )
+        if not isinstance(acknowledgements, list):
+            latest = getattr(self, "latest_bridge_release_ack", None)
+            acknowledgements = [latest] if isinstance(latest, dict) else []
+        try:
+            route = int(identity.get("route_id", 0) or 0)
+            generation = int(identity.get("action_generation", 0) or 0)
+            lifecycle = int(
+                identity.get("lifecycle_transaction_id", 0) or 0
+            )
+        except (TypeError, ValueError):
+            return False
+        if route <= 0 or generation <= 0 or lifecycle <= 0:
+            return False
+        for ack in reversed(acknowledgements[-16:]):
+            if not isinstance(ack, dict):
+                continue
+            if bool(ack.get("active", True)):
+                continue
+            if str(ack.get("event", "") or "") != "lease_release_ack":
+                continue
+            if str(ack.get("controller_lease", "") or "") != "released":
+                continue
+            try:
+                ack_route = int(
+                    ack.get("frontier_lease_released_route_id", 0) or 0
+                )
+                ack_generation = int(
+                    ack.get("active_action_generation", 0) or 0
+                )
+                ack_lifecycle = int(
+                    ack.get("active_action_lifecycle_transaction_id", 0)
+                    or 0
+                )
+            except (TypeError, ValueError):
+                continue
+            if (
+                route == ack_route
+                and generation == ack_generation
+                and lifecycle == ack_lifecycle
+            ):
+                return True
+        return False
+
+    def _active_contract_matches_released_route_locked(
+        self, identity, state, producer
+    ):
+        """Recognize a planner ACTIVE frame for a route already terminal.
+
+        A terminal Bridge result proves that an ACTIVE frame for the same
+        released route can no longer be adopted.  Drop only that exact
+        route/lifecycle/generation; a future route remains queued.
+        """
+        if state != PlannerCommandContract.STATE_ACTIVE:
+            return False
+        if str(producer or "").strip().lower() != "persistent_teb_local_planner":
+            return False
+        if bool(getattr(self, "active_action", False)):
+            return False
+        if not isinstance(identity, dict):
+            return False
+        history = getattr(self, "bridge_terminal_history", None)
+        if not isinstance(history, list):
+            return False
+        try:
+            route = int(identity.get("route_id", 0) or 0)
+            generation = int(identity.get("action_generation", 0) or 0)
+            lifecycle = int(identity.get("lifecycle_transaction_id", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        if route <= 0 or generation <= 0 or lifecycle <= 0:
+            return False
+        for status in reversed(history[-16:]):
+            if not isinstance(status, dict) or bool(status.get("active", True)):
+                continue
+            if str(status.get("event", "") or "") not in (
+                "transport_terminal", "lease_release_ack"
+            ):
+                continue
+            if str(status.get("controller_lease", "") or "") != "released":
+                continue
+            try:
+                released_route = int(
+                    status.get("frontier_lease_released_route_id", 0) or 0
+                )
+                released_generation = int(status.get("action_generation", 0) or 0)
+                released_lifecycle = int(
+                    status.get("active_action_lifecycle_transaction_id", 0)
+                    or 0
+                )
+            except (TypeError, ValueError):
+                continue
+            if (
+                route == released_route
+                and generation == released_generation
+                and lifecycle == released_lifecycle
+            ):
+                return True
+        return False
+
+    def _ignore_pending_contract_for_released_route_locked(self, pending):
+        identity = pending.get("identity", {})
+        self.planner_contract_pending = None
+        self.publish_status_locked(
+            "planner_contract_pending_ignored",
+            reason="planner_active_contract_for_released_route",
+            planner_contract_identity=dict(identity or {}),
+        )
+        return False
+
     def _promote_pending_planner_contract_locked(self):
         pending = getattr(self, "planner_contract_pending", None)
         if not isinstance(pending, dict):
             return False
         pending_identity = pending.get("identity")
+        if self._active_contract_matches_released_route_locked(
+            pending_identity, pending.get("state"), pending.get("producer")
+        ):
+            return self._ignore_pending_contract_for_released_route_locked(
+                pending
+            )
+        if self._terminal_contract_matches_release_ack_locked(
+            pending_identity,
+            pending.get("state"),
+            pending.get("producer"),
+        ):
+            return bool(self._apply_planner_contract_locked(
+                pending_identity,
+                pending["command"],
+                pending["state"],
+                pending["reason"],
+                pending["producer"],
+            ))
         if self._pending_planner_contract_is_stale_locked(pending_identity):
             self.planner_contract_pending = None
             self.publish_status_locked(
@@ -783,6 +952,7 @@ class TebTurnSupervisorCallbacksMixin:
         origin_epoch = None
         projection_epoch = None
         graph_transaction_id = 0
+        payload = None
         try:
             payload = json.loads(message.data)
             if isinstance(payload, dict):
@@ -823,7 +993,16 @@ class TebTurnSupervisorCallbacksMixin:
                 source = str(message.data).strip().lower() or source
         except (TypeError, ValueError, json.JSONDecodeError):
             source = str(message.data).strip().lower() or source
+        from portal_authentication_turn_contract import authentication_turn_contract
+        turn = (None if not isinstance(payload, dict) else authentication_turn_contract(
+            payload.get("authentication_turn"), route_id, graph_transaction_id,
+            payload.get("lifecycle_transaction_id", 0)))
         with self.lock:
+            self.latest_authentication_turn = turn
+            self.latest_authentication_turn_required = bool(
+                isinstance(payload, dict) and (
+                    payload.get("authentication_turn_required", False)
+                    or "authentication_turn" in payload))
             self.latest_intent_source = source
             self.latest_intent_priority = max(0, min(3, priority))
             self.latest_route_kind = route_kind
@@ -872,7 +1051,32 @@ class TebTurnSupervisorCallbacksMixin:
         if not isinstance(payload, dict):
             return
         with self.lock:
+            if (
+                str(payload.get("event", "") or "") == "lease_release_ack"
+                and str(payload.get("controller_lease", "") or "") == "released"
+                and not bool(payload.get("active", False))
+            ):
+                self.latest_bridge_release_ack = dict(payload)
+                history = getattr(self, "bridge_release_ack_history", [])
+                if not isinstance(history, list):
+                    history = []
+                history.append(dict(payload))
+                self.bridge_release_ack_history = history[-16:]
+            if (
+                str(payload.get("event", "") or "")
+                in ("transport_terminal", "lease_release_ack")
+                and str(payload.get("controller_lease", "") or "") == "released"
+                and not bool(payload.get("active", False))
+            ):
+                terminal_history = getattr(self, "bridge_terminal_history", [])
+                if not isinstance(terminal_history, list):
+                    terminal_history = []
+                terminal_history.append(dict(payload))
+                self.bridge_terminal_history = terminal_history[-16:]
             previous_identity = self.active_action_identity
+            previous_goal_context = getattr(
+                self, "active_action_goal_context", None,
+            )
             self.active_action = bool(payload.get("active", False))
             self.active_action_route_kind = str(
                 payload.get("active_route_kind", "")
@@ -880,6 +1084,10 @@ class TebTurnSupervisorCallbacksMixin:
             self.active_action_source = str(
                 payload.get("active_intent_source", "unknown")
             ).strip().lower() or "unknown"
+            goal_context = payload.get("active_goal_context")
+            self.active_action_goal_context = (
+                dict(goal_context) if isinstance(goal_context, dict) else None
+            )
             self.active_action_priority = max(
                 0, min(3, int(payload.get("active_intent_priority", 0) or 0))
             )
@@ -1024,15 +1232,23 @@ class TebTurnSupervisorCallbacksMixin:
                 self.active_action_source_goal = None
             self.active_action_identity = self._active_action_key_locked()
             if self.active_action_identity != previous_identity:
-                if (
-                    previous_identity is not None
-                    and self.state == STATE_TURNING
-                    and self.turn_action_identity != self.active_action_identity
-                ):
-                    self._release_turn_locked(
-                        "bridge_action_identity_changed",
-                        completed=False,
+                continued_turn = False
+                if (previous_identity is not None
+                        and self.state == STATE_TURNING
+                        and self.turn_action_identity != self.active_action_identity):
+                    continue_handoff = getattr(
+                        self, "_continue_stalled_route_turn_for_handoff_locked",
+                        None,
                     )
+                    if callable(continue_handoff):
+                        continued_turn = bool(continue_handoff(
+                            self.active_action_identity, previous_goal_context,
+                        ))
+                    if not continued_turn:
+                        self._release_turn_locked(
+                            "bridge_action_identity_changed",
+                            completed=False,
+                        )
                 self.pre_turn_checked_identity = None
                 self.completed_turn_key = None
                 self.latest_navfn_plan = None
@@ -1040,8 +1256,10 @@ class TebTurnSupervisorCallbacksMixin:
                 self.stalled_route_candidate_identity = None
                 self.stalled_route_candidate_since_wall = 0.0
                 self.stalled_route_ready_identity = None
-                self.stalled_route_completed_identity = None
-                self.stalled_route_reorientation_attempted_identity = None
+                if not continued_turn:
+                    self.stalled_route_completed_identity = None
+                    self.stalled_route_reorientation_attempted_identity = None
+                    self.stalled_route_turn_handoff_count = 0
                 self.forward_only_trajectory_identity = None
                 self.latest_mux_boundary_key = None
                 self._invalidate_trajectory_feedback_locked(

@@ -120,7 +120,7 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES lste_persistent_navigation_plugins
+  LIBRARIES lste_persistent_navigation_plugins lste_place_scope_layer
   CATKIN_DEPENDS costmap_2d gazebo_msgs geometry_msgs message_runtime nav_core navfn pluginlib roscpp std_msgs teb_local_planner tf tf2_ros
 #  DEPENDS system_lib
 )
@@ -182,6 +182,7 @@ catkin_install_python(PROGRAMS
   scripts/gp_subgoals_sim_topo.py
   scripts/lste_global_frontier_node.py
   scripts/lste_navigation_metrics.py
+  scripts/test_semantic_inputs.py
   scripts/lste_teb_goal_bridge.py
   scripts/lste_teb_turn_supervisor.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -223,6 +224,14 @@ install(FILES
   scripts/global_frontier_evidence_contract.py
   scripts/global_frontier_transition.py
   scripts/global_frontier_graph_route_planner.py
+  scripts/global_frontier_work_item_tour.py
+  scripts/global_frontier_place_dfs.py
+  scripts/global_frontier_place_partition.py
+  scripts/global_frontier_place_navigation.py
+  scripts/global_frontier_place_mask_projection.py
+  scripts/global_frontier_work_item_map_evidence.py
+  scripts/global_frontier_place_portal_validation.py
+  scripts/global_frontier_room_scope.py
   scripts/global_frontier_graph_route_adapter.py
   scripts/global_frontier_graph_route_transaction.py
   scripts/global_frontier_graph_route_gate.py
@@ -336,6 +345,7 @@ install(FILES
   scripts/gp_branch_discovery.py
   scripts/gp_branch_frontier.py
   scripts/gp_exploration_tree.py
+  scripts/gp_observation_tree.py
   scripts/global_frontier_portal_authentication.py
   scripts/global_frontier_terminal_lifecycle.py
   scripts/global_frontier_terminal_connector.py
@@ -402,6 +412,7 @@ install(FILES
   scripts/navigation_metrics_failure_evidence.py
   scripts/navigation_metrics_goal_events.py
   scripts/navigation_metrics_logging.py
+  scripts/navigation_metrics_line_stream.py
   scripts/navigation_metrics_observer_state.py
   scripts/navigation_metrics_planner.py
   scripts/navigation_metrics_planner_teb_feedback.py
@@ -447,9 +458,11 @@ install(FILES
   scripts/teb_turn_supervisor_callbacks.py
   scripts/teb_turn_supervisor_control.py
   scripts/teb_turn_supervisor_contract.py
+  scripts/portal_authentication_turn_contract.py
   scripts/teb_turn_supervisor_parameters.py
   scripts/teb_turn_supervisor_ros.py
   scripts/teb_turn_supervisor_routes.py
+  scripts/teb_native_reseed.py
   scripts/teb_turn_supervisor_state.py
   scripts/teb_turn_supervisor_turn_lifecycle.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -477,6 +490,10 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
+install(DIRECTORY config/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
+)
+
 install(FILES persistent_navigation_plugins.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
@@ -493,3 +510,10 @@ install(FILES persistent_navigation_plugins.xml
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+
+add_library(lste_place_scope_layer src/place_scope_layer.cpp)
+target_compile_features(lste_place_scope_layer PRIVATE cxx_std_11)
+target_link_libraries(lste_place_scope_layer ${catkin_LIBRARIES})
+add_dependencies(lste_place_scope_layer ${catkin_EXPORTED_TARGETS})
+install(TARGETS lste_place_scope_layer LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
+install(FILES place_scope_plugins.xml DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})

@@ -80,6 +80,18 @@ class GlobalFrontierRouteCommandPublicationMixin:
         execution_yaw = (
             None if frame_id == "odom" else command.command_yaw
         )
+        auth = getattr(self, "active_portal_authentication", lambda: None)()
+        if (auth is not None and auth.state == "turning"
+                and command.route_kind == "frontier_turn_connector"):
+            # The observation turn owns a physical pose, not a raster epoch.
+            frame_id = "odom"
+            execution_xy = getattr(auth, "turn_odom_xy", None)
+            if execution_xy is None:
+                pose = getattr(self, "pose_odom", None)
+                execution_xy = (tuple(auth.inside_xy) if pose is None
+                                else (float(pose.x), float(pose.y)))
+                auth.turn_odom_xy = execution_xy
+            execution_yaw = float(auth.target_yaw)
         goal = PoseStamped()
         goal.header.stamp = rospy.Time.now()
         goal.header.frame_id = frame_id

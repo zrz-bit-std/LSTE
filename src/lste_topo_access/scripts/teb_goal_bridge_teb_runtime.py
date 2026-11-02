@@ -653,27 +653,74 @@ class TebGoalBridgeTebRuntimeMixin:
         state = str(payload.get("state", "UNKNOWN")).strip().upper() or "UNKNOWN"
         event = str(payload.get("event", "unknown"))
         with self.lock:
+            now = now_for(self)
+            previous = str(getattr(self, "turn_supervisor_state", "UNKNOWN") or "")
             self.turn_supervisor_state = state
             self.turn_supervisor_last_event = event
-            if (
-                event in ("turn_completed", "turn_released")
+            # The supervisor heartbeats its state about once per second, so a
+            # latch is detectable: no fresh message means nobody owns the turn
+            # any more.  A genuinely stuck turn is bounded separately below.
+            self.turn_supervisor_status_monotonic = now
+            if state == "TURNING" and previous != "TURNING":
+                self.turn_supervisor_turning_since = now
+            elif state != "TURNING":
+                self.turn_supervisor_turning_since = 0.0
+            route_kind = str(getattr(self, "active_route_kind", "") or "")
+            turn_route_kinds = {
+                "frontier_turn_connector",
+                "frontier_endpoint",
+                "portal_transition",
+                "local_egress",
+            }
+            payload_route_kind = str(
+                payload.get("active_route_kind", payload.get("route_kind", ""))
+                or ""
+            )
+            route_id = self._contract_int(
+                payload.get("active_route_id", payload.get("route_id")), -1
+            )
+            generation = self._contract_int(
+                payload.get(
+                    "active_action_generation", payload.get("action_generation")
+                ),
+                -1,
+            )
+            transaction_id = self._contract_int(
+                payload.get(
+                    "active_action_goal_transaction_id",
+                    payload.get("transaction_id"),
+                ),
+                -1,
+            )
+            completion_matches_active_action = bool(
+                event == "turn_completed"
+                and state != "TURNING"
                 and self.action_active
-                and self.active_route_kind == "frontier_turn_connector"
-            ):
-                # XY feedback is stationary during a mandated yaw connector.
-                # Completing it is still action-health progress.
-                self.active_progress_monotonic = now_for(self)
+                and route_kind in turn_route_kinds
+                and payload_route_kind == route_kind
+                and route_id > 0
+                and route_id == int(getattr(self, "active_route_id", 0) or 0)
+                and generation > 0
+                and generation == int(getattr(self, "action_generation", 0) or 0)
+                and transaction_id > 0
+                and transaction_id
+                == int(getattr(self, "active_goal_transaction_id", 0) or 0)
+            )
+            if completion_matches_active_action:
+                # XY is intentionally stationary during an in-place turn. A
+                # successful, identity-matched turn is physical progress for
+                # the bridge's independent action-health watchdog. Do not
+                # refresh this clock for stale, released, or unowned events.
+                now = now_for(self)
+                self.active_progress_monotonic = now
+                self.active_motion_progress_monotonic = now
                 if self.active_feedback_distance is not None:
                     self.active_best_distance = self.active_feedback_distance
-            if (
-                event == "turn_completed"
-                and self.action_active
-                and self.active_route_kind == "frontier_turn_connector"
-            ):
-                self.turn_transition_ready = True
-                self.dispatch_locked(
-                    force=False, reason="turn_completed_route_release"
-                )
+                if route_kind == "frontier_turn_connector":
+                    self.turn_transition_ready = True
+                    self.dispatch_locked(
+                        force=False, reason="turn_completed_route_release"
+                    )
         if state == "TURNING":
             rospy.loginfo_throttle(
                 3.0,
@@ -988,11 +1035,60 @@ class TebGoalBridgeTebRuntimeMixin:
                 self.teb_reorientation_reference_yaw = yaw
                 self.teb_reorientation_last_yaw_progress_monotonic = now
 
+    def turn_supervisor_is_turning(self, now=None):
+        """Return whether a live, plausibly-short turn still owns the base.
+
+        ``_defer_frontier_update_during_turn_locked`` queues every same-priority
+        frontier replacement while this returns true, so an unbounded latch
+        here means a dispatched successor is never sent.  The supervisor
+        heartbeats at ~1 Hz and its own no-progress release is capped at 12 s;
+        anything older than those bounds is a stale latch, not an active turn.
+        """
+        if str(getattr(self, "turn_supervisor_state", "UNKNOWN")) != "TURNING":
+            return False
+        now = now_for(self) if now is None else float(now)
+        seen = float(
+            getattr(self, "turn_supervisor_status_monotonic", 0.0) or 0.0
+        )
+        stale_after = float(
+            getattr(self, "turn_supervisor_status_timeout", 3.0) or 0.0
+        )
+        if seen <= 0.0 or (stale_after > 0.0 and now - seen > stale_after):
+            self._report_turn_supervisor_latch_expired(
+                "status_stale", now, seen, stale_after)
+            return False
+        since = float(
+            getattr(self, "turn_supervisor_turning_since", 0.0) or 0.0
+        )
+        max_turn = float(
+            getattr(self, "turn_supervisor_turn_max_seconds", 20.0) or 0.0
+        )
+        if since > 0.0 and max_turn > 0.0 and now - since > max_turn:
+            self._report_turn_supervisor_latch_expired(
+                "turn_too_long", now, since, max_turn)
+            return False
+        return True
+
+    def _report_turn_supervisor_latch_expired(self, reason, now, since, limit):
+        key = (reason, int(getattr(self, "active_route_id", 0) or 0))
+        if getattr(self, "_turn_supervisor_latch_reported", None) == key:
+            return
+        self._turn_supervisor_latch_reported = key
+        publish = getattr(self, "publish_bridge_status", None)
+        if callable(publish):
+            publish(
+                "turn_supervisor_latch_expired",
+                reason=str(reason),
+                route_id=int(getattr(self, "active_route_id", 0) or 0),
+                held_seconds=round(float(now) - float(since), 3),
+                limit_seconds=float(limit),
+            )
+
     def _teb_reorientation_progressing_locked(self, now):
         """Check the finite action-health exemption for a native TEB turn."""
         if (
             not self.action_active
-            or self.turn_supervisor_state == "TURNING"
+            or self.turn_supervisor_is_turning(now)
             or not self._teb_reorientation_command_active_locked(now)
             or self.odom_yaw is None
             or now - self.odom_pose_monotonic

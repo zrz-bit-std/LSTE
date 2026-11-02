@@ -1,159 +1,174 @@
-# 语义房间场景 v2：T / L / 十字复现
+# Semantic junction Gazebo tests
 
-实验室电脑：`ssh -4 zrz@bit1010.local`。工作区：`/home/zrz/work/lste_ws`。
-
-## 新版场景
-
-本版替换了只有短走廊的旧版场景。中央路口外有宽 3 米、长 12 米的走廊分支，西侧入口走廊长 14 米；各分支尽头通过宽 2.2 米的门口连入 8×8 米的封闭房间。家具使用实验室现有模型，保留真实 collision，不使用旧版 visual-only 副本。
-
-| World（位于 `worlds/targeted_navigation/`） | 房间 | 物件实例数 |
-| --- | --- | --- |
-| `semantic_t_junction.world` | 西侧休息室、东侧办公室、北侧会议室 | 39 |
-| `semantic_l_junction.world` | 西侧办公室、北侧茶水间 | 27 |
-| `semantic_cross_junction.world` | 西侧休息室、东侧办公室、北侧会议室、南侧茶水间 | 50 |
-
-物件复用现有 world 中的 desk、office_chair、monitor、keyboard、mouse、computer_case、cup、bookshelf、file_cabinet、file/file_box、conference_table、sofa、coffee_table、cafe_table、kitchen_chair、book、plant 等。每个房间至少 10 件物件，按房间主题布置，家具碰撞轮廓均位于房间内。
-
-每个 world 同目录有：
-
-- `<场景名>.json`：房间边界、门宽、走廊尺寸、起点、语义模型及位置。
-- `<场景名>_layout.png`：带物件名称的布局图。
-- `<场景名>_scene.png`：包含墙体和真实家具碰撞轮廓的完整场景概览。
-- `<场景名>_geometry_result.json`：模型无缺失、家具在室内、每房间至少 10 件物件、从起点到每个房门内侧的 0.4 米净空路径连通性检查。
-
-## 验证范围
-
-运行当前 GP 候选发现 + 在线 SLAM 去重 + 门洞观望期 + persistent Navfn/TEB。验收中央路口的方向、稳定候选身份、逐分支进入、门内 frontier、固定方向转身、回到原 node 和观望期完成。
-
-当前策略完成中央路口观望后停在 node 等待决策。**此测试不声称机器人已走遍远端所有房间**：远端真实房间已建模、物理家具已加载，并通过静态门口连通性检查；整图探索和 WeDeT 语义识别/打分不在本轮验收范围内。
-
-## 运行准备
+Run these tests on the lab Ubuntu host from the workspace root:
 
 ```bash
-ssh -4 zrz@bit1010.local
-bash
-cd /home/zrz/work/lste_ws
 source /opt/ros/noetic/setup.bash
+bash scripts/tests/targeted_navigation/run_semantic_junction_suite.sh
 ```
 
-代码改过需要构建时执行 `catkin_make`。仅复现已有构建可跳过。runner 会通过 `scripts/config/pipeline_env.sh` 加载当前工作区和 supporting workspace。
+The default suite runs `semantic_t_junction`, `semantic_l_junction`, `semantic_cross_junction`, and `semantic_t_junction_rotated`. Each run starts Gazebo, online SLAM, GP branch discovery, WeDetect semantics, Portal observation/authentication, and Place-scoped WorkItem exploration. It writes tree, authentication, semantic-lifecycle audits and a Portal route PNG under `runtime/gp_branch_development/semantic_junction_suite_<timestamp>/`.
 
-模型的 visual/collision 定义已内联进 world，但 mesh/material 仍引用 `~/.gazebo/models/` 的原始模型资源，不能只复制三个 world 就在新机器运行。旧参考工作区 `/home/zrz/work/lste-previous/lste_ws` 保持只读。
-
-启动前检查是否已有其他实验占用 ROS/Gazebo：
+To run a single scene and adjust its wall-clock limit:
 
 ```bash
-pgrep -af 'gzserver|roslaunch|run_semantic_junction_suite.sh'
-```
-
-若有旧 suite，在原终端正常退出后再运行。**必须串行运行，两个 suite 不能共用同一 ROS master 和 Gazebo。**
-
-## 重新生成 world 与静态几何检查
-
-```bash
-cd /home/zrz/work/lste_ws
-python3 scripts/tests/targeted_navigation/generate_semantic_room_worlds.py
-```
-
-生成器会重写三个 world、JSON 和场景 PNG，并检查每个房间入口的静态连通性。几何检查失败会报错。模型需已安装；依赖已有 Python 3、NumPy、Matplotlib，不需额外安装 SciPy。
-
-可选 SDF 检查：
-
-```bash
-export GAZEBO_MODEL_PATH="$PWD/worlds/targeted_navigation/models:$HOME/.gazebo/models${GAZEBO_MODEL_PATH:+:$GAZEBO_MODEL_PATH}"
-export GAZEBO_MODEL_DATABASE_URI="file://$PWD/worlds/.gazebo_model_database"
-for world in worlds/targeted_navigation/semantic_*.world; do
-  timeout 30 gz sdf -k "$world"
-done
-```
-
-## 全套与单场景运行
-
-```bash
-cd /home/zrz/work/lste_ws
-GP_SUITE_SECONDS=900 T_JUNCTION_GUI=false \
+SEMANTIC_CASES=semantic_t_junction_rotated GP_SUITE_SECONDS=1500 \
   bash scripts/tests/targeted_navigation/run_semantic_junction_suite.sh
 ```
 
-顺序 T → L → 十字；每个场景默认运行窗口 900 秒、启动就绪等待上限 90 秒，另有退出、审计和绘图开销。可用 `GP_SUITE_SECONDS=600` 调整运行窗口；时间不足导致未完成时，应看具体状态而非直接认定场景失败。需要 Gazebo GUI 时设 `T_JUNCTION_GUI=true`。
-
-起点为 `(-3.5,0,yaw=0)`，中央 junction 为 `(0,0)`。长走廊/真实房间几何不会因运行窗口改变。建议在远端 tmux 内运行以支持 SSH 断开。
-
-单场景：
+The rotated semantic T uses a focused T layout so the robot reaches the target junction before entering a semantic room. Regenerate the rotated scene with:
 
 ```bash
-SEMANTIC_CASES=semantic_t_junction GP_SUITE_SECONDS=900 T_JUNCTION_GUI=false \
-  bash scripts/tests/targeted_navigation/run_semantic_junction_suite.sh
-
-SEMANTIC_CASES=semantic_l_junction GP_SUITE_SECONDS=900 T_JUNCTION_GUI=false \
-  bash scripts/tests/targeted_navigation/run_semantic_junction_suite.sh
-
-SEMANTIC_CASES=semantic_cross_junction GP_SUITE_SECONDS=900 T_JUNCTION_GUI=false \
-  bash scripts/tests/targeted_navigation/run_semantic_junction_suite.sh
+python3 scripts/tests/targeted_navigation/generate_focused_semantic_t.py
+python3 scripts/tests/targeted_navigation/generate_rotated_semantic_world.py \
+  worlds/targeted_navigation/semantic_t_junction_focused.world \
+  worlds/targeted_navigation/semantic_t_junction_focused_rotated.world
 ```
 
-`SEMANTIC_CASES` 也可设为加引号、空格分隔的多个场景名。
+The four-scene results and current audit JSON/PNG artifacts are collected in:
 
-## 结果与通过标准
+`runtime/gp_branch_development/semantic_portal_goal_final_20261024/`
 
-runner 第一行输出本轮目录：
+Run the focused code regression suite with the commands in that directory’s `README.md`. For reproducible background and object placement, see each world’s matching JSON manifest and `*_geometry_result.json` under `worlds/targeted_navigation/`.
 
-```text
-/home/zrz/work/lste_ws/runtime/gp_branch_development/semantic_junction_suite_YYYYMMDD_HHMMSS
-```
+## Place-scoped TSP integration
+
+Normal exploration remains WorkItem-driven. GP + online SLAM temporarily owns
+Portal observation/authentication; this freezes ordinary WI dispatch. Once a
+certified entrance WI crosses its Portal, the existing crossing transaction
+creates the destination Place. Only that Place's admissible WIs enter the open
+TSP optimizer. Room semantic priority, branch isolation, room closure, return to
+the junction, and resumption of the suspended parent WI keep their existing
+local behavior.
+
+The pose-cost optimizer is copied from lumole's
+`20260805_exploration_navigation_dev` commit
+`8125577a62a0e9123fe4041329212bc5bbd74f03`. It includes translation and heading
+cost, 2-opt segment reversal, and Or-opt relocation. The local adapter keeps
+robot pose, WI anchors, WI normals, and semantic room scopes in their original
+physical odom frame before sorting. Rigid SLAM reprojection cannot change room
+membership; map projection remains at route materialization.
+
+Acceptance requires the scene's actual arm count: **T = 3, L = 2, cross = 4,
+rotated T = 3**. The TSP audit checks actual `work_item_dispatched` events as well
+as planned tours; a sibling WI cannot pass by merely recording the intended
+head in the plan. The semantic lifecycle audit also compares actual room-entry
+order with semantic priority and rejects repeated entry.
+
+To audit or plot an existing run (no Gazebo or ROS master needed):
 
 ```bash
-RESULT_ROOT=/home/zrz/work/lste_ws/runtime/gp_branch_development/semantic_junction_suite_YYYYMMDD_HHMMSS
-cat "$RESULT_ROOT/summary.log"
+RUN=runtime/targeted_navigation/t_junction_small/logs/<timestamp>
+METRICS="$RUN/$(basename "$RUN")_navigation_metrics.log"
+python3 scripts/tests/targeted_navigation/audit_place_tsp.py "$METRICS" \
+  --output "$RUN/place_tsp_audit.json"
+python3 scripts/tests/targeted_navigation/audit_semantic_room_lifecycle.py \
+  "$METRICS" --center 0 0 --expected-rooms 2 \
+  --output "$RUN/semantic_lifecycle_audit.json"
+python3 scripts/tools/plot_place_tsp.py "$METRICS" \
+  --world worlds/targeted_navigation/semantic_l_junction.world \
+  --center 0 0 --expected-rooms 2 --output "$RUN/place_tsp.png"
 ```
 
-每个场景应出现 `launch=0 tree=0 auth=0 visual=0`；各 JSON 的 `passed` 应为 `true`。不要仅依据整个 shell 脚本的退出码判断通过，runner 会继续执行后续场景。
+`plot_place_tsp.py` preserves retries and writes a JSON data/provenance file
+beside the PNG. Grey lines are recorded odometry; colored overlays are recorded
+room exploration intervals. Numbered squares are dispatched viewpoints, not
+hypothetical TSP travel segments. Gaps above two simulation seconds are not
+connected. Missing geometry models are listed in the JSON.
 
-- `*_tree_result.json`：预期中央路口方向、无重复稳定方向、入口几何、实际进入及子空间、junction 身份。
-- `*_authentication_result.json`：只对已确认 `junction_confirmed` 的路口审计。所有稳定候选均处理、真实重复启动计数为零、进入/门内 frontier/固定转向目标/回 node 证据完整、观望期完成、SLAM 去重审计存在。
-- 父 node 的已知返回走廊标记为 `return`，不需要当成新门洞再次观望；中央方向数不等于新门洞认证数。
-- `*_portal_authentication.png`：实际路线、frontier、门洞树和观望认证、SLAM 去重记录。全景房间及家具布局另看 world 同目录的 `*_scene.png`。
-- `*_visualization.log`：绘图检查及资源缺失信息。
+For fresh Gazebo runs, use one ROS master per scene, avoid simultaneous Gazebo
+instances, and keep running shell files unchanged until their process exits.
+The runner fails if a roslaunch child crashes; `roslaunch` remaining alive is
+insufficient. Python native-crash tracebacks are enabled for diagnosis. Such a
+run must be repeated with healthy perception/planning processes; it is not a
+passing scenario even if some earlier audits were green.
 
-原始数据位于 summary 的 `run=` 目录；历史路径仍是 `runtime/targeted_navigation/t_junction_small/logs/<timestamp>/`，即使运行 L/十字也使用该目录名。目录包含 metrics、launcher、lifecycle、failure report 和失败快照。
+### 本轮 Place TSP 的专项完成条件
 
-## 已有 metrics 重新审计、绘图
+`run_semantic_junction_suite.sh` 会为每个场景传入实际期望方向。测试运行器
+每 30 秒调用 `check_semantic_junction_goal.py`，原有树结构、门洞认证、房间
+生命周期、实际 TSP 派发四类审计全部通过后正常停止，记录
+`semantic_junction_goal_complete`，并保存 `<timestamp>_semantic_goal.json`。
+该结果表示本轮路口任务通过，不表示整张 world 的普通探索已结束。
+独立 `run_t_junction.sh` 未设置 `T_JUNCTION_GOAL_HEADINGS` 时保持原运行方式。
+必要子进程意外退出和最大运行时窗仍会检查；专项审计失败不会被记为成功。
+
+场景套件的任一启动、专项审计或绘图检查失败时，套件返回非零；详细状态始终写入 `summary.log`。
+
+
+Install either supported low-memory checkpoint on bit1010 with:
+WDETECT_MODEL_SIZE=tiny bash scripts/models/setup_wedetect.sh
+(or use base). General tasks select the detector with DETECTOR=wedetect-tiny,
+wedetect-base, or wedetect-large before starting the pipeline.
+
+WeDetect model size for semantic targeted-navigation runs is selected per run with
+T_JUNCTION_WEDETECT_MODEL_SIZE=tiny, base, or large (defaults to base for the
+8 GiB RTX 2070). Small-object tiled fallback is independently controlled with
+T_JUNCTION_WEDETECT_TILE_SEARCH_ENABLED=true|false and defaults to false
+to avoid its additional GPU-memory peak. The standard pipeline can still select
+DETECTOR: wedetect-base or DETECTOR: wedetect-large in its task config.
+
+For controller A/B diagnostics only, set T_JUNCTION_TEB_FORWARD_ONLY=false.
+The installed TEB does not support min_vel_x; setting that ROS parameter has no effect.
+
+For the known-free Navfn diagnostic, use `T_JUNCTION_NAVFN_ALLOW_UNKNOWN=false`.
+This is a supported Navfn setting; it does not alone enforce Portal/Place boundaries.
+The default remains true until the full scene evidence supports a production change.
+
+### Physical observation turn evidence (2026-10-29)
+
+A `room_facing_turn_complete` event alone does not establish the selected
+clockwise/counterclockwise sweep. The suite's `turn_raw` gate independently
+checks the sealed main bag's `/rbt_pose` against every reported completed
+observation turn, including the original physical initial yaw, continuous
+samples, signed swept angle and frozen target yaw. Bounded failed turns remain
+subject to the full authentication audit; this check never settles a WI.
+
+For suites launched from an older immutable shell snapshot, run it manually:
 
 ```bash
-cd /home/zrz/work/lste_ws
-RUN_DIR=/home/zrz/work/lste_ws/runtime/semantic_rooms_v2/20261022_170952/semantic_t_junction/logs
-STAMP=20261022_170952
-METRICS="$RUN_DIR/${STAMP}_navigation_metrics.log"
-OUT_DIR=/home/zrz/work/lste_ws/runtime/gp_branch_development/semantic_rooms_v2_recheck
-mkdir -p "$OUT_DIR"
-
-# T：中央方向为东、北、西。
-python3 scripts/tests/targeted_navigation/check_gp_tree.py "$METRICS" \
-  --headings 0 1.57079632679 3.14159265359 --center 0 0 \
-  --output "$OUT_DIR/semantic_t_junction_tree_result.json"
-python3 scripts/tests/targeted_navigation/check_portal_authentication.py "$METRICS" \
-  --output "$OUT_DIR/semantic_t_junction_authentication_result.json"
-python3 scripts/tools/plot_portal_authentication.py "$METRICS" \
-  --world worlds/targeted_navigation/semantic_t_junction.world --route-zoom \
-  --model-root "$HOME/.gazebo/models" --model-root "$PWD/worlds" \
-  --output "$OUT_DIR/semantic_t_junction_portal_authentication.png"
+python3 scripts/tests/targeted_navigation/audit_portal_turn_directions.py \
+  /absolute/path/to/sealed_slam.bag --output /absolute/path/to/turn_raw_audit.json
 ```
 
-L 的 headings 为 `1.57079632679 3.14159265359`；十字为 `0 1.57079632679 3.14159265359 -1.57079632679`，center 均为 `0 0`。相应替换 run/world/输出名。必须使用与 metrics 对应版本的 world 绘图，不能把旧短走廊 metrics 叠到新版房间几何上。
+The runtime carries the frozen physical yaw and sweep in the existing JSON
+route/intent contract, bound to route, lifecycle and graph transaction. The
+supervisor executes it only for the matching frontier action in odom; a declared
+but invalid contract refuses generic shortest-angle fallback. No ROS message
+schema or collision/velocity budget is changed. Check the new process's source
+manifest for `portal_authentication_turn_contract.py` and its producer/consumer
+modules; editing source does not prove a running process loaded it.
 
-## 新旧结果区分
+### Same-source-epoch native Place masks (2026-10-29)
 
-新版最终成功归档：`runtime/semantic_rooms_v2/20261022_170952/`。每个场景下有 `scene.png`、`authentication.png`、`checks.log`、`configuration.log` 和 `logs/`；总验收见 `summary.log`。
+The global layer consumes `/lste/place_navigation_mask` in map. The rolling
+local layer consumes `/lste/place_navigation_mask_odom` in odom. Both are built
+from the same source map and immutable exact-stamp transform;
+`info.map_load_time` records that source epoch, while the header records
+publication time. The odom raster is conservative: a target cell is traversable
+only if its entire source-cell bounding box belongs to the Place. Physical
+obstacle costs are never reduced by this rendering.
 
-旧版短走廊结果 `semantic_junction_suite_20261022_150410` 仅为历史记录，不适用于新版几何。本轮失败尝试、重试产物及旧 world 临时副本已清理，成功原始日志集中在上述最终目录。
+A bounded mask revision releases the old ordinary route and waits for its exact
+controller ACK before publishing either new mask. New ordinary dispatch still
+waits for both actual master grids to contain the exclusion. The raw native
+auditor independently checks both input frames, their paired source epoch,
+original raw TF and every actual master cell. Future TF is not substituted.
+Legacy single-mask recordings keep the older strict replay path and are not
+reclassified as successes.
 
-## 常见问题
+New suites record both mask topics in the main bag. The Portal observer also
+records a continuous, driver/start-token-bound mask sidecar, including ordinary
+WI intervals, and saves its source configuration and runtime topic parameters.
+For an older immutable suite snapshot which did not record the new topic,
+a successfully sealed sidecar can be joined without modifying either input:
 
-- model/mesh 缺失：保留原 `~/.gazebo/models/` 模型资源；不要依赖已退役的在线 Gazebo 模型库下载。
-- 候选或认证未完成：检查运行窗口、原始 failure report、auth JSON 的未完成分支，以及是否存在并行 ROS/Gazebo。
-- Gazebo 异常退出：保留 launcher 和 failure report；可以对完整 metrics 独立审计/绘图，但绘图成功不代表行为通过，也不代表进程无异常。
-- 仅有中央观望路线：这是当前停止等待决策策略的预期范围；远端房间完整几何可看 `*_scene.png` 和几何连通性 JSON。
+```bash
+python3 scripts/tests/targeted_navigation/merge_place_mask_sidecar.py \
+  /absolute/main_slam.bag /absolute/native_masks_DRIVER.bag \
+  /absolute/native_masks_DRIVER_contract.json /absolute/new_joined.bag
+```
 
-## 长场景中补充的逻辑与回归
-
-融合候选按已合并方向继续去重，junction 确认按独立方向计数；认证期间固定物理入口平面，并保持源 node 的路线所有权；返回遇到短暂无进展可在有界窗口内重试同一任务；物理返回完成时先释放旧 TEB lease、等待控制器确认，再推进下一支。审计只统计已确认 junction，并在形成唯一 ID 前检查重复启动。GP/树/认证回归 29 项、审计回归 2 项。动态验收包括完成后连续 30 秒停车。
+Only original odom-mask payloads and timestamps are added; the provenance file
+hashes all input/output bags. An absent, failed or unsealed historical sidecar
+cannot be reconstructed or treated as positive evidence.

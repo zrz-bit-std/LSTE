@@ -100,6 +100,43 @@ class GraphRouteActionTransaction:
         }
 
 
+def next_graph_route_transaction_id(sequence, released_graph_transaction_id=0):
+    """Allocate above both planner-local and controller-visible graph IDs."""
+    values = []
+    for value in (sequence, released_graph_transaction_id):
+        try:
+            values.append(max(0, int(value or 0)))
+        except (TypeError, ValueError):
+            continue
+    return max(values or [0]) + 1
+
+
+def route_graph_transaction_identity(selection, transaction, sequence,
+                                     released_graph_transaction_id=0):
+    """Keep controller graph IDs monotonic for non-durable GP auth routes.
+
+    The GP observation route temporarily bypasses the durable graph planner,
+    but GoalManager still validates its graph identity against the high-water
+    mark established by earlier WorkItem/Portal materialization attempts.
+    """
+    try:
+        current_id = int(getattr(transaction, "graph_transaction_id", 0) or 0)
+    except (TypeError, ValueError):
+        current_id = 0
+    try:
+        sequence_id = max(0, int(sequence or 0))
+    except (TypeError, ValueError):
+        sequence_id = 0
+    if current_id > 0:
+        return current_id, sequence_id
+    if not str(getattr(selection, "authentication_phase", "") or ""):
+        return 0, sequence_id
+    allocated = next_graph_route_transaction_id(
+        sequence_id, released_graph_transaction_id,
+    )
+    return allocated, allocated
+
+
 def _positive_id(value):
     """Normalize a durable identity without accepting a zero sentinel."""
     try:
@@ -410,6 +447,23 @@ def materialize_graph_route_action(plan, candidate, *, branch_first=False):
     if expected in (ACTION_OBSERVE_LOCAL_WORK, ACTION_RETRY_VIEWPOINT):
         if actual in (ACTION_OBSERVE_LOCAL_WORK, ACTION_RETRY_VIEWPOINT):
             planned_work_item = _positive_id(plan.obligation_id)
+            tsp_tour = tuple(getattr(plan, "work_item_tour", ()) or ())
+            if tsp_tour:
+                try:
+                    tsp_head = int(tsp_tour[0])
+                except (TypeError, ValueError, IndexError):
+                    tsp_head = None
+                if (
+                    tsp_head is None
+                    or planned_work_item != tsp_head
+                    or work_item_id != tsp_head
+                ):
+                    return GraphRouteMaterialization(
+                        accepted=False,
+                        plan=plan,
+                        reason="tsp_work_item_head_mismatch",
+                        **common,
+                    )
             candidate_place = candidate_place_id(candidate)
             planned_place_id = _positive_id(plan.current_place_id)
             if (

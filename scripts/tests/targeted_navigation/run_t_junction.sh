@@ -223,7 +223,11 @@ WORLD="${T_JUNCTION_WORLD:-$WS/worlds/targeted_navigation/t_junction_small.world
 SPAWN_X="${T_JUNCTION_X:--2.5}"
 SPAWN_Y="${T_JUNCTION_Y:-0.0}"
 SPAWN_YAW="${T_JUNCTION_YAW:-0.0}"
-RUN_CONFIG="world=$WORLD initial_pose=[$SPAWN_X,$SPAWN_Y,0.1,$SPAWN_YAW] max_seconds=$MAX_SECONDS startup_seconds=$STARTUP_SECONDS stop_on_failure=$STOP_ON_FAILURE persistent_execution=$PERSISTENT_EXECUTION planner_frequency=$PLANNER_FREQUENCY base_global_planner=$BASE_GLOBAL_PLANNER base_local_planner=$BASE_LOCAL_PLANNER target_probe=$TARGET_PROBE target_probe_goal=[$TARGET_PROBE_X,$TARGET_PROBE_Y] target_probe_transaction_id=$TARGET_PROBE_TRANSACTION_ID target_probe_epoch=$TARGET_PROBE_EPOCH target_probe_track_id=$TARGET_PROBE_TRACK_ID target_probe_require_frontier=$TARGET_PROBE_REQUIRE_FRONTIER pre_route_alignment=$ALIGNMENT converter=$CONVERTER include_costmap_obstacles=$INCLUDE_COSTMAP_OBSTACLES"
+SLAM_MAP_XMIN="${T_JUNCTION_SLAM_XMIN:-}"
+if [[ -z "$SLAM_MAP_XMIN" ]]; then
+  SLAM_MAP_XMIN="$(python3 -c 'import math, sys; print(min(-3.0, math.floor(float(sys.argv[1]) - 4.0)))' "$SPAWN_X")"
+fi
+RUN_CONFIG="world=$WORLD initial_pose=[$SPAWN_X,$SPAWN_Y,0.1,$SPAWN_YAW] max_seconds=$MAX_SECONDS startup_seconds=$STARTUP_SECONDS stop_on_failure=$STOP_ON_FAILURE persistent_execution=$PERSISTENT_EXECUTION planner_frequency=$PLANNER_FREQUENCY base_global_planner=$BASE_GLOBAL_PLANNER base_local_planner=$BASE_LOCAL_PLANNER target_probe=$TARGET_PROBE target_probe_goal=[$TARGET_PROBE_X,$TARGET_PROBE_Y] target_probe_transaction_id=$TARGET_PROBE_TRANSACTION_ID target_probe_epoch=$TARGET_PROBE_EPOCH target_probe_track_id=$TARGET_PROBE_TRACK_ID target_probe_require_frontier=$TARGET_PROBE_REQUIRE_FRONTIER pre_route_alignment=$ALIGNMENT converter=$CONVERTER include_costmap_obstacles=$INCLUDE_COSTMAP_OBSTACLES teb_forward_only=${T_JUNCTION_TEB_FORWARD_ONLY:-true}"
 
 log_lifecycle() {
   local level="$1"
@@ -242,6 +246,10 @@ import hashlib,json,sys
 from pathlib import Path
 ws,run=map(Path,sys.argv[1:])
 files=list((ws/'src/lste_topo_access/scripts').glob('*.py'))
+files.extend((ws/'src/lste_topo_access/src').glob('*.cpp'))
+files.extend((ws/'src/lste_topo_access').glob('*.xml'))
+files.extend((ws/'src/lste_topo_access/config').glob('*.yaml'))
+files.extend([ws/'src/lste_topo_access/CMakeLists.txt', ws/'devel/lib/liblste_place_scope_layer.so'])
 files.extend((ws/'src/lste_topo_access/launch').glob('*.launch'))
 files.append(ws/'src/lste_topo_access/scripts/gp_exploration_tree.py')
 files.extend((ws/'scripts/tests/targeted_navigation').glob('*junction*'))
@@ -385,16 +393,46 @@ cleanup() {
   fi
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'STOP_REASON="interrupted"; exit 130' INT
+trap 'STOP_REASON="terminated"; exit 143' TERM
+
+case "${T_JUNCTION_WEDETECT_MODEL_SIZE:-base}" in
+  tiny|base|large) ;;
+  *) echo "[error] invalid WeDetect model size: ${T_JUNCTION_WEDETECT_MODEL_SIZE}; choose tiny, base, or large" >&2; exit 2 ;;
+esac
+case "${T_JUNCTION_WEDETECT_TILE_SEARCH_ENABLED:-false}" in
+  true|false) ;;
+  *) echo "[error] T_JUNCTION_WEDETECT_TILE_SEARCH_ENABLED must be true or false" >&2; exit 2 ;;
+esac
+if [[ "${T_JUNCTION_SEMANTIC_PERCEPTION:-false}" == true ]]; then
+  case "${T_JUNCTION_WEDETECT_MODEL_SIZE:-base}" in
+    tiny) WEDETECT_CHECKPOINT="$WS/model/WeDetect/checkpoints/wedetect_tiny.pth" ;;
+    base) WEDETECT_CHECKPOINT="$WS/model/WeDetect/checkpoints/wedetect_base.pth" ;;
+    large) WEDETECT_CHECKPOINT="$WS/model/WeDetect/checkpoints/wedetect_large.pth" ;;
+  esac
+  if [[ ! -s "$WEDETECT_CHECKPOINT" ]]; then
+    echo "[error] requested WeDetect checkpoint is missing: $WEDETECT_CHECKPOINT" >&2
+    echo "[error] download Base with scripts/models/setup_wedetect.sh before enabling semantic perception" >&2
+    exit 2
+  fi
+fi
 
 LAUNCH_ARGS=(
   "$WS/scripts/tests/targeted_navigation/t_junction_nav.launch"
   "gui:=$GUI"
   "world_name:=$WORLD"
+  "robot_description_path:=${T_JUNCTION_ROBOT_DESCRIPTION:-$WS/src/lste_core/urdf/pro3_semantic_camera.xacro}"
   "x:=$SPAWN_X"
   "y:=$SPAWN_Y"
+  "slam_map_xmin:=$SLAM_MAP_XMIN"
   "yaw:=$SPAWN_YAW"
   "exploration_method:=${T_JUNCTION_EXPLORATION_METHOD:-place_portal_workitem}"
+  "target_done_policy:=${T_JUNCTION_TARGET_DONE_POLICY:-visual_target}"
+  "start_semantic_perception:=${T_JUNCTION_SEMANTIC_PERCEPTION:-false}"
+  "wedetect_model_size:=${T_JUNCTION_WEDETECT_MODEL_SIZE:-base}"
+
+  "wedetect_tile_search_enabled:=${T_JUNCTION_WEDETECT_TILE_SEARCH_ENABLED:-false}"
   start_metrics:=true
   "metrics_log_dir:=$LOG_ROOT"
   "metrics_run_directory:=$RUN_DIRECTORY"
@@ -408,6 +446,8 @@ LAUNCH_ARGS=(
   metrics_failure_post_window:=1.5
   metrics_failure_zero_velocity_seconds:=3.0
   metrics_failure_no_progress_seconds:=4.0
+  "teb_forward_only:=${T_JUNCTION_TEB_FORWARD_ONLY:-true}"
+  "navfn_allow_unknown:=${T_JUNCTION_NAVFN_ALLOW_UNKNOWN:-true}"
   "teb_frontier_pre_route_alignment:=$ALIGNMENT"
   "teb_costmap_converter_plugin:=$CONVERTER"
   "teb_include_costmap_obstacles:=$INCLUDE_COSTMAP_OBSTACLES"
@@ -416,6 +456,14 @@ LAUNCH_ARGS=(
   "base_local_planner:=$BASE_LOCAL_PLANNER"
   "planner_frequency:=$PLANNER_FREQUENCY"
 )
+export PYTHONUNBUFFERED=1
+export PYTHONFAULTHANDLER=1
+if [[ "${T_JUNCTION_GDB_MUX:-0}" == 1 ]]; then
+  export LSTE_CMD_VEL_MUX_LAUNCH_PREFIX="$WS/scripts/tests/targeted_navigation/gdb_mux_capture.sh"
+  export LSTE_CMD_VEL_MUX_GDB_LOG="$RUN_DIRECTORY/${RUN_TIMESTAMP}_mux_gdb.log"
+  ulimit -c unlimited
+fi
+
 if command -v setsid >/dev/null 2>&1; then
   setsid roslaunch "${LAUNCH_ARGS[@]}" >"$LAUNCHER_LOG" 2>&1 &
   LAUNCH_GROUP=true
@@ -429,6 +477,11 @@ ready_deadline=$((SECONDS + STARTUP_SECONDS))
 last_missing=""
 navigation_ready=false
 while ((SECONDS < ready_deadline)); do
+  if child_failure="$(readiness_child_process_failure "$LAUNCHER_LOG")"; then
+    log_lifecycle ERROR child_process_exit detail="$child_failure"
+    record_startup_failure startup_child_process_exit
+    exit 1
+  fi
   if readiness_check t_junction "$METRICS_LOG"; then
     navigation_ready=true
     break
@@ -482,7 +535,46 @@ if [[ "$TARGET_PROBE" == "true" ]]; then
 fi
 
 navigation_deadline=$((SECONDS + MAX_SECONDS))
+next_semantic_goal_check=$SECONDS
 while ((SECONDS < navigation_deadline)); do
+  if child_failure="$(readiness_child_process_failure "$LAUNCHER_LOG")"; then
+    STOP_REASON="child_process_exit"
+    log_lifecycle ERROR run_aborted reason="$STOP_REASON" detail="$child_failure"
+    exit 1
+  fi
+  # The semantic junction suite ends at its explicit measured goal, while
+  # ordinary diagnostic runs retain their original fixed-window behavior.
+  if [[ -n "${T_JUNCTION_GOAL_HEADINGS:-}" ]] \
+    && ((SECONDS >= next_semantic_goal_check)); then
+    next_semantic_goal_check=$((SECONDS + 30))
+    # A bounded authentication return that exhausted its physical recovery
+    # budget is a failed *branch*: the node records it as failed and advances
+    # the observation period.  Sealing the whole trial here threw away every
+    # remaining doorway (runs 20261101_191225 and 20261101_210304).
+    if grep -Eq '"frontier_event": *"place_dfs_return_unrecoverable"' "$METRICS_LOG"; then
+      STOP_REASON="place_dfs_return_unrecoverable"
+      log_lifecycle ERROR run_aborted reason="$STOP_REASON"
+      exit 1
+    fi
+    if grep -Eq '"frontier_event": *"place_scope_recovery_(returned|unrecoverable)"' "$METRICS_LOG"; then
+      STOP_REASON="place_scope_recovery_failed_trial"
+      log_lifecycle ERROR run_aborted reason="$STOP_REASON"
+      exit 1
+    fi
+    read -r -a SEMANTIC_GOAL_HEADINGS <<< "$T_JUNCTION_GOAL_HEADINGS"
+    read -r -a SEMANTIC_GOAL_CENTER <<< "${T_JUNCTION_GOAL_CENTER:-0 0}"
+    if python3 "$WS/scripts/tests/targeted_navigation/check_semantic_junction_goal.py" \
+      "$METRICS_LOG" --headings "${SEMANTIC_GOAL_HEADINGS[@]}" \
+      --center "${SEMANTIC_GOAL_CENTER[@]}" \
+      --heading-tolerance "${T_JUNCTION_GOAL_HEADING_TOLERANCE:-0.45}" \
+      --output "$RUN_DIRECTORY/${RUN_TIMESTAMP}_semantic_goal.json" \
+      >>"$RUN_DIRECTORY/${RUN_TIMESTAMP}_semantic_goal_check.log" 2>&1; then
+      STOP_REASON="semantic_junction_goal_complete"
+      log_lifecycle INFO semantic_junction_goal_complete \
+        artifact="$RUN_DIRECTORY/${RUN_TIMESTAMP}_semantic_goal.json"
+      break
+    fi
+  fi
   if [[ "$TARGET_PROBE" == "true" && -f "$TARGET_PROBE_RESULT" ]]; then
     if grep -q '"passed": true' "$TARGET_PROBE_RESULT"; then
       STOP_REASON="target_probe_complete"

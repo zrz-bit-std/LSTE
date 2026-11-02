@@ -3,9 +3,23 @@
 
 import rospy
 
+from global_frontier_room_scope import best_branch_for_portal, build_branch_scope
+
 
 class GlobalFrontierPortalArrivalCommitMixin:
     """Write one verified portal arrival to place memory and report the result."""
+
+    def _invalidate_place_scope_for_handoff(self, destination_place_id):
+        """Retire the old raster ownership before publishing a physical handoff.
+
+        Keep the exact-map TF closure and durable WI/DFS records. Only a fresh
+        ownership projection can authorize ordinary work in the new Place.
+        """
+        self.current_place_scope_valid = False
+        self.current_place_scope_invalidated_reason = "physical_portal_handoff"
+        self.current_place_scope_frontier_work_evidence = None
+        self._place_partition_key = None
+        self.place_entry_rehydration_pending = int(destination_place_id)
 
     def _reject_portal_self_loop(self, arrival, portal_id, now, evidence_source):
         """Close an invalid crossing that resolved to its source Place.
@@ -72,6 +86,133 @@ class GlobalFrontierPortalArrivalCommitMixin:
             if callable(clear):
                 clear()
 
+    def _commit_semantic_room_return(self, active_room, portal_id, destination_place_id,
+                                     now, hypothesis_ledger, gp_tree, room_stack):
+        room_place_id = int(active_room.get("place_id", -1))
+        branch_scope = None
+        dfs = getattr(self, "place_dfs", None)
+        unresolved_ids = (
+            self.place_work_items.unresolved_ids(
+                room_place_id, branch_scope=branch_scope,
+            )
+            if room_place_id > 0 else []
+        )
+        unresolved_set = set(unresolved_ids)
+        snapshot = getattr(self.place_work_items, "snapshot", None)
+        work_records = snapshot() if callable(snapshot) else ()
+        active_ids = [
+            int(item["id"])
+            for item in work_records
+            if int(item.get("place_id", -1)) == room_place_id
+            and int(item.get("id", -1)) in unresolved_set
+            and str(item.get("state", "")).strip().lower() == "unresolved"
+            and item.get("active_attempt_id") is not None
+        ]
+        if dfs is not None and dfs.nodes.get(room_place_id, {}).get("state") == "recovery_returning":
+            if not dfs.return_to_parent(room_place_id, destination_place_id, portal_id):
+                self.publish_status("place_dfs_return_rejected", place_id=room_place_id,
+                    parent_place_id=int(destination_place_id), portal_id=int(portal_id),
+                    reason="wrong_recovery_return_edge", place_dfs=dfs.snapshot())
+                return
+            self._invalidate_place_scope_for_handoff(destination_place_id)
+            if room_stack:
+                room_stack.pop()
+            self.active_semantic_room = room_stack[-1] if room_stack else None
+            self.publish_status("place_scope_recovery_returned", place_id=room_place_id,
+                parent_place_id=int(destination_place_id), portal_id=int(portal_id),
+                unresolved_work_item_ids=unresolved_ids, execution_failed=True,
+                return_obligation_pending=False, place_closed=False, place_dfs=dfs.snapshot())
+            return
+
+        if unresolved_ids:
+            self.pending_graph_resume_place_id = room_place_id
+            self.pending_graph_resume_portal_id = int(active_room.get("portal_id", portal_id))
+            self.pending_graph_resume_destination_place_id = int(destination_place_id)
+            self.publish_status(
+                "semantic_room_return_incomplete",
+                node_id=int(active_room.get("node_id", 0)),
+                branch_id=int(active_room.get("branch_id", 0)),
+                portal_id=int(active_room.get("portal_id", portal_id)),
+                room_place_id=room_place_id,
+                unresolved_work_item_ids=unresolved_ids,
+                active_work_item_ids=active_ids,
+                deferred_unprojected_work_item_ids=[
+                    item_id for item_id in unresolved_ids if item_id not in active_ids
+                ],
+                resume_required=True,
+            )
+            return
+
+        if dfs is not None and not dfs.return_to_parent(room_place_id, destination_place_id, portal_id):
+            self.publish_status("place_dfs_return_rejected", place_id=room_place_id,
+                parent_place_id=int(destination_place_id), portal_id=int(portal_id),
+                reason="subtree_not_complete_or_wrong_return_edge", place_dfs=dfs.snapshot())
+            return
+        self._invalidate_place_scope_for_handoff(destination_place_id)
+        closed_items = []
+        reassigned_items = []
+        if room_place_id > 0:
+            parent_place_id = int(destination_place_id or 0)
+            close_scoped = getattr(
+                self.place_work_items, "close_scoped_place", None,
+            )
+            if callable(close_scoped) and parent_place_id > 0:
+                closed_items, reassigned_items = close_scoped(
+                    room_place_id,
+                    parent_place_id,
+                    branch_scope,
+                    now,
+                    reason="semantic_room_explored_returned_to_junction",
+                )
+            else:
+                closed_items = self.place_work_items.close_place(
+                    room_place_id, now,
+                    reason="semantic_room_explored_returned_to_junction",
+                )
+        entrance_portal = (hypothesis_ledger.get(int(active_room.get("portal_id", portal_id)))
+                           if hypothesis_ledger is not None else None)
+        if entrance_portal is not None:
+            entrance_portal["exploration_suppressed"] = True
+        if gp_tree is not None:
+            room_branch = gp_tree.branches.get(int(active_room.get("branch_id", -1)))
+            if room_branch is not None:
+                room_branch["room_state"] = "completed"
+                room_branch["room_work_item_ids_closed"] = closed_items
+                room_branch["room_work_item_ids_reassigned"] = list(reassigned_items)
+        self.publish_status(
+            "semantic_room_closed", node_id=int(active_room.get("node_id", 0)),
+            branch_id=int(active_room.get("branch_id", 0)),
+            portal_id=int(active_room.get("portal_id", portal_id)),
+            room_place_id=room_place_id,
+            source_place_id=int(destination_place_id), closed_work_item_ids=closed_items,
+            reassigned_work_item_ids=list(reassigned_items), reentry_suppressed=True,
+        )
+        if getattr(self, "pending_graph_resume_place_id", None) == room_place_id:
+            self.pending_graph_resume_place_id = None
+            self.pending_graph_resume_portal_id = None
+            self.pending_graph_resume_destination_place_id = None
+        if dfs is not None:
+            self.publish_status("place_dfs_returned", place_id=room_place_id,
+                parent_place_id=int(destination_place_id), portal_id=int(portal_id),
+                place_dfs=dfs.snapshot())
+        if room_stack:
+            room_stack.pop()
+        self.active_semantic_room = room_stack[-1] if room_stack else None
+
+    def _resume_semantic_room_arrival(self, active_room, place_id, portal_id):
+        if active_room is None or int(active_room.get("place_id", -1)) != int(place_id):
+            return False
+        self.active_semantic_room = active_room
+        self.publish_status(
+            "semantic_room_exploration_resumed",
+            node_id=int(active_room.get("node_id", 0)),
+            branch_id=int(active_room.get("branch_id", 0)),
+            portal_id=int(active_room.get("portal_id", portal_id)),
+            room_place_id=int(place_id),
+            reason="incomplete_room_return_resume",
+        )
+        return True
+
     def commit_portal_arrival(self, arrival, component, now, evidence_source):
         """Enter the destination place after a structural identity is available."""
         transaction = getattr(self, "portal_transaction", None)
@@ -126,6 +267,43 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 bound_destination = int(hypothesis["source_place_id"])
         except (TypeError, ValueError):
             bound_destination = None
+        if bound_destination is None and isinstance(hypothesis, dict):
+            if (hypothesis.get("destination_place_id") is not None
+                    and int(hypothesis["source_place_id"]) == int(arrival.source_region_id)):
+                bound_destination = int(hypothesis["destination_place_id"])
+        # An incomplete semantic room can require a second visit after the
+        # robot returns to its parent Place.  That forward traversal is not a
+        # reverse traversal of the durable Portal edge, so the edge's directed
+        # destination check above cannot identify the existing room.  Reuse
+        # the pending Place only when the exact Portal and parent endpoint
+        # match the recorded resume transaction.
+        pending_place_id = getattr(self, "pending_graph_resume_place_id", None)
+        pending_portal_id = getattr(self, "pending_graph_resume_portal_id", None)
+        pending_parent_id = getattr(
+            self, "pending_graph_resume_destination_place_id", None
+        )
+        if bound_destination is None:
+            try:
+                pending_matches = (
+                    pending_place_id is not None
+                    and pending_portal_id is not None
+                    and pending_parent_id is not None
+                    and int(pending_portal_id) == portal_id
+                    and int(pending_parent_id) == int(arrival.source_region_id)
+                    and int(pending_place_id) != int(arrival.source_region_id)
+                    and self.region_memory.by_id(int(pending_place_id)) is not None
+                )
+            except (TypeError, ValueError, AttributeError):
+                pending_matches = False
+            if pending_matches:
+                bound_destination = int(pending_place_id)
+                self.publish_status(
+                    "portal_place_resume_binding",
+                    portal_id=portal_id,
+                    source_place_id=int(arrival.source_region_id),
+                    destination_place_id=bound_destination,
+                    reason="pending_graph_resume_identity",
+                )
         enter_bound = getattr(
             self.region_memory, "enter_bound_portal_destination", None,
         )
@@ -179,7 +357,8 @@ class GlobalFrontierPortalArrivalCommitMixin:
                     portal_id=(portal_id if portal_id > 0 else None),
                     source_place_id=arrival.source_region_id,
                 )
-                and (component is None or source_component_match)
+                and hypothesis is not None
+                and hypothesis.get("destination_place_id") is None
             )
             enter = (
                 destination_enter
@@ -311,6 +490,25 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 evidence_source=str(evidence_source),
             )
             return None
+        # Bind the physical entry to the exact forward Portal only after a
+        # verified arrival and self-loop rejection. Reverse arrivals must not
+        # overwrite this directed child-to-parent return identity.
+        record_entry = getattr(self.region_memory, "record_entry_portal", None)
+        if (
+            portal_id > 0
+            and isinstance(hypothesis, dict)
+            and hypothesis.get("source_place_id") == arrival.source_region_id
+            and callable(record_entry)
+        ):
+            entry = record_entry(
+                region["id"], arrival.portal_gate_xy, arrival.goal_xy,
+                physical_gate_xy=arrival.physical_portal_gate_xy,
+                physical_inside_xy=arrival.physical_goal_xy,
+                source_place_id=arrival.source_region_id,
+            )
+            if entry is not None:
+                entry["portal_id"] = portal_id
+
         # If an unbound branch lands in an already-known Place, the source
         # Place may still own suspended local obligations. Evaluate this only
         # after rematerialization and self-loop rejection so a discarded or
@@ -448,6 +646,7 @@ class GlobalFrontierPortalArrivalCommitMixin:
         # The destination is now the only durable owner for local frontier
         # work.  Current SLAM components may split it around furniture, but
         # those splits cannot mint another physical Place.
+        self._invalidate_place_scope_for_handoff(region["id"])
         portal_id = int(getattr(self, "last_portal_hypothesis_id", 0) or 0)
         hypothesis_ledger = getattr(self, "portal_hypothesis_ledger", None)
         crossed = (
@@ -537,6 +736,68 @@ class GlobalFrontierPortalArrivalCommitMixin:
                     reason="stale_departure_lease_not_committed",
                 )
         self.current_physical_place_id = int(region["id"])
+        if hypothesis is not None:
+            entry_work_item_id = hypothesis.get("semantic_entry_work_item_id")
+            item_ledger = getattr(self, "place_work_items", None)
+            resolved_entry = None
+            if entry_work_item_id is not None and item_ledger is not None:
+                resolved_entry = item_ledger.resolve(
+                    int(entry_work_item_id), now,
+                    reason="portal_crossing_created_place",
+                )
+            if resolved_entry is not None:
+                hypothesis["semantic_entry_work_item_completed"] = True
+                self.publish_status(
+                    "portal_entry_work_item_completed",
+                    work_item_id=int(entry_work_item_id), portal_id=int(portal_id),
+                    source_place_id=int(arrival.source_region_id),
+                    destination_place_id=int(region["id"]),
+                    reason="portal_crossing_created_place",
+                )
+        gp_tree = getattr(self, "gp_exploration_tree", None)
+        observation_tree = getattr(self, "gp_observation_tree", None)
+        portal_record = None if hypothesis_ledger is None or portal_id <= 0 else hypothesis_ledger.get(portal_id)
+        room_stack = getattr(self, "active_semantic_rooms", None)
+        if room_stack is None:
+            room_stack = self.active_semantic_rooms = []
+        active_room = room_stack[-1] if room_stack else getattr(self, "active_semantic_room", None)
+        if (active_room is not None and portal_record is not None
+                and int(portal_id) == int(active_room.get("portal_id", -1))
+                and int(region["id"]) == int(active_room.get("source_place_id", -1))):
+            self._commit_semantic_room_return(
+                active_room, portal_id, int(region["id"]), now,
+                hypothesis_ledger, gp_tree, room_stack,
+            )
+        elif active_room is not None and int(region["id"]) == int(active_room.get("place_id", -1)):
+            self._resume_semantic_room_arrival(active_room, int(region["id"]), portal_id)
+        elif portal_record is not None:
+            room_branch = None if gp_tree is None else best_branch_for_portal(gp_tree.branches, portal_id)
+            node_id = 0 if room_branch is None else int(room_branch["node_id"])
+            branch_id = 0 if room_branch is None else int(room_branch["id"])
+            active_room = dict(node_id=node_id, branch_id=branch_id, portal_id=int(portal_id),
+                place_id=int(region["id"]), source_place_id=int(arrival.source_region_id),
+                branch_scope=None)
+            dfs = getattr(self, "place_dfs", None)
+            entered = dfs is None or dfs.enter(arrival.source_region_id, region['id'], portal_id)
+            if entered:
+                room_stack.append(active_room)
+                self.active_semantic_room = active_room
+                if room_branch is not None:
+                    room_branch["room_place_id"] = int(region["id"])
+                    room_branch["room_state"] = "exploring"
+                    if observation_tree is not None:
+                        record = observation_tree.junctions.get(node_id, {}).get("rooms", {}).get(branch_id)
+                        if record is not None:
+                            record["place_id"] = int(region["id"])
+                self.publish_status("semantic_room_exploration_started",
+                    node_id=node_id, branch_id=branch_id, portal_id=int(portal_id),
+                    room_place_id=int(region['id']), source_place_id=int(arrival.source_region_id),
+                    semantic_score=None if room_branch is None else room_branch.get("room_semantic_score"),
+                    priority=None if room_branch is None else room_branch.get("room_priority"),
+                    branch_scope=None, wi_only=True)
+                if dfs is not None:
+                    self.publish_status("place_dfs_entered", parent_place_id=int(arrival.source_region_id),
+                        place_id=int(region['id']), portal_id=int(portal_id), place_dfs=dfs.snapshot())
         # The Place identity is now authoritative, but its local observation
         # ledger is still snapshot-local.  The next selection pass must first
         # reconcile one map projection for this Place before graph transit can

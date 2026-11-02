@@ -120,6 +120,7 @@ def handle_detections(manager, msg):
     if getattr(manager, "target_done_policy", "visual_target") in (
         "target_room_entry",
         "target_context",
+        "graph_exploration",
     ):
         # Doorway-entry acceptance is a topology probe. Visual target tracks
         # and context-only completion are intentionally observational here;

@@ -4,7 +4,13 @@
        the world and reproducible starting pose. -->
   <arg name="gui" default="false"/>
   <arg name="exploration_method" default="place_portal_workitem"/>
+  <arg name="target_done_policy" default="visual_target"/>
+  <arg name="start_semantic_perception" default="false"/>
+  <arg name="wedetect_model_size" default="base"/>
+  <arg name="wedetect_tile_search_enabled" default="false"/>
   <arg name="world_name" default="$(find lste_core)/../../worlds/targeted_navigation/t_junction_small.world"/>
+  <arg name="slam_map_xmin" default="-3.0"/>
+  <arg name="robot_description_path" default="$(find pja)/urdf/pro3.xacro"/>
   <!-- Keep the spawn inside online_slam_frontier's default xmin=-3.0 map
        window while leaving a full west arm before the junction. -->
   <arg name="x" default="-2.5"/>
@@ -28,6 +34,7 @@
   <arg name="teb_include_costmap_obstacles" default="true"/>
   <arg name="start_goal_manager" default="true"/>
   <arg name="teb_forward_only" default="true"/>
+  <arg name="navfn_allow_unknown" default="true"/>
   <arg name="teb_frontier_pre_route_alignment" default="true"/>
 
   <!-- Optional metrics process for a reproducible diagnostic run. Both
@@ -51,7 +58,13 @@
   <include file="$(find lste_core)/../../scripts/tests/targeted_navigation/portal_retry_single_door_nav.launch">
     <arg name="gui" value="$(arg gui)"/>
     <arg name="exploration_method" value="$(arg exploration_method)"/>
+    <arg name="target_done_policy" value="$(arg target_done_policy)"/>
+    <arg name="start_semantic_perception" value="$(arg start_semantic_perception)"/>
+    <arg name="wedetect_model_size" value="$(arg wedetect_model_size)"/>
+    <arg name="wedetect_tile_search_enabled" value="$(arg wedetect_tile_search_enabled)"/>
     <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="slam_map_xmin" value="$(arg slam_map_xmin)"/>
+    <arg name="robot_description_path" value="$(arg robot_description_path)"/>
     <arg name="x" value="$(arg x)"/>
     <arg name="y" value="$(arg y)"/>
     <arg name="z" value="$(arg z)"/>
@@ -67,6 +80,7 @@
     <arg name="teb_include_costmap_obstacles" value="$(arg teb_include_costmap_obstacles)"/>
     <arg name="start_goal_manager" value="$(arg start_goal_manager)"/>
     <arg name="teb_forward_only" value="$(arg teb_forward_only)"/>
+    <arg name="navfn_allow_unknown" value="$(arg navfn_allow_unknown)"/>
     <arg name="teb_frontier_pre_route_alignment" value="$(arg teb_frontier_pre_route_alignment)"/>
   </include>
 

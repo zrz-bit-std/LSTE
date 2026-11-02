@@ -72,6 +72,43 @@ class GlobalFrontierTerminalValidationMixin:
         )
         return None
 
+    @staticmethod
+    def _terminal_goal_geometry_contract(
+        route_kind, map_frame, map_xy, portal_destination_odom_xy,
+        authentication_phase, authentication,
+    ):
+        """Return the frozen frame/XY for the exact goal sent to MoveBase.
+
+        Authentication turns are published in odom at a frozen physical
+        anchor, while ordinary frontier waypoints are published in map. A
+        terminal must be compared with the same execution-frame endpoint.
+        """
+        route_kind = str(route_kind or "").strip().lower()
+        if route_kind == "portal_transition" and portal_destination_odom_xy is not None:
+            xy = portal_destination_odom_xy
+            expected_frame = "odom"
+        elif route_kind == "frontier_turn_connector" and (
+            str(authentication_phase or "").strip().lower() == "turning"
+            or str(getattr(authentication, "state", "") or "").strip().lower()
+            == "turning"
+        ):
+            xy = getattr(authentication, "turn_odom_xy", None)
+            if xy is None:
+                return None
+            expected_frame = "odom"
+        else:
+            xy = map_xy
+            expected_frame = str(map_frame or "map").strip().lstrip("/")
+        try:
+            if xy is None or len(xy) != 2:
+                return None
+            x, y = float(xy[0]), float(xy[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not (math.isfinite(x) and math.isfinite(y)):
+            return None
+        return expected_frame, (x, y)
+
     def consume_late_released_terminal(self, message):
         """Replay controller release when a physical crossing won the race.
 
@@ -510,28 +547,31 @@ class GlobalFrontierTerminalValidationMixin:
         if terminal_goal is None:
             return self._reject_terminal(message, "terminal_goal_missing")
         frame = (terminal_goal.header.frame_id or "").strip().lstrip("/")
-        expected_frame = (
+        map_frame = (
             "" if self.map_msg is None
-            else (self.map_msg.header.frame_id or "map").strip().lstrip("/")
+            else (self.map_msg.header.frame_id or "map")
         )
-        expected_xy = self.active_last_waypoint_map
-        frozen_portal_odom = getattr(
-            self, "active_portal_destination_odom_xy", None,
+        auth_getter = getattr(self, "active_portal_authentication", None)
+        authentication = auth_getter() if callable(auth_getter) else None
+        geometry = self._terminal_goal_geometry_contract(
+            self.active_route_kind,
+            map_frame,
+            self.active_last_waypoint_map,
+            getattr(self, "active_portal_destination_odom_xy", None),
+            getattr(self, "active_portal_authentication_phase", ""),
+            authentication,
         )
-        if (
-            self.active_route_kind == "portal_transition"
-            and frozen_portal_odom is not None
-        ):
-            # A portal is a physical graph edge. Its command is intentionally
-            # frozen in odom, so the matching terminal must be checked against
-            # that same endpoint rather than a later SLAM-corrected map goal.
-            expected_frame = "odom"
-            expected_xy = frozen_portal_odom
+        if geometry is None:
+            return self._reject_terminal(
+                message, "terminal_geometry_contract_missing"
+            )
+        expected_frame, expected_xy = geometry
         if frame and expected_frame and frame != expected_frame:
             return self._reject_terminal(
                 message,
                 "terminal_frame_mismatch",
                 expected_frame=expected_frame,
+                actual_frame=frame,
             )
         terminal_delta = math.hypot(
             float(terminal_goal.pose.position.x) - float(expected_xy[0]),

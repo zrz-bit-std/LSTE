@@ -176,8 +176,10 @@ class FailedRouteCacheExplorer:
     def publish_failed_route_invalidation(self, *_args, **_kwargs):
         pass
 
-    def release_active_frontier(self):
-        pass
+    def release_active_frontier(self, queue_successor=True,
+                                await_controller_release_ack=None,
+                                terminal_contract=None):
+        self.release_request = (queue_successor, await_controller_release_ack, terminal_contract)
 
     def clear_prefetched_frontier(self):
         self.cleared += 1
@@ -411,6 +413,7 @@ class FrontierTerminalFailureTest(unittest.TestCase):
 
         self.assertEqual(explorer.cleared, 1)
         self.assertIsNone(explorer.prefetched_frontier)
+        self.assertEqual(explorer.release_request, (True, False, None))
 
 
 if __name__ == "__main__":

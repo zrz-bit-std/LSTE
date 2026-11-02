@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 import sys
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -213,6 +214,25 @@ class LocalEgressCommandLifecycle(CommandLifecycle):
         return False, float("inf"), False
 
 
+class PortalTurnCommandLifecycle(LocalEgressCommandLifecycle):
+    def __init__(self):
+        super().__init__()
+        self.active_semantic_room = None
+        self.active_portal_authentication_phase = "turning"
+        self.active_mission_route_kind = "frontier_endpoint"
+        self.pose_odom = SimpleNamespace(x=1.0, y=1.0)
+        self.auth = SimpleNamespace(
+            target_yaw=0.7, inside_xy=(1.0, 1.0), turn_map_xy=(2.0, 3.0),
+        )
+        self.active_portal_authentication = lambda: self.auth
+        self.transform_xy = lambda _source, _target, x, y: (x, y)
+
+    @staticmethod
+    def maybe_insert_turn_connector(_message, _steps, _cell, _mission, command,
+                                    _initial, terminal, _remaining, _robot_yaw):
+        return command, terminal, "frontier_endpoint", False
+
+
 class PortalTransitionCommandLifecycle(LocalEgressCommandLifecycle):
     """A portal uses endpoint geometry but must retain portal semantics."""
 
@@ -252,6 +272,126 @@ class LifecyclePreparation:
 
 
 class ActiveRouteCommandTest(unittest.TestCase):
+    def test_authentication_turn_keeps_one_map_waypoint_across_slam_updates(self):
+        resolver = load_command_resolver()
+
+        class TurningLifecycle(CommandLifecycle):
+            resolve_active_route_command = resolver
+
+            def __init__(self):
+                super().__init__(waypoint=None)
+                self.active_mission_route_kind = "frontier_endpoint"
+                self.route_segment_distance = 2.0
+                self.pose_odom = type("Pose", (), {"x": 1.2, "y": 2.1})()
+                self.offset = 0.0
+                self.auth = type("Auth", (), {
+                    "inside_xy": (1.0, 2.0), "target_yaw": 0.5,
+                    "turn_map_xy": None,
+                })()
+                self.active_portal_authentication_phase = "turning"
+
+            def active_portal_authentication(self):
+                return self.auth
+
+            @staticmethod
+            def active_mission_endpoint(_message, _cell):
+                return 4.0, 5.0
+
+            @staticmethod
+            def select_route_command_cell(_message, _steps, active_cell):
+                return (active_cell[0], active_cell[1]), "frontier_endpoint", 1.0
+
+            @staticmethod
+            def route_headings(*_args):
+                return 0.0, 0.0
+
+            @staticmethod
+            def cell_xy(_message, _row, _col):
+                return 4.0, 5.0
+
+            @staticmethod
+            def should_hold_active_waypoint(_robot_map):
+                return False, float("inf"), False
+
+            @staticmethod
+            def maybe_insert_turn_connector(*args):
+                return args[4], args[8], "frontier_endpoint", False
+
+            def transform_xy(self, _frame, _source, x, y):
+                return x + self.offset, y + self.offset
+
+        lifecycle = TurningLifecycle()
+        message = type("Message", (), {"header": type("Header", (), {"frame_id": "map"})(),
+                                        "info": type("Info", (), {"resolution": 0.1})()})()
+        steps = np.zeros((4, 5), dtype=np.int32)
+        first = lifecycle.resolve_active_route_command(
+            message, (1, 2, 4.0, 5.0), None, steps, (0, 0), (1.0, 2.0), 0.0,
+        )
+        lifecycle.offset = 0.2
+        second = lifecycle.resolve_active_route_command(
+            message, (1, 2, 4.0, 5.0), None, steps, (0, 0), (1.2, 2.2), 0.0,
+        )
+
+        self.assertEqual(first.command_xy, second.command_xy)
+        self.assertAlmostEqual(first.command_yaw, second.command_yaw)
+        self.assertEqual(first.command_xy, (1.2, 2.1))
+
+    def test_work_item_view_direction_sets_and_locks_terminal_yaw(self):
+        resolver = load_command_resolver()
+
+        class ViewLifecycle(CommandLifecycle):
+            resolve_active_route_command = resolver
+
+            def __init__(self):
+                super().__init__(waypoint=None)
+                self.active_mission_route_kind = "frontier_endpoint"
+                self.route_segment_distance = 2.0
+                self.active_work_item_id = 7
+                self.active_work_item_normal_xy = (0.0, 1.0)
+                self.active_work_item_map_yaw = None
+                self.offset = 0.0
+
+            @staticmethod
+            def active_mission_endpoint(_message, _cell):
+                return 4.0, 5.0
+
+            @staticmethod
+            def select_route_command_cell(_message, _steps, cell):
+                return (cell[0], cell[1]), "frontier_endpoint", 1.0
+
+            @staticmethod
+            def route_headings(*_args):
+                return 0.0, 0.0
+
+            @staticmethod
+            def cell_xy(_message, _row, _col):
+                return 4.0, 5.0
+
+            @staticmethod
+            def should_hold_active_waypoint(_robot_map):
+                return False, float("inf"), False
+
+            @staticmethod
+            def maybe_insert_turn_connector(*args):
+                return args[4], args[8], "frontier_endpoint", False
+
+            def transform_xy(self, _frame, _source, x, y):
+                return x + self.offset, y + self.offset
+
+        lifecycle = ViewLifecycle()
+        message = type("Message", (), {"header": type("Header", (), {"frame_id": "map"})(),
+                                        "info": type("Info", (), {"resolution": 0.1})()})()
+        steps = np.zeros((4, 5), dtype=np.int32)
+        first = lifecycle.resolve_active_route_command(
+            message, (1, 2, 4.0, 5.0), None, steps, (0, 0), (1.0, 2.0), 0.0,
+        )
+        lifecycle.offset = 0.4
+        second = lifecycle.resolve_active_route_command(
+            message, (1, 2, 4.0, 5.0), None, steps, (0, 0), (1.4, 2.4), 0.0,
+        )
+        self.assertAlmostEqual(first.command_yaw, math.pi / 2.0)
+        self.assertAlmostEqual(first.command_yaw, second.command_yaw)
+
     def test_endpoint_lease_stays_frozen_inside_release_radius(self):
         lifecycle = CommandLifecycle()
 
@@ -260,6 +400,31 @@ class ActiveRouteCommandTest(unittest.TestCase):
         )
 
         self.assertTrue(should_hold)
+        self.assertLess(distance, lifecycle.waypoint_release_radius)
+        self.assertFalse(turn_pending)
+
+    def test_portal_auth_entry_approach_releases_at_teb_terminal_tolerance(self):
+        lifecycle = CommandLifecycle(endpoint_only=False, release_radius=0.4)
+        lifecycle.active_portal_authentication_phase = "entering"
+        lifecycle.active_portal_authentication_entry_approach = True
+
+        should_hold, distance, _turn_pending = lifecycle.should_hold_active_waypoint(
+            (3.55, 1.0)
+        )
+
+        self.assertFalse(should_hold)
+        self.assertAlmostEqual(distance, 0.45)
+
+    def test_portal_auth_entry_approach_can_advance_at_release_radius(self):
+        lifecycle = CommandLifecycle(endpoint_only=False)
+        lifecycle.active_portal_authentication_phase = "entering"
+        lifecycle.active_portal_authentication_entry_approach = True
+
+        should_hold, distance, turn_pending = lifecycle.should_hold_active_waypoint(
+            (3.9, 1.0)
+        )
+
+        self.assertFalse(should_hold)
         self.assertLess(distance, lifecycle.waypoint_release_radius)
         self.assertFalse(turn_pending)
 
@@ -326,6 +491,29 @@ class ActiveRouteCommandTest(unittest.TestCase):
         self.assertEqual(cell, (2, 3))
         self.assertEqual(route_kind, "frontier_endpoint")
         self.assertAlmostEqual(remaining, 1.7)
+
+    def test_portal_auth_turn_overrides_frozen_frontier_waypoint(self):
+        lifecycle = PortalTurnCommandLifecycle()
+        message = type("Message", (), {
+            "header": type("Header", (), {"frame_id": "map"})(),
+            "info": type("Info", (), {"resolution": 0.1})(),
+        })()
+        steps = np.zeros((4, 5), dtype=np.int32)
+
+        command = lifecycle.resolve_active_route_command(
+            message,
+            (1, 2, 4.0, 5.0),
+            (4.0, 5.0),
+            steps,
+            (0, 0),
+            (1.0, 1.0),
+            0.0,
+        )
+
+        self.assertEqual(command.route_kind, "frontier_turn_connector")
+        self.assertEqual(command.command_xy, (2.0, 3.0))
+        self.assertAlmostEqual(command.command_yaw, 0.7)
+        self.assertEqual(lifecycle.active_route_kind, "frontier_turn_connector")
 
     def test_local_egress_route_kind_survives_command_resolution(self):
         lifecycle = LocalEgressCommandLifecycle()

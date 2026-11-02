@@ -702,6 +702,11 @@ class FailureClassificationTest(unittest.TestCase):
         metrics._write = lambda *_args, **_kwargs: None
         metrics._write_failure_log = lambda *_args, **_kwargs: None
         metrics._initialize_failure_evidence_state()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        metrics.failure_log_path = Path(directory.name) / "20260908_120001_failure_evidence.log"
+        metrics._open_failure_evidence_log()
+        self.addCleanup(metrics._close_failure_evidence_log)
         metrics.pose = (0.0, 0.0, 0.0)
         metrics.goal = (2.0, 0.0)
         metrics.command = [0.0, 0.0]
@@ -786,6 +791,17 @@ class FailureEpisodeTest(unittest.TestCase):
             )
         )
         self.metrics._initialize_failure_evidence_state()
+        # Match production startup: reserve IDs through a real run-local
+        # sequence file before testing episode creation, not an absent sink.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.metrics.failure_log_path = (
+            Path(directory.name) / "20260908_120000_failure_evidence.log"
+        )
+        self.metrics._open_failure_evidence_log()
+        self.addCleanup(self.metrics._close_failure_evidence_log)
+        self.metrics.task_done = False
+        self.metrics.navigation_hold = False
         self.metrics.pose = (0.0, 0.0, 0.0)
         self.metrics.goal = (3.0, 0.0)
         self.metrics.command = [0.0, 0.0]
@@ -801,6 +817,8 @@ class FailureEpisodeTest(unittest.TestCase):
         self.metrics.teb_feedback_state = {
             "selected_velocity": {"linear_x": 0.2, "angular_z": 0.0}
         }
+        self.metrics.teb_feedback_valid = True
+        self.metrics.teb_feedback_invalid_reason = ""
         self.metrics.teb_status = "trajectory_valid"
         self.metrics.run_context = {
             "experiment": {
@@ -980,30 +998,36 @@ class FailureEpisodeTest(unittest.TestCase):
         summary = metrics._finish_failure_episode_locked("test", force=True)
         self.assertEqual(summary["route_kind"], "target_approach")
 
-    def test_forward_only_output_gap_opens_a_failure_episode(self):
+    def _sample_forward_only_gap(self, angular):
         metrics = self.metrics
         metrics.goal = (0.57, 0.0)
         metrics.goal_frame = "odom"
         metrics._pose_xy_in_frame_locked = lambda _frame: (0.0, 0.0, 0.0)
-        metrics.command = [0.0, 0.19]
-        metrics.teb_command = [-0.01, 0.19]
-        metrics.teb_planner_command = [-0.01, 0.14]
+        metrics.command = [0.0, angular]
+        metrics.teb_command = [-0.01, angular]
+        metrics.teb_planner_command = [-0.01, angular]
         metrics.cmd_vel_mux_status = {
             "filter_reason": "forward_only_reverse_clamp",
-            "output": {"linear_x": 0.0, "angular_z": 0.19},
+            "output": {"linear_x": 0.0, "angular_z": angular},
         }
         metrics.teb_feedback_state = {
-            "selected_velocity": {"linear_x": -0.003, "angular_z": 0.30}
+            "selected_velocity": {"linear_x": -0.003, "angular_z": angular}
         }
         metrics.teb_turn_supervisor_status = {"state": "PASS_THROUGH"}
         metrics.failure_zero_velocity_limit = 1.0
         metrics.failure_controller_gap_start_wall = time.monotonic() - 2.0
         metrics.last_failure_evidence_wall = 0.0
         metrics.on_failure_evidence_sample()
+        return metrics
+
+    def test_forward_only_output_gap_opens_a_failure_episode(self):
+        metrics = self._sample_forward_only_gap(0.01)
         self.assertIsNotNone(metrics.active_failure)
-        self.assertEqual(
-            metrics.active_failure["trigger"], "controller_output_gap"
-        )
+        self.assertEqual(metrics.active_failure["trigger"], "controller_output_gap")
+
+    def test_forward_only_meaningful_rotation_is_not_an_output_gap(self):
+        metrics = self._sample_forward_only_gap(0.19)
+        self.assertIsNone(metrics.active_failure)
 
     def test_public_sample_keeps_route_context_after_bounded_serialization(self):
         public = self.metrics._failure_public_sample(

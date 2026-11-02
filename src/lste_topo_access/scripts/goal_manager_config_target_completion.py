@@ -7,7 +7,7 @@ class GoalManagerTargetCompletionConfigMixin:
     def _load_target_completion_parameters(self, gp):
         """Configure close-range completion and multi-frame confirmation."""
         policy = str(gp("~target_done_policy", "visual_target")).strip().lower()
-        if policy not in ("visual_target", "target_room_entry", "target_context"):
+        if policy not in ("visual_target", "target_room_entry", "target_context", "graph_exploration"):
             policy = "visual_target"
         self.target_done_policy = policy
         # ``target_room_entry`` is a benchmark/diagnostic acceptance policy.

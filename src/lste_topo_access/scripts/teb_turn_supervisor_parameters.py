@@ -16,6 +16,7 @@ def _as_bool(value):
 def configure_turn_supervisor_parameters(supervisor):
     """Load topics and execution bounds into ``supervisor``."""
     gp = rospy.get_param
+    supervisor.native_teb_reseed_enabled = _as_bool(gp("~native_teb_reseed_enabled", True))
     supervisor.planner_cmd_topic = gp(
         "~planner_cmd_topic", "/lste/cmd_vel/teb_planner"
     )

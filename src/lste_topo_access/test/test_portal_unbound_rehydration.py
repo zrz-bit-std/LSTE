@@ -71,6 +71,23 @@ class PortalUnboundRehydrationTest(unittest.TestCase):
             [2.5, 2.75],
         )
 
+    def test_uses_reachable_interior_cell_when_destination_cell_is_unknown(self):
+        explorer = RehydrationExplorer()
+        record, _created = explorer.portal_hypothesis_ledger.certify(
+            4, (2.0, 3.0), (4.0, 3.0), now=1.0,
+        )
+        snap = request()
+        snap.steps[2, 4] = -1
+        sources = {}
+
+        explorer._populate_unbound_portal_sources(
+            snap, SimpleNamespace(source_place_id=4), sources,
+        )
+
+        self.assertEqual(list(sources), [("hypothesis", record["id"])])
+        source = next(iter(sources.values()))
+        self.assertEqual((source.endpoint_row, source.endpoint_col), (2, 3))
+
     def test_reprojects_graph_selected_crossed_portal_without_labels(self):
         explorer = RehydrationExplorer()
         record, _created = explorer.portal_hypothesis_ledger.certify(

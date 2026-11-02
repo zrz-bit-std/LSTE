@@ -472,7 +472,7 @@ class PortalProbeLedger:
         self, source_place_id, physical_gate_xy, direction_xy, portal_id,
         now=0.0,
     ):
-        """Promote a source-arrived probe when a directed Portal is certified."""
+        """Mark a matching pending/source-arrived probe satisfied by Portal certification."""
         gate = _xy(physical_gate_xy)
         direction = _unit(direction_xy)
         if gate is None or direction is None:
@@ -485,7 +485,7 @@ class PortalProbeLedger:
         for record in self._records.values():
             if (
                 int(record.get("source_place_id", -1)) != source_place_id
-                or record.get("state") != PROBE_SOURCE_ARRIVED
+                or record.get("state") not in (PROBE_PENDING, PROBE_SOURCE_ARRIVED)
             ):
                 continue
             prior_direction = _unit(record.get("normal_xy"))
@@ -683,6 +683,15 @@ class PortalProbeLedger:
             record["state"] = PROBE_OBSERVED
         elif result == "rejected":
             record["state"] = PROBE_REJECTED
+        elif result == "deferred":
+            # Higher-priority Portal authentication temporarily owns motion.
+            # Release the probe lease without treating the viewpoint as a
+            # failed attempt or producing physical negative evidence.
+            record["state"] = (
+                PROBE_SOURCE_ARRIVED
+                if phase == "destination" else PROBE_PENDING
+            )
+            record["destination_retry_allowed"] = phase == "destination"
         elif result in ("failed", "blocked"):
             # Route failure is not physical negative evidence.  Releasing the
             # obligation lets WorkItem viewpoint lineage choose another view.
@@ -701,7 +710,7 @@ class PortalProbeLedger:
             record["destination_retry_allowed"] = phase == "destination"
         else:
             raise ValueError("unknown portal probe result: %s" % result)
-        if result not in ("failed", "blocked"):
+        if result not in ("failed", "blocked", "deferred"):
             record["destination_retry_allowed"] = False
         record["last_finished_at"] = float(now)
         record["last_reason"] = str(reason or result)

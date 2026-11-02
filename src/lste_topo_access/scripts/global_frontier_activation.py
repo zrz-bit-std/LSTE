@@ -13,6 +13,7 @@ from lifecycle_manager import State
 from global_frontier_models import SelectedFrontier
 from global_frontier_topology import copy_component_evidence
 from global_frontier_portal_crossing import portal_signed_distance
+from global_frontier_graph_route_transaction import route_graph_transaction_identity
 
 
 class GlobalFrontierActivationMixin:
@@ -27,6 +28,15 @@ class GlobalFrontierActivationMixin:
     ):
         """Open the destination region and prepare any source-place departure."""
         self.place_graph_waiting_for_portal = False
+        if getattr(selection, "authentication_phase", None):
+            place_id = getattr(self, "current_physical_place_id", None)
+            region = (
+                None if place_id is None
+                else self.region_memory.by_id(int(place_id))
+            )
+            # A doorway peek is an observation task inside its source Place.
+            # It cannot create a destination Place or begin a crossing.
+            return region, None
         if selection.route_kind == "local_egress":
             # A recovery anchor is a previously reached pose, not a new
             # observation candidate or a transition out of a place.
@@ -236,10 +246,6 @@ class GlobalFrontierActivationMixin:
         if not self.place_departure.active:
             self._clear_active_place_departure()
         self.active_route_id += 1
-        tree = getattr(self, "gp_exploration_tree", None)
-        branch_id = getattr(selection, "branch_id", None)
-        if tree is not None and branch_id is not None:
-            self.commit_gp_branch_transaction(branch_id, self.active_route_id)
         pending_predecessor = getattr(
             self, "pending_graph_successor_predecessor_contract", None
         )
@@ -324,9 +330,16 @@ class GlobalFrontierActivationMixin:
         self.active_portal_retry = False
         self.active_terminal_received = False
         self.active_terminal_contract = None
-        graph_transaction_id = int(
-            getattr(graph_transaction, "graph_transaction_id", 0) or 0
+        graph_transaction_id, graph_sequence = route_graph_transaction_identity(
+            selection,
+            graph_transaction,
+            getattr(self, "graph_route_action_transaction_sequence", 0),
+            getattr(self, "last_released_route_graph_transaction_id", 0),
         )
+        if graph_sequence > int(
+            getattr(self, "graph_route_action_transaction_sequence", 0) or 0
+        ):
+            self.graph_route_action_transaction_sequence = graph_sequence
         route_origin_epoch = getattr(graph_transaction, "origin_epoch", None)
         route_projection_epoch = getattr(
             graph_transaction, "projection_epoch", None
@@ -726,12 +739,27 @@ class GlobalFrontierActivationMixin:
         selection = self.selected_frontier_from_cell(active_cell)
         transaction = getattr(self, "portal_transaction", None)
         prospective_route_id = int(getattr(self, "active_route_id", 0)) + 1
+        pending_pre_dispatch_rebind = bool(
+            getattr(self, "portal_transaction_route_rebind_pending", False)
+        )
+        try:
+            same_portal_edge = (
+                transaction is not None
+                and int(getattr(transaction, "portal_id", 0) or 0) > 0
+                and int(getattr(self, "last_portal_hypothesis_id", 0) or 0)
+                == int(getattr(transaction, "portal_id", 0) or 0)
+            )
+        except (TypeError, ValueError):
+            same_portal_edge = False
         transaction_rebind = (
             transaction is not None
             and transaction.active
             and selection.route_kind == "portal_transition"
-            and selection_mode == "portal_recovery_retry"
             and transaction.state in ("source_probe", "throat")
+            and (
+                selection_mode == "portal_recovery_retry"
+                or (pending_pre_dispatch_rebind and same_portal_edge)
+            )
         )
         if transaction is not None and transaction.active and not (
             transaction_rebind
@@ -781,6 +809,11 @@ class GlobalFrontierActivationMixin:
                     now, "durable_probe_lease_unavailable", selection
                 )
                 return False
+        authentication_phase = str(getattr(selection, "authentication_phase", "") or "")
+        if authentication_phase:
+            suspend_work_item = getattr(self, "suspend_active_work_item", None)
+            if callable(suspend_work_item):
+                suspend_work_item(now, "portal_authentication_%s" % authentication_phase)
         lifecycle = self.prepare_selected_frontier_lifecycle(
             message,
             components,
@@ -815,9 +848,15 @@ class GlobalFrontierActivationMixin:
             if transaction_rebind:
                 transaction_snapshot = transaction.bind_route(
                     self.active_route_id,
-                    reason="portal_retry_route_bound",
+                    reason=(
+                        "portal_pre_dispatch_route_rebound"
+                        if pending_pre_dispatch_rebind
+                        else "portal_retry_route_bound"
+                    ),
                 )
                 transaction_event = "portal_transaction_rebound"
+                if transaction_snapshot is not None:
+                    self.portal_transaction_route_rebind_pending = False
             else:
                 source_signed_distance = portal_signed_distance(
                     getattr(self, "active_start_odom_xy", None),
@@ -891,6 +930,7 @@ class GlobalFrontierActivationMixin:
         # forever after a successful probe.
         if dispatch is not None and not (
             getattr(selection, "graph_action", None) == "probe_portal"
+            or bool(authentication_phase)
         ):
             dispatch(message, selection, region, now)
         # Only the transaction boundary knows the selection mode. Mark one

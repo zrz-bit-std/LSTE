@@ -314,7 +314,6 @@ class TebGoalBridgeActionTerminalMixin:
         if not (
             status == GoalStatus.SUCCEEDED
             and route_kind == TURN_ROUTE_KIND
-            and self.turn_supervisor_state != "PASS_THROUGH"
         ):
             return False
         self.last_result_status = int(status)

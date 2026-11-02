@@ -1,5 +1,7 @@
 """Periodic snapshot construction and orderly metrics shutdown."""
 
+from contextlib import nullcontext
+
 import math
 import time
 
@@ -472,7 +474,8 @@ class NavigationMetricsSnapshotMixin:
                 status_counts=self.status_counts,
             )
             try:
-                self.stream.close()
+                with getattr(self, "log_write_lock", nullcontext()):
+                    self.stream.close()
             except (AttributeError, ValueError):
                 pass
             self._close_failure_evidence_log()

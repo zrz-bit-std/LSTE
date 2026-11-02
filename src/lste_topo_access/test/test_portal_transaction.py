@@ -22,6 +22,25 @@ from global_frontier_portal_transaction import (
 
 
 class PortalTransactionTest(unittest.TestCase):
+    def test_unconfirmed_standoff_retry_reuses_only_same_direction_source_evidence(self):
+        tx = PortalTransaction()
+        tx.start(11, portal_id=3, source_place_id=2, gate_xy=(1, 0),
+                 destination_xy=(2, 0), source_side_proven=True,
+                 source_signed_distance=-1.)
+        tx.abort("portal_retry_after_unconfirmed_standoff")
+        tx.finish("portal_transaction_closed_before_retry")
+        self.assertTrue(tx.source_evidence_matches(3, 2, (1, 0), (3, 0)))
+        self.assertFalse(tx.source_evidence_matches(3, 1, (1, 0), (3, 0)))
+        self.assertFalse(tx.source_evidence_matches(4, 2, (1, 0), (3, 0)))
+        self.assertFalse(tx.source_evidence_matches(3, 2, (1, 0), (0, 0)))
+        self.assertFalse(tx.source_evidence_matches(3, 2, (1.2, 0), (3, 0)))
+        restarted = tx.start(12, portal_id=3, source_place_id=2,
+                             gate_xy=(1, 0), destination_xy=(3, 0))
+        self.assertTrue(restarted.source_side_proven)
+        self.assertEqual(restarted.source_signed_distance, -1.)
+        tx.crossing_verified(12);tx.place_commit();tx.finish()
+        self.assertFalse(tx.source_evidence_matches(3, 2, (1, 0), (3, 0)))
+
     def test_phase_order_is_explicit_and_monotonic(self):
         tx = PortalTransaction()
         self.assertEqual(tx.state, PORTAL_TX_IDLE)
@@ -68,6 +87,23 @@ class PortalTransactionTest(unittest.TestCase):
         self.assertEqual(rebound.source_place_id, 3)
         self.assertEqual(rebound.retry_count, 1)
         self.assertFalse(tx.route_allowed(11, "portal_transition"))
+
+    def test_unstarted_route_can_be_rebound_without_counting_a_physical_retry(self):
+        tx = PortalTransaction()
+        tx.start(19, portal_id=3, source_place_id=1, gate_xy=(2, 0), destination_xy=(4, 0))
+
+        released = tx.release_unstarted_route(19)
+        self.assertEqual(released.state, PORTAL_TX_SOURCE_PROBE)
+        self.assertEqual(released.route_id, 0)
+        self.assertEqual(released.retry_count, 0)
+        self.assertEqual(tx.route_allowed(20, "portal_transition"), False)
+
+        rebound = tx.bind_route(20, reason="portal_pre_dispatch_route_rebound")
+        self.assertEqual(rebound.portal_id, 3)
+        self.assertEqual(tx.portal_id, 3)
+        self.assertEqual(rebound.source_place_id, 1)
+        self.assertEqual(rebound.route_id, 20)
+        self.assertEqual(rebound.retry_count, 0)
 
     def test_source_side_evidence_survives_a_retry_started_at_the_gate(self):
         """A recovery route may begin on the gate's destination-side envelope."""

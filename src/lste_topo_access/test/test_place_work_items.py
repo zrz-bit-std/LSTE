@@ -49,6 +49,18 @@ class ActivationProbe(GlobalFrontierObservationCoverageMixin):
 
 
 class PlaceWorkItemTest(unittest.TestCase):
+    def test_deduplicated_portal_entry_keeps_best_room_priority(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        item_id = ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 6, 0.47, 1.0)
+        same_id = ledger.ensure_portal_entry(4, 1, (3.0, 4.0), 1, 0.86, 2.0)
+        ledger.ensure_portal_entry(4, 1, (5.0, 6.0), 5, 0.52, 3.0)
+
+        self.assertEqual(item_id, same_id)
+        item = ledger._items[item_id]
+        self.assertEqual(item["priority"], 1)
+        self.assertAlmostEqual(item["semantic_score"], 0.86)
+        self.assertEqual((item["x"], item["y"]), (3.0, 4.0))
+
     def test_local_component_split_reuses_physical_owner(self):
         probe = ActivationProbe()
         owner, _tier = probe.region_memory.activate(
@@ -122,6 +134,34 @@ class PlaceWorkItemTest(unittest.TestCase):
             ledger._items[second]["attempts"][-1]["id"],
             ledger._items[second]["attempts"][-2]["id"],
         )
+
+    def test_stale_terminal_cannot_resolve_suspended_parent_work(self):
+        ledger = PlaceWorkItemLedger(merge_radius=0.5)
+        item_id = ledger.dispatch(3, (2.0, 1.0), now=1.0)
+        attempt_id = ledger.active_attempt_id(item_id)
+        item, attempt = ledger.suspend_attempt(
+            item_id, now=2.0, reason="portal_junction_observation_period",
+            attempt_id=attempt_id,
+        )
+        self.assertIsNotNone(attempt)
+
+        self.assertIsNone(ledger.resolve(
+            item_id, now=3.0, reason="stale_preempted_terminal",
+        ))
+        self.assertEqual(item["state"], WORK_UNRESOLVED)
+        self.assertEqual(item["attempts"][-1]["state"], "suspended")
+
+        resumed = ledger.dispatch_existing(
+            item_id, now=4.0, viewpoint_xy=(2.0, 1.0), map_goal=(2.0, 1.0),
+        )
+        self.assertEqual(resumed, item_id)
+        new_attempt = ledger.active_attempt_id(item_id)
+        self.assertNotEqual(new_attempt, attempt_id)
+        self.assertIsNotNone(ledger.resolve(
+            item_id, now=5.0, reason="observed_after_resume",
+            attempt_id=new_attempt,
+        ))
+        self.assertEqual(item["attempts"][-1]["state"], "succeeded")
 
     def test_route_rejection_blocks_only_pre_dispatch_viewpoint(self):
         ledger = PlaceWorkItemLedger(merge_radius=0.5)

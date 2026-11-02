@@ -20,10 +20,45 @@ from global_frontier_graph_route_planner import (  # noqa: E402
     PLAN_BLOCKED,
     PLAN_COMPLETE,
     PLAN_READY,
+    dfs_exit_projection_ready,
 )
 from global_frontier_directional_branch_coverage import (  # noqa: E402
     DirectionalBranchCoverage,
 )
+
+
+class DfsExitProjectionReadyTest(unittest.TestCase):
+    def test_valid_current_place_projection_is_exit_ready(self):
+        self.assertTrue(dfs_exit_projection_ready(
+            scope_matches_current=True, projection_valid=True,
+            entry_portal_id=3))
+
+    def test_only_bound_entry_portal_leak_allows_empty_place_egress(self):
+        self.assertTrue(dfs_exit_projection_ready(
+            scope_matches_current=True, projection_valid=False,
+            entry_portal_id=3, leaking_portal_ids=[3],
+            pending_frontier_count=0,
+            frontier_work_evidence={"raw_count": 0, "pending_count": 0}))
+
+    def test_other_leak_or_any_frontier_still_blocks_close(self):
+        common = dict(
+            scope_matches_current=True, projection_valid=False,
+            entry_portal_id=3, pending_frontier_count=0,
+            frontier_work_evidence={"raw_count": 0, "pending_count": 0})
+        self.assertFalse(dfs_exit_projection_ready(
+            **dict(common, leaking_portal_ids=[3, 4])))
+        self.assertFalse(dfs_exit_projection_ready(
+            **dict(common, leaking_portal_ids=[3],
+                   frontier_work_evidence={"raw_count": 1, "pending_count": 0})))
+        self.assertFalse(dfs_exit_projection_ready(
+            **dict(common, leaking_portal_ids=[3], pending_frontier_count=1)))
+
+    def test_stale_place_scope_never_authorizes_egress(self):
+        self.assertFalse(dfs_exit_projection_ready(
+            scope_matches_current=False, projection_valid=False,
+            entry_portal_id=3, leaking_portal_ids=[3],
+            frontier_work_evidence={"raw_count": 0, "pending_count": 0}))
+
 
 
 def place(place_id, *, covered=True, state="open"):
@@ -68,6 +103,33 @@ class GraphRoutePlannerTest(unittest.TestCase):
             probes=probes,
             **kwargs,
         )
+
+    def test_current_place_work_items_use_tsp_and_room_scope_before_ordering(self):
+        items = [
+            dict(work(31, 1), anchor_xy=(3.0, 0.0), normal_xy=(0.0, 1.0)),
+            dict(work(32, 1), anchor_xy=(1.0, 0.0), normal_xy=(0.0, 1.0)),
+            dict(work(33, 1), anchor_xy=(0.0, 2.0), normal_xy=(1.0, 0.0)),
+            dict(work(34, 2), anchor_xy=(0.25, 0.0), normal_xy=(0.0, 1.0)),
+        ]
+        result = self.plan(
+            1,
+            [place(1), place(2)],
+            work_items=items,
+            visible_work_item_ids={31, 32, 33},
+            robot_pose=(0.0, 0.0, 0.0),
+            room_work_item_only=True,
+            room_branch_scope={
+                "origin_xy": [0.0, 0.0],
+                "selected_branch_id": 1,
+                "directions": [
+                    {"branch_id": 1, "direction_xy": [1.0, 0.0]},
+                    {"branch_id": 2, "direction_xy": [0.0, 1.0]},
+                ],
+            },
+        )
+
+        self.assertEqual(result.obligation_id, 32)
+        self.assertEqual(result.work_item_tour, (32, 31))
 
     def test_multihop_route_returns_complete_path_but_one_first_edge(self):
         result = self.plan(
@@ -233,6 +295,145 @@ class GraphRoutePlannerTest(unittest.TestCase):
         self.assertEqual(result.first_portal_id, 13)
         self.assertEqual(result.reason, "destination_view_promoted_to_portal")
 
+    def test_semantic_room_priority_crosses_best_ranked_portal_before_local_work(self):
+        result = self.plan(
+            1,
+            [place(1)],
+            [
+                {
+                    "id": 14, "source_place_id": 1,
+                    "destination_place_id": None, "state": "certified",
+                    "semantic_priority": 2, "semantic_score": 0.72,
+                },
+                {
+                    "id": 13, "source_place_id": 1,
+                    "destination_place_id": None, "state": "certified",
+                    "semantic_priority": 1, "semantic_score": 0.91,
+                },
+                {
+                    "id": 15, "source_place_id": 1,
+                    "destination_place_id": None, "state": "certified",
+                    "semantic_priority": 3, "semantic_score": -1.0,
+                    "exploration_suppressed": True,
+                },
+            ],
+            work_items=[
+                work(31, 1),
+                dict(work(70, 1), kind="portal_entry", portal_id=14, priority=2),
+                dict(work(71, 1), kind="portal_entry", portal_id=13, priority=1),
+                dict(work(72, 1), kind="portal_entry", portal_id=15, priority=3),
+            ],
+            branch_first=True,
+        )
+
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.first_portal_id, 13)
+        self.assertEqual(result.reason, "semantic_priority_portal_entry_work_item:71")
+
+    def test_unprojected_best_portal_entry_blocks_lower_rank_and_probe(self):
+        result = self.plan(
+            1,
+            [place(1)],
+            portals=[
+                {"id": 13, "source_place_id": 1, "destination_place_id": None,
+                 "state": "certified"},
+                {"id": 14, "source_place_id": 1, "destination_place_id": None,
+                 "state": "certified"},
+            ],
+            work_items=[
+                dict(work(70, 1), kind="portal_entry", portal_id=14, priority=2),
+                dict(work(71, 1), kind="portal_entry", portal_id=13, priority=1),
+                work(31, 1),
+            ],
+            probes=[{"id": 7, "source_place_id": 1, "state": "pending"}],
+            branch_first=True,
+            visible_portal_ids=(14,),
+            visible_probe_ids=(7,),
+        )
+        self.assertEqual(result.status, PLAN_BLOCKED)
+        self.assertEqual(result.action, ACTION_HOLD)
+        self.assertEqual(result.obligation_kind, "portal_entry")
+        self.assertEqual(result.obligation_id, 71)
+        self.assertEqual(result.first_portal_id, 13)
+        self.assertEqual(
+            result.reason, "semantic_priority_portal_entry_projection_pending"
+        )
+
+    def test_visible_semantic_portal_entry_work_item_rehydrates_certified_portal(self):
+        result = self.plan(
+            1,
+            [place(1)],
+            portals=[
+                {"id": 13, "source_place_id": 1, "destination_place_id": None,
+                 "state": "certified"},
+            ],
+            work_items=[
+                dict(work(71, 1), kind="portal_entry", portal_id=13, priority=1),
+                work(31, 1),
+            ],
+            branch_first=True,
+            visible_portal_ids=(),
+            visible_work_item_ids=(71, 31),
+        )
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.first_portal_id, 13)
+        self.assertEqual(result.reason, "semantic_priority_portal_entry_work_item:71")
+
+    def test_visible_semantic_entry_rehydrates_portal_after_edge_projection_exclusion(self):
+        result = self.plan(
+            1,
+            [place(1)],
+            portals=[
+                {"id": 13, "source_place_id": 1, "destination_place_id": None,
+                 "state": "certified", "physical_gate": [1.0, 0.0],
+                 "physical_destination": [2.0, 0.0]},
+            ],
+            work_items=[
+                dict(work(71, 1), kind="portal_entry", portal_id=13,
+                     priority=1, x=2.0, y=0.0),
+                work(31, 1),
+            ],
+            branch_first=True,
+            visible_portal_ids=(),
+            visible_work_item_ids=(71, 31),
+            excluded_portal_ids=(13,),
+        )
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.first_portal_id, 13)
+        self.assertEqual(result.reason, "semantic_priority_portal_entry_work_item:71")
+
+    def test_deferred_highest_semantic_entry_yields_to_next_ranked_room(self):
+        result = self.plan(
+            1,
+            [place(1)],
+            portals=[
+                {"id": 13, "source_place_id": 1, "destination_place_id": None,
+                 "state": "certified", "navigation_deferred_until_epoch": 50,
+                 "physical_gate": [1.0, 0.0], "physical_destination": [2.0, 0.0]},
+                {"id": 14, "source_place_id": 1, "destination_place_id": None,
+                 "state": "certified", "physical_gate": [0.0, 1.0],
+                 "physical_destination": [0.0, 2.0]},
+            ],
+            work_items=[
+                dict(work(71, 1), kind="portal_entry", portal_id=13, priority=1,
+                     x=2.0, y=0.0),
+                dict(work(72, 1), kind="portal_entry", portal_id=14, priority=2,
+                     x=0.0, y=2.0),
+                work(31, 1),
+            ],
+            branch_first=True,
+            visible_portal_ids=(),
+            visible_work_item_ids=(71, 72, 31),
+            map_epoch=1,
+        )
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.first_portal_id, 14)
+        self.assertEqual(result.reason, "semantic_priority_portal_entry_work_item:72")
+
     def test_bound_probe_promotes_unbound_portal_to_action_identity(self):
         """A Portal ID must never be sent to the source-side probe adapter."""
         result = self.plan(
@@ -392,6 +593,201 @@ class GraphRoutePlannerTest(unittest.TestCase):
         self.assertEqual(crossing.action, ACTION_CROSS_PORTAL)
         self.assertEqual(crossing.portal_path, (11,))
 
+    def test_branch_first_resumes_hidden_unresolved_work_before_new_portal(self):
+        result = self.plan(
+            1,
+            [place(1), place(3)],
+            [portal(44, 1, 3)],
+            work_items=[work(73, 3, normal_xy=(0.0, 1.0))],
+            branch_first=True,
+            resume_place_id=3,
+            visible_work_item_ids=(),
+        )
+
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.portal_path, (44,))
+        self.assertEqual(
+            result.reason, "resume_source_after_covered_portal_arrival"
+        )
+
+    def test_room_branch_services_probe_bound_work_item_as_local_work(self):
+        scope = {
+            "origin_xy": [0.0, 0.0],
+            "selected_branch_id": 8,
+            "directions": [
+                {"branch_id": 7, "direction_xy": [1.0, 0.0]},
+                {"branch_id": 8, "direction_xy": [0.0, 1.0]},
+            ],
+        }
+        result = self.plan(
+            2,
+            [place(1), place(2)],
+            [portal(44, 1, 2)],
+            work_items=[
+                {
+                    **work(73, 2, normal_xy=(0.0, 1.0)),
+                    "anchor_xy": [0.0, 4.0],
+                },
+            ],
+            probes=[
+                {
+                    "id": 91,
+                    "source_place_id": 2,
+                    "state": "pending",
+                    "work_item_id": 73,
+                    "physical_gate_xy": [0.0, 4.0],
+                    "normal_xy": [0.0, 1.0],
+                },
+            ],
+            branch_first=True,
+            visible_work_item_ids=(73,),
+            visible_probe_ids=(91,),
+            room_work_item_only=True,
+            room_branch_scope=scope,
+        )
+
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_OBSERVE_LOCAL_WORK)
+        self.assertEqual(result.obligation_id, 73)
+        self.assertEqual(result.reason, "semantic_room_local_work_only")
+
+    def test_room_branch_holds_for_unprojected_probe_bound_work_item(self):
+        scope = {
+            "origin_xy": [0.0, 0.0],
+            "selected_branch_id": 8,
+            "directions": [
+                {"branch_id": 7, "direction_xy": [1.0, 0.0]},
+                {"branch_id": 8, "direction_xy": [0.0, 1.0]},
+            ],
+        }
+        result = self.plan(
+            2,
+            [place(1), place(2)],
+            [portal(44, 1, 2)],
+            work_items=[
+                {"id": 73, "place_id": 2, "state": "unresolved",
+                 "active_attempt_id": None, "anchor_xy": [0.0, 4.0]},
+            ],
+            probes=[
+                {"id": 91, "source_place_id": 2, "state": "awaiting_projection",
+                 "work_item_id": 73, "physical_gate_xy": [0.0, 4.0]},
+            ],
+            branch_first=True,
+            visible_work_item_ids=(),
+            visible_probe_ids=(),
+            room_work_item_only=True,
+            room_branch_scope=scope,
+        )
+
+        self.assertEqual(result.status, PLAN_BLOCKED)
+        self.assertEqual(result.action, ACTION_HOLD)
+        self.assertEqual(result.obligation_id, 73)
+        self.assertEqual(
+            result.reason, "semantic_room_work_item_projection_pending"
+        )
+
+    def test_room_branch_waits_for_active_scoped_work_item_attempt(self):
+        scope = {
+            "origin_xy": [0.0, 0.0],
+            "selected_branch_id": 8,
+            "directions": [
+                {"branch_id": 8, "direction_xy": [0.0, 1.0]},
+            ],
+        }
+        result = self.plan(
+            2,
+            [place(1), place(2)],
+            [portal(44, 1, 2)],
+            work_items=[
+                {"id": 73, "place_id": 2, "state": "unresolved",
+                 "active_attempt_id": 5, "anchor_xy": [0.0, 4.0]},
+            ],
+            branch_first=True,
+            visible_work_item_ids=(),
+            visible_probe_ids=(),
+            room_work_item_only=True,
+            room_branch_scope=scope,
+        )
+
+        self.assertEqual(result.status, PLAN_BLOCKED)
+        self.assertEqual(result.action, ACTION_HOLD)
+        self.assertEqual(result.obligation_id, 73)
+        self.assertEqual(
+            result.reason, "semantic_room_active_work_item_attempt"
+        )
+
+    def test_room_branch_does_not_pin_on_unowned_structural_probe(self):
+        scope = {
+            "origin_xy": [0.0, 0.0],
+            "selected_branch_id": 8,
+            "directions": [
+                {"branch_id": 8, "direction_xy": [0.0, 1.0]},
+            ],
+        }
+        result = self.plan(
+            2,
+            [place(1), place(2)],
+            [portal(44, 1, 2)],
+            probes=[
+                {
+                    "id": 91,
+                    "source_place_id": 2,
+                    "state": "source_arrived",
+                    "work_item_id": None,
+                    "physical_gate_xy": [0.0, 4.0],
+                    "normal_xy": [0.0, 1.0],
+                },
+            ],
+            branch_first=True,
+            visible_work_item_ids=(),
+            visible_probe_ids=(),
+            room_work_item_only=True,
+            room_branch_scope=scope,
+        )
+
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.portal_path, (44,))
+        self.assertEqual(
+            result.reason, "dfs_place_and_children_complete_return_to_parent"
+        )
+
+    def test_room_branch_ignores_probe_bound_to_resolved_work_item(self):
+        scope = {
+            "origin_xy": [0.0, 0.0],
+            "selected_branch_id": 8,
+            "directions": [
+                {"branch_id": 8, "direction_xy": [0.0, 1.0]},
+            ],
+        }
+        result = self.plan(
+            2,
+            [place(1), place(2)],
+            [portal(44, 1, 2)],
+            work_items=[
+                {"id": 73, "place_id": 2, "state": "resolved",
+                 "active_attempt_id": None, "normal_xy": [0.0, 1.0]},
+            ],
+            probes=[
+                {"id": 91, "source_place_id": 2, "state": "pending",
+                 "work_item_id": 73, "physical_gate_xy": [0.0, 4.0],
+                 "normal_xy": [0.0, 1.0]},
+            ],
+            branch_first=True,
+            visible_work_item_ids=(),
+            visible_probe_ids=(91,),
+            room_work_item_only=True,
+            room_branch_scope=scope,
+        )
+
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.portal_path, (44,))
+        self.assertEqual(
+            result.reason, "dfs_place_and_children_complete_return_to_parent"
+        )
+
     def test_target_place_work_cannot_be_abandoned_by_branch_first(self):
         result = self.plan(
             1,
@@ -497,6 +893,38 @@ class GraphRoutePlannerTest(unittest.TestCase):
 
         self.assertEqual(result.status, PLAN_BLOCKED)
         self.assertEqual(result.reason, "local_work_attempt_active")
+
+    def test_unobserved_root_selects_certified_semantic_child_before_bootstrap_work(self):
+        result = self.plan(
+            1,
+            [place(1, covered=False)],
+            [{"id": 21, "source_place_id": 1, "destination_place_id": None,
+              "state": "certified", "semantic_priority": 0.2,
+              "gp_authentication_state": "completed"},
+             {"id": 22, "source_place_id": 1, "destination_place_id": None,
+              "state": "certified", "semantic_priority": 0.8,
+              "gp_authentication_state": "completed"}],
+            work_items=[work(31, 1)],
+            branch_first=True,
+        )
+
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.first_portal_id, 21)
+        self.assertEqual(result.reason, "dfs_root_semantic_child_before_bootstrap_work")
+
+    def test_unobserved_place_bootstraps_from_durable_work_item_during_projection_gap(self):
+        result = self.plan(
+            1,
+            [place(1, covered=False)],
+            work_items=[work(31, 1)],
+            branch_first=True,
+            visible_work_item_ids=(),
+        )
+
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, "bootstrap_observation")
+        self.assertEqual(result.obligation_id, 31)
+        self.assertEqual(result.reason, "place_observation_required")
 
     def test_hidden_current_work_item_does_not_freeze_visible_graph_progress(self):
         result = self.plan(
@@ -608,6 +1036,90 @@ class GraphRoutePlannerTest(unittest.TestCase):
 
         self.assertEqual(result.action, ACTION_OBSERVE_LOCAL_WORK)
         self.assertEqual(result.obligation_id, 31)
+
+    def test_semantic_portal_entries_remain_ahead_of_suspended_work_item(self):
+        result = self.plan(
+            1,
+            [place(1)],
+            portals=[
+                {"id": 13, "source_place_id": 1, "destination_place_id": None,
+                 "state": "certified", "semantic_priority": 1,
+                 "physical_gate": [1.0, 0.0], "physical_destination": [2.0, 0.0]},
+            ],
+            work_items=[
+                work(31, 1),
+                dict(work(71, 1), kind="portal_entry", portal_id=13, priority=1),
+            ],
+            branch_first=True,
+            resume_work_item_id=31,
+        )
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.first_portal_id, 13)
+        self.assertEqual(result.reason, "semantic_priority_portal_entry_work_item:71")
+
+    def test_suspended_work_item_resumes_before_new_portal_after_room_cycles(self):
+        result = self.plan(
+            1,
+            [place(1), place(2, covered=False)],
+            [portal(11, 1, 2)],
+            work_items=[work(31, 1, normal_xy=(1.0, 0.0))],
+            probes=[{
+                "id": 41, "source_place_id": 1, "state": "pending",
+                "observation_source": "structural_boundary",
+            }],
+            branch_first=True,
+            structural_boundary_first=True,
+            visible_work_item_ids=(31,),
+            visible_probe_ids=(41,),
+            resume_work_item_id=31,
+        )
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_OBSERVE_LOCAL_WORK)
+        self.assertEqual(result.obligation_id, 31)
+        self.assertEqual(
+            result.reason,
+            "resume_suspended_work_item_after_portal_observation",
+        )
+
+    def test_hidden_suspended_work_item_holds_until_reprojected(self):
+        result = self.plan(
+            1,
+            [place(1), place(2, covered=False)],
+            [portal(11, 1, 2)],
+            work_items=[work(31, 1, normal_xy=(1.0, 0.0))],
+            probes=[{
+                "id": 41, "source_place_id": 1, "state": "pending",
+                "observation_source": "structural_boundary",
+            }],
+            branch_first=True,
+            structural_boundary_first=True,
+            visible_work_item_ids=(),
+            visible_probe_ids=(41,),
+            resume_work_item_id=31,
+        )
+        self.assertEqual(result.status, PLAN_BLOCKED)
+        self.assertEqual(result.action, ACTION_HOLD)
+        self.assertEqual(result.obligation_id, 31)
+        self.assertEqual(result.reason, "suspended_work_item_projection_pending")
+
+    def test_hidden_suspended_work_item_yields_to_visible_same_place_tsp(self):
+        result = self.plan(
+            1,
+            [place(1)],
+            work_items=[
+                work(31, 1, normal_xy=(1.0, 0.0)),
+                work(32, 1, normal_xy=(0.0, 1.0)),
+            ],
+            branch_first=True,
+            visible_work_item_ids=(32,),
+            resume_work_item_id=31,
+        )
+        self.assertEqual(result.status, PLAN_READY)
+        self.assertEqual(result.action, ACTION_OBSERVE_LOCAL_WORK)
+        self.assertEqual(result.current_place_id, 1)
+        self.assertEqual(result.obligation_id, 32)
+        self.assertEqual(result.work_item_tour, (32,))
+        self.assertEqual(result.reason, "local_work_pending")
 
     def test_structural_boundary_probe_precedes_local_work(self):
         result = self.plan(

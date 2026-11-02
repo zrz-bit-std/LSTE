@@ -18,6 +18,8 @@ from global_frontier_evidence_contract import (
     next_evidence_gap,
 )
 from global_frontier_portal_probe_ledger import destination_reobserve_available
+from global_frontier_room_scope import work_item_belongs_to_branch
+from global_frontier_work_item_tour import order_work_items_open_tsp
 
 
 PLAN_READY = "ready"
@@ -58,6 +60,7 @@ class GraphRoutePlan:
     # ``source`` and ``destination`` are separate information obligations for
     # one physical PortalProbe.  The phase is immutable for this route lease.
     portal_probe_phase: str = ""
+    work_item_tour: tuple = ()
 
     def __post_init__(self):
         """Attach the evidence boundary without changing route geometry."""
@@ -97,6 +100,7 @@ class GraphRoutePlan:
             "required_evidence": evidence_payload(self.required_evidence),
             "produces_evidence": evidence_payload(self.produces_evidence),
             "portal_probe_phase": str(self.portal_probe_phase or ""),
+            "work_item_tour": [int(item_id) for item_id in self.work_item_tour],
         }
 
     def signature(self):
@@ -388,8 +392,15 @@ def _portal_probe_state(records, source_place_id, portal_id):
     return str(record.get("state", "")).strip().lower()
 
 
-def _unresolved_probe_places(records, branch_coverage=None, excluded_ids=()):
-    """Keep active destination attempts visible to the completion decision."""
+def _unresolved_probe_places(
+    records, branch_coverage=None, excluded_ids=(), work_items=(),
+):
+    """Keep active probes unless their linked WorkItem is already terminal."""
+    work_by_id = {
+        _positive_id(item.get("id")): item
+        for item in _records(work_items)
+        if _positive_id(item.get("id")) is not None
+    }
     excluded = {
         probe_id
         for probe_id in (_positive_id(value) for value in excluded_ids)
@@ -404,6 +415,12 @@ def _unresolved_probe_places(records, branch_coverage=None, excluded_ids=()):
             continue
         if probe_id in excluded:
             continue
+        linked_work = work_by_id.get(_positive_id(probe.get("work_item_id")))
+        if (
+            linked_work is not None
+            and str(linked_work.get("state", "")).strip().lower() != "unresolved"
+        ):
+            continue
         if str(probe.get("state", "")).strip().lower() in terminal_states:
             continue
         if _branch_coverage_state(branch_coverage, probe) in {
@@ -412,6 +429,42 @@ def _unresolved_probe_places(records, branch_coverage=None, excluded_ids=()):
             continue
         by_place[place_id].append(probe)
     return by_place
+
+
+
+def dfs_exit_projection_ready(
+        *, scope_matches_current, projection_valid, entry_portal_id,
+        leaking_portal_ids=(), pending_frontier_count=0,
+        frontier_work_evidence=None):
+    """Allow DFS egress with only its known entry Portal leaking the local cut.
+
+    The current Place boundary must still be valid for local work dispatch.
+    This exception applies only to the final close/return decision, and only
+    when raw and projected frontier counts are both zero and the sole leak is
+    the already-bound entry Portal that will serve as the return edge.
+    """
+    if not scope_matches_current:
+        return False
+    if projection_valid:
+        return True
+    entry_id = _positive_id(entry_portal_id)
+    leaks = {_positive_id(value) for value in leaking_portal_ids}
+    leaks.discard(None)
+    if entry_id is None or leaks != {entry_id}:
+        return False
+    try:
+        if int(pending_frontier_count or 0) > 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(frontier_work_evidence, dict):
+        return False
+    try:
+        raw_count = int(frontier_work_evidence.get("raw_count", -1))
+        evidence_pending = int(frontier_work_evidence.get("pending_count", -1))
+    except (TypeError, ValueError):
+        return False
+    return raw_count == 0 and evidence_pending == 0
 
 
 def _incoming_crossed_portal(
@@ -489,15 +542,27 @@ class GraphRoutePlanner:
         target_place_id=None,
         target_observation_pending=False,
         resume_place_id=None,
+        resume_work_item_id=None,
         branch_coverage=None,
         structural_boundary_first=False,
         map_epoch=None,
         excluded_portal_ids=(),
         excluded_work_item_ids=(),
         excluded_probe_ids=(),
+        room_work_item_only=False,
+        room_branch_scope=None,
+        dfs_parent_portal_id=None,
+        dfs_recovery_return=False,
+        dfs_execution_failed=False,
+        dfs_ancestor_place_ids=(),
+        dfs_completed_place_ids=(),
+        place_projection_complete=True,
+        place_frontier_count=0,
+        robot_pose=None,
     ):
         current = _positive_id(current_place_id)
         resume_place = _positive_id(resume_place_id)
+        resume_work_item = _positive_id(resume_work_item_id)
         excluded_portals = {
             value for value in (_positive_id(item) for item in excluded_portal_ids)
             if value is not None
@@ -524,7 +589,51 @@ class GraphRoutePlanner:
                 reason="current_place_not_in_durable_graph",
             )
 
-        probe_records = _records(probes)
+        if dfs_execution_failed:
+            return GraphRoutePlan(PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                                  reason="dfs_execution_failed_return_obligation_preserved")
+        portal_records = _records(portals)
+        if dfs_recovery_return:
+            egress = _incoming_crossed_portal(current, [record for record in portal_records
+                if _positive_id(record.get("id")) == _positive_id(dfs_parent_portal_id)])
+            if egress is not None:
+                return self._cross(current, egress, "dfs_invalid_projection_recovery_return")
+            return GraphRoutePlan(PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                                  reason="dfs_recovery_return_portal_unavailable")
+        deferred_portal_ids = set()
+        if map_epoch is not None:
+            try:
+                current_epoch = int(map_epoch)
+            except (TypeError, ValueError):
+                current_epoch = None
+            if current_epoch is not None:
+                for portal in portal_records:
+                    try:
+                        deferred_until = int(
+                            portal.get("navigation_deferred_until_epoch", -1)
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if deferred_until > current_epoch:
+                        portal_id = _positive_id(portal.get("id"))
+                        if portal_id is not None:
+                            deferred_portal_ids.add(portal_id)
+        semantic_portal_ids = {
+            _positive_id(portal.get("id"))
+            for portal in portal_records
+            if (
+                portal.get("semantic_priority") is not None
+                or bool(portal.get("exploration_suppressed", False))
+            )
+        }
+        semantic_portal_ids.discard(None)
+        # GP authentication already supplies source, inside-frontier, and
+        # return evidence. Its ranked Portal owns exploration; a linked legacy
+        # source probe must not preempt that semantic order.
+        probe_records = [
+            probe for probe in _records(probes)
+            if _positive_id(probe.get("portal_id")) not in semantic_portal_ids
+        ]
         # A source-side probe and its unbound Portal are two representations
         # of one physical doorway.  Excluding only the probe would still let
         # the Portal branch reintroduce that doorway after invalidation.
@@ -549,6 +658,7 @@ class GraphRoutePlanner:
         )
         unresolved_probe_places = _unresolved_probe_places(
             probe_records, branch_coverage, excluded_ids=excluded_probes,
+            work_items=work_items,
         )
         active_probe_by_place = defaultdict(list)
         for probe in probe_records:
@@ -571,8 +681,19 @@ class GraphRoutePlanner:
             and str(probe.get("state", "")).strip().lower()
             in {"pending", "active", "source_arrived", "destination_active"}
         }
+        work_records = _records(work_items)
+        portal_entry_items = [
+            item for item in work_records
+            if str(item.get("kind", "")) == "portal_entry"
+            and _positive_id(item.get("portal_id")) not in deferred_portal_ids
+        ]
         work, unresolved_work = _available_work(
-            _records(work_items), excluded_ids=probe_work_ids,
+            [item for item in work_records if str(item.get("kind", "")) != "portal_entry"],
+            # During a semantic room visit the source-side frontier WI remains
+            # the normal exploration obligation even if a Portal probe has
+            # attached to it. Portal probing must not take ownership of room
+            # motion or cause a nested crossing before the Place is complete.
+            excluded_ids=() if room_work_item_only else probe_work_ids,
         )
         if excluded_work:
             for place_id, values in tuple(work.items()):
@@ -600,6 +721,19 @@ class GraphRoutePlanner:
             # the empty set. Never resurrect a durable local item merely
             # because branch-first has no current candidate.
             work[current] = visible_current_work
+        # WorkItems keep their durable SLAM Place owner, but a connected
+        # occupancy component may span several GP arms. During one semantic
+        # room visit, the current SLAM anchors are assigned to the selected
+        # entrance branch; sibling-arm obligations remain for the parent.
+        if room_work_item_only and isinstance(room_branch_scope, dict):
+            work[current] = [
+                item for item in work.get(current, ())
+                if work_item_belongs_to_branch(item, room_branch_scope)
+            ]
+            unresolved_work[current] = [
+                item for item in unresolved_work.get(current, ())
+                if work_item_belongs_to_branch(item, room_branch_scope)
+            ]
         if visible_probe_ids is not None:
             # Probe visibility is a snapshot-local geometry fact. An explicit
             # set, including an empty set, is the completed projection result
@@ -623,7 +757,6 @@ class GraphRoutePlanner:
             ]
         adjacency = defaultdict(list)
         unbound_by_place = defaultdict(list)
-        portal_records = _records(portals)
         for portal in portal_records:
             portal_id = _positive_id(portal.get("id"))
             source = _positive_id(portal.get("source_place_id"))
@@ -631,7 +764,11 @@ class GraphRoutePlanner:
             state = str(portal.get("state", "")).strip().lower()
             if portal_id is None or source is None:
                 continue
+            if bool(portal.get("exploration_suppressed", False)):
+                continue
             if destination is None:
+                if portal_id in deferred_portal_ids:
+                    continue
                 if state in _UNBOUND_PORTAL_STATES and source in place_by_id:
                     if portal_id in excluded_portals:
                         continue
@@ -679,7 +816,28 @@ class GraphRoutePlanner:
         for values in adjacency.values():
             values.sort(key=lambda edge: (edge[1], edge[0]))
         for values in unbound_by_place.values():
-            values.sort(key=lambda item: _positive_id(item.get("id")) or 0)
+            values.sort(key=lambda item: (
+                float(item.get("semantic_priority", float("inf")))
+                if item.get("semantic_priority") is not None else float("inf"),
+                _positive_id(item.get("id")) or 0,
+            ))
+        visible_entry_portal_ids = set()
+        if visible_work_item_ids is not None:
+            visible_work = {
+                item_id
+                for item_id in (
+                    _positive_id(value) for value in visible_work_item_ids
+                )
+                if item_id is not None
+            }
+            visible_entry_portal_ids = {
+                portal_id
+                for item in portal_entry_items
+                if _positive_id(item.get("place_id")) == current
+                and _positive_id(item.get("id")) in visible_work
+                and str(item.get("state", "")).strip().lower() == "unresolved"
+                and (portal_id := _positive_id(item.get("portal_id"))) is not None
+            }
         if visible_portal_ids is not None:
             visible = {
                 portal_id
@@ -692,6 +850,8 @@ class GraphRoutePlanner:
                 portal for portal in unbound_by_place.get(current, ())
                 if (
                     _positive_id(portal.get("id")) in visible
+                    or _positive_id(portal.get("id")) in visible_entry_portal_ids
+                    or portal.get("semantic_priority") is not None
                     # Once both sides of a physical doorway have been
                     # observed, its crossing obligation is durable graph
                     # evidence. Do not require the transient frontier arc to
@@ -706,16 +866,203 @@ class GraphRoutePlanner:
 
         current_place = place_by_id[current]
         current_covered = _covered(current_place)
-        local_work = work.get(current, ())
+        local_work = order_work_items_open_tsp(
+            robot_pose, work.get(current, ())
+        )
+        work_item_tour = tuple(
+            item_id for item in local_work
+            if (item_id := _positive_id(item.get("id"))) is not None
+        )
         local_probe = probe_by_place.get(current, ())
         local_unbound = unbound_by_place.get(current, ())
+
+        def _portal_for_ranked_entry(entry_item):
+            portal_id = _positive_id(entry_item.get("portal_id"))
+            portal = next(
+                (item for item in local_unbound
+                 if _positive_id(item.get("id")) == portal_id
+                 and not bool(item.get("exploration_suppressed", False))),
+                None,
+            )
+            if portal is not None:
+                return portal
+            # A visible Portal-entry WorkItem is the map projection of this
+            # durable, already certified Portal. The Portal arc itself may
+            # disappear from the transient candidate set after returning to
+            # its source Place; recover only that exact identity and only
+            # when its physical gate/destination remain available.
+            if (
+                portal_id is None
+                or portal_id not in visible_entry_portal_ids
+                or portal_id in deferred_portal_ids
+            ):
+                return None
+            entry_id = _positive_id(entry_item.get("id"))
+            for record in portal_records:
+                if (
+                    _positive_id(record.get("id")) != portal_id
+                    or _positive_id(record.get("source_place_id")) != current
+                    or _positive_id(record.get("destination_place_id")) is not None
+                    or str(record.get("state", "")).strip().lower()
+                    not in _UNBOUND_PORTAL_STATES
+                    or bool(record.get("exploration_suppressed", False))
+                ):
+                    continue
+                rejected_epoch = record.get("rejected_map_epoch")
+                try:
+                    rejected_now = (
+                        map_epoch is not None
+                        and rejected_epoch is not None
+                        and int(rejected_epoch) == int(map_epoch)
+                    )
+                except (TypeError, ValueError):
+                    rejected_now = str(rejected_epoch) == str(map_epoch)
+                if rejected_now:
+                    continue
+                gate = record.get("physical_gate") or record.get("map_gate")
+                destination = (
+                    record.get("physical_destination")
+                    or record.get("map_destination")
+                )
+                if gate is None or destination is None:
+                    continue
+                return record
+            return None
+
+        if room_work_item_only:
+            # Explore only the SLAM WorkItems assigned to the selected GP
+            # entrance arm. Sibling-arm WorkItems remain unresolved durable
+            # obligations and are handed back to the parent on room close.
+            active_room_work = [
+                item for item in unresolved_work.get(current, ())
+                if item.get("active_attempt_id") is not None
+            ]
+            if active_room_work:
+                return GraphRoutePlan(
+                    PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                    obligation_kind="work_item",
+                    obligation_id=_positive_id(active_room_work[0].get("id")),
+                    reason="semantic_room_active_work_item_attempt",
+                )
+            # A certified child is the next DFS obligation. Keep all parent
+            # WorkItems unresolved while traversing that child's subtree.
+            ancestors = {_positive_id(value) for value in dfs_ancestor_place_ids}
+            completed = {_positive_id(value) for value in dfs_completed_place_ids}
+            def child_edge(record):
+                destination = _positive_id(record.get("destination_place_id"))
+                return (_positive_id(record.get("source_place_id")) == current
+                        and _positive_id(record.get("id")) != _positive_id(dfs_parent_portal_id)
+                        and not record.get("exploration_suppressed", False)
+                        and destination not in ancestors | completed
+                        and str(record.get("state", "")).lower() in _PORTAL_TRANSIT_STATES | _UNBOUND_PORTAL_STATES)
+            child_records = [record for record in portal_records if child_edge(record)]
+            entries = sorted(
+                (item for item in portal_entry_items
+                 if _positive_id(item.get("place_id")) == current
+                 and item.get("state") == "unresolved"
+                 and any(_positive_id(record.get("id")) == _positive_id(item.get("portal_id"))
+                         for record in child_records)),
+                key=lambda item: (int(item.get("priority") or 10**9), int(item["id"])))
+            if entries:
+                record = _portal_for_ranked_entry(entries[0])
+                if record is None:
+                    return GraphRoutePlan(PLAN_BLOCKED, ACTION_HOLD,
+                        current_place_id=current, obligation_kind="portal_entry",
+                        obligation_id=int(entries[0]["id"]),
+                        reason="dfs_child_portal_projection_pending")
+                portal_id = int(record["id"])
+                return self._cross(current, (None, (portal_id,), "portal_edge", portal_id),
+                                   "dfs_semantic_child_before_parent_work")
+            for record in sorted(child_records, key=lambda record: int(record["id"])):
+                portal_id = int(record["id"])
+                if portal_id in excluded_portals or portal_id in deferred_portal_ids:
+                    continue
+                destination = _positive_id(record.get("destination_place_id"))
+                if destination is not None or record in local_unbound:
+                    return self._cross(current, (destination, (portal_id,), "portal_edge", portal_id),
+                                       "dfs_certified_child_before_parent_work")
+            if local_work:
+                if not current_covered:
+                    return self._bootstrap(
+                        current, local_work[0],
+                        "semantic_room_entry_observation_required",
+                        tour=work_item_tour,
+                    )
+                return self._local(
+                    current, local_work[0], "semantic_room_local_work_only",
+                    tour=work_item_tour,
+                )
+            remaining_room_work = list(unresolved_work.get(current, ()))
+            if remaining_room_work:
+                return GraphRoutePlan(
+                    PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                    obligation_kind="work_item",
+                    obligation_id=_positive_id(remaining_room_work[0].get("id")),
+                    reason="semantic_room_work_item_projection_pending",
+                )
+            resolved_ids = {_positive_id(item.get("id")) for item in work_records
+                            if item.get("state") == "resolved"}
+            child_probes = [probe for probe in local_probe
+                            if _positive_id(probe.get("work_item_id")) not in resolved_ids]
+            if child_records or child_probes:
+                if child_probes:
+                    return self._probe(current, child_probes[0], "dfs_child_portal_requires_certification")
+                return GraphRoutePlan(PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                                      reason="dfs_child_subtree_pending")
+            if not place_projection_complete or int(place_frontier_count or 0) > 0:
+                return GraphRoutePlan(PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                                      reason="dfs_place_observation_incomplete")
+            incoming_records = portal_records if dfs_parent_portal_id is None else [
+                record for record in portal_records
+                if _positive_id(record.get("id")) == _positive_id(dfs_parent_portal_id)]
+            egress = _incoming_crossed_portal(current, incoming_records)
+            if egress is not None:
+                return self._cross(
+                    current, egress,
+                    "dfs_place_and_children_complete_return_to_parent",
+                )
+            return GraphRoutePlan(
+                PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                reason="semantic_room_return_portal_unavailable",
+            )
+
+        # At the root junction, GP observation/authentication already
+        # produced certified semantic child Portals. Select the best certified
+        # child before resuming any root WorkItem, including the initial Place
+        # bootstrap view. A newly crossed child Place still follows the normal
+        # observe-before-outward-action invariant below.
+        if not current_covered and dfs_parent_portal_id is None:
+            certified_root_children = [
+                record for record in local_unbound
+                if str(record.get("state", "")).strip().lower() == "certified"
+                and str(record.get("gp_authentication_state", "")).strip().lower()
+                    == "completed"
+                and record.get("semantic_priority") is not None
+                and _positive_id(record.get("id")) not in excluded_portals
+                and _positive_id(record.get("id")) not in deferred_portal_ids
+            ]
+            if certified_root_children:
+                portal = min(certified_root_children, key=lambda item: (
+                    float(item.get("semantic_priority", float("inf"))),
+                    _positive_id(item.get("id")) or 0,
+                ))
+                portal_id = _positive_id(portal.get("id"))
+                return self._cross(
+                    current, (None, (portal_id,), "portal_edge", portal_id),
+                    "dfs_root_semantic_child_before_bootstrap_work",
+                )
 
         # A newly entered Place must be observed before it can issue an
         # outward graph action.  This is a state invariant, not a score.
         if not current_covered:
-            if local_work:
+            bootstrap_work = local_work or [
+                item for item in unresolved_work.get(current, ())
+                if item.get("active_attempt_id") is None
+            ]
+            if bootstrap_work:
                 return self._bootstrap(
-                    current, local_work[0], "place_observation_required"
+                    current, bootstrap_work[0], "place_observation_required",
+                    tour=work_item_tour,
                 )
             if local_probe:
                 return self._probe(current, local_probe[0], "place_observation_required")
@@ -768,9 +1115,16 @@ class GraphRoutePlanner:
         # this marker when the source Place is reached; this planner remains
         # pure and only follows certified adjacency.
         if branch_first and resume_place is not None and resume_place != current:
+            # A suspended semantic room can have unresolved WorkItems whose
+            # current-map geometry is temporarily absent.  The durable ledger,
+            # not only this snapshot's projected subset, owns the resume
+            # obligation; otherwise a sibling Portal can steal the decision
+            # while the selected room is still incomplete.
             resume_pending = bool(
                 work.get(resume_place)
+                or unresolved_work.get(resume_place)
                 or probe_by_place.get(resume_place)
+                or unresolved_probe_places.get(resume_place)
                 or unbound_by_place.get(resume_place)
             )
             if resume_pending:
@@ -785,6 +1139,121 @@ class GraphRoutePlanner:
                         current,
                         resume_path,
                         "resume_source_after_covered_portal_arrival",
+                    )
+
+        # Ranked doorways are represented as explicit Portal-entry WorkItems.
+        # The best unresolved entry owns the next action even when its portal
+        # has not reappeared in this map projection; waiting is safer than
+        # letting a lower-ranked doorway or generic probe bypass semantics.
+        if branch_first:
+            entry_by_portal = {
+                _positive_id(item.get("portal_id")): item
+                for item in portal_entry_items
+                if _positive_id(item.get("place_id")) == current
+                and str(item.get("state", "")).strip().lower() == "unresolved"
+                and _positive_id(item.get("portal_id")) is not None
+            }
+            ranked_entries = sorted(
+                entry_by_portal.values(),
+                key=lambda item: (
+                    int(item.get("priority", 10 ** 9)),
+                    _positive_id(item.get("id")) or 0,
+                ),
+            )
+            for entry_item in ranked_entries:
+                portal_id = _positive_id(entry_item.get("portal_id"))
+                portal = _portal_for_ranked_entry(entry_item)
+                if portal is None:
+                    if portal_id in deferred_portal_ids:
+                        # Skip only a Portal with explicit controller-failure
+                        # backoff. An unprojected top-ranked Portal still blocks
+                        # lower semantic entries until its geometry is visible.
+                        continue
+                    return GraphRoutePlan(
+                        PLAN_BLOCKED, ACTION_HOLD,
+                        current_place_id=current,
+                        obligation_kind="portal_entry",
+                        obligation_id=_positive_id(entry_item.get("id")),
+                        first_portal_id=portal_id,
+                        reason="semantic_priority_portal_entry_projection_pending",
+                    )
+                return self._cross(
+                    current,
+                    (None, (portal_id,), "portal_edge", portal_id),
+                    "semantic_priority_portal_entry_work_item:%d"
+                    % int(entry_item["id"]),
+                )
+
+
+        # After all ranked semantic Portal entries have been serviced, put
+        # the exact WorkItem suspended for the junction observation back at
+        # the front of the source Place queue.  Otherwise branch-first may
+        # immediately cross another newly discovered Portal and leave the
+        # pre-existing exploration obligation suspended indefinitely.
+        if resume_work_item is not None:
+            resume_owner = None
+            resume_record = None
+            for place_id, items in unresolved_work.items():
+                resume_record = next(
+                    (item for item in items
+                     if _positive_id(item.get("id")) == resume_work_item),
+                    None,
+                )
+                if resume_record is not None:
+                    resume_owner = place_id
+                    break
+            if resume_record is not None:
+                if resume_owner != current:
+                    resume_path = self._path_to_place(
+                        current, resume_owner, adjacency,
+                        excluded_portal_ids=excluded_portals,
+                    )
+                    if resume_path is not None:
+                        return self._cross(
+                            current, resume_path,
+                            "resume_suspended_work_item_place",
+                        )
+                    return GraphRoutePlan(
+                        PLAN_BLOCKED, ACTION_HOLD,
+                        current_place_id=current,
+                        obligation_kind="work_item",
+                        obligation_id=resume_work_item,
+                        reason="suspended_work_item_place_unreachable",
+                    )
+                projected = next(
+                    (item for item in work.get(current, ())
+                     if _positive_id(item.get("id")) == resume_work_item),
+                    None,
+                )
+                if projected is None:
+                    # Keep the suspended obligation durable, but do not let a
+                    # missing transient projection block every other visible
+                    # WorkItem in this same Place. Continue its Place-local TSP
+                    # while SLAM may re-project the suspended arc. If there is
+                    # no executable same-Place work, retain the explicit hold.
+                    if not local_work:
+                        return GraphRoutePlan(
+                            PLAN_BLOCKED, ACTION_HOLD,
+                            current_place_id=current,
+                            obligation_kind="work_item",
+                            obligation_id=resume_work_item,
+                            reason="suspended_work_item_projection_pending",
+                        )
+                else:
+                    resume_tour = (resume_work_item,) + tuple(
+                        item_id for item_id in work_item_tour
+                        if item_id != resume_work_item
+                    )
+                    if not current_covered:
+                        return self._bootstrap(
+                            current, projected,
+                            "suspended_work_item_observation_required",
+                            tour=resume_tour,
+                        )
+                    return self._local(
+                        current, projected,
+                        "resume_suspended_work_item_after_portal_observation",
+                        tour=resume_tour,
                     )
 
         # A source-arrived Portal probe is an active evidence contract.  Its
@@ -807,8 +1276,10 @@ class GraphRoutePlanner:
                 # destination-view obligation must survive disappearance of
                 # the transient frontier arc; otherwise local WorkItems can
                 # starve the second half of the same Portal transaction.
-                str(probe.get("state", "")).strip().lower()
-                == "source_arrived"
+                (
+                    str(probe.get("state", "")).strip().lower() == "source_arrived"
+                    and destination_reobserve_available(probe, map_epoch)
+                )
                 or str(probe.get("state", "")).strip().lower()
                 not in _AVAILABLE_PROBE_STATES
                 or _positive_id(probe.get("id")) in available_probe_ids
@@ -959,6 +1430,11 @@ class GraphRoutePlanner:
             and not local_work
         )
         if local_work_projection_missing:
+            if local_work_has_rehydratable_view:
+                return GraphRoutePlan(
+                    PLAN_BLOCKED, ACTION_HOLD, current_place_id=current,
+                    reason="current_place_obligation_not_materialized",
+                )
             # An explicit empty visibility set is a completed snapshot result,
             # not an instruction to wait forever.  Preserve the local durable
             # WorkItems, but use a certified path to a genuinely unobserved
@@ -986,6 +1462,7 @@ class GraphRoutePlanner:
         if (
             branch_first
             and local_work
+            and not local_work_has_rehydratable_view
             and not self._target_work_pending(
                 explicit_target, current, local_work,
             )
@@ -1006,13 +1483,30 @@ class GraphRoutePlanner:
                 return self._cross(current, path, "branch_first_to_unobserved_place")
 
         if local_work:
-            return self._local(current, local_work[0], "local_work_pending")
-
+            return self._local(
+                current, local_work[0], "local_work_pending",
+                tour=work_item_tour,
+            )
         # A source-side probe is itself an information obligation.  It cannot
         # be replaced by a generic frontier or silently cleared by a route
         # failure.
         if local_probe:
             return self._probe(current, local_probe[0], "portal_probe_pending")
+        visible_probe_set = {
+            _positive_id(value) for value in (visible_probe_ids or ())
+        }
+        hidden_pending_probe = next((
+            probe for probe in probe_records
+            if _positive_id(probe.get("source_place_id")) == current
+            and str(probe.get("state", "")).strip().lower() == "pending"
+            and visible_probe_ids is not None
+            and _positive_id(probe.get("id")) not in visible_probe_set
+        ), None)
+        if hidden_pending_probe is not None and not local_work and not local_unbound:
+            return self._probe(
+                current, hidden_pending_probe,
+                "portal_probe_pending_projection_hidden",
+            )
         if local_unbound:
             # A Portal hypothesis may already own a source-side probe even
             # though SLAM has not projected that probe into this snapshot's
@@ -1070,6 +1564,13 @@ class GraphRoutePlanner:
         )
         if path is not None:
             return self._cross(current, path, "transit_to_pending_graph_obligation")
+        hidden_local_intent = unresolved_work.get(current, ())
+        if (hidden_local_intent and visible_work_item_ids is not None
+                and not local_work_has_rehydratable_view):
+            return self._local(
+                current, hidden_local_intent[0],
+                "branch_first_hidden_work_intent_retained",
+            )
 
         # An unresolved Attempt may be active or a durable obligation may be
         # disconnected from the known graph.  Neither condition is completion.
@@ -1135,7 +1636,7 @@ class GraphRoutePlanner:
         return explicit_target is not None and explicit_target == current and bool(local_work)
 
     @staticmethod
-    def _bootstrap(place_id, item, reason):
+    def _bootstrap(place_id, item, reason, tour=()):
         """Name the first observation as a phase transition, not local work."""
         item_id = _positive_id(item.get("id"))
         return GraphRoutePlan(
@@ -1146,10 +1647,11 @@ class GraphRoutePlanner:
             obligation_kind="work_item",
             obligation_id=item_id,
             reason=reason,
+            work_item_tour=tuple(tour),
         )
 
     @staticmethod
-    def _local(place_id, item, reason):
+    def _local(place_id, item, reason, tour=()):
         item_id = _positive_id(item.get("id"))
         return GraphRoutePlan(
             PLAN_READY,
@@ -1159,6 +1661,7 @@ class GraphRoutePlanner:
             obligation_kind="work_item",
             obligation_id=item_id,
             reason=reason,
+            work_item_tour=tuple(tour),
         )
 
     @staticmethod

@@ -12,13 +12,15 @@ from matplotlib.patches import Rectangle
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / 'worlds/targeted_navigation'
+SPAWN = [-3.5, 0.0, 0.0]
+EXTRA_CORRIDORS = []
 ARMS = {'west': (-22,-14,-4,4), 'east': (12,20,-4,4),
         'north': (-4,4,12,20), 'south': (-4,4,-20,-12)}
 CORRIDORS = {'west': (-14,0,-1.5,1.5), 'east': (0,12,-1.5,1.5),
              'north': (-1.5,1.5,0,12), 'south': (-1.5,1.5,-12,0)}
 THEMES = {
  'office': [('desk_brown',-2,2,0,0),('desk_brown',2,2,0,0),
- ('office_chair',-2,0.8,0,0),('office_chair',2,0.8,0,0),
+ ('office_chair',-2,-0.8,0,0),('office_chair',2,-0.8,0,0),
  ('monitor_3',-2,2.2,0.8,0),('monitor_2',2,2.2,0.8,0),
  ('keyboard',-2,1.8,0.8,0),('keyboard',2,1.8,0.8,0),
  ('mouse',-1.5,1.8,0.8,0),('computer_case',2.8,2,0,0),
@@ -28,7 +30,7 @@ THEMES = {
  'meeting': [('table_conference_2',0,0,0,0),
  ('office_chair',-1.6,-1,0,math.pi/2),('office_chair',-1.6,1,0,math.pi/2),
  ('office_chair',1.6,-1,0,-math.pi/2),('office_chair',1.6,1,0,-math.pi/2),
- ('office_chair',0,2.2,0,math.pi),('office_chair',0,-2.2,0,0),
+ ('office_chair',0,2.2,0,math.pi),('office_chair',-2.8,-2.2,0,0),
  ('cup_yellow',-0.5,0.5,0.85,0),('cup_blue',0.5,-0.5,0.85,0),
  ('file_1',0,0,0.85,0),('file_box_1',2.8,2.8,0,0),
  ('bookshelf',-2.8,2.8,0,0),('plant_1_single',2.8,-2.8,0,0)],
@@ -90,14 +92,14 @@ def generate(name,arms):
  # Large enough for all 8x8 rooms and long arms.
  for size in world.findall("./model[@name='ground_plane']//plane/size"):size.text='60 60'
  struct=child(world,'model',name='semantic_room_structure');child(struct,'static','true');link=child(struct,'link',name='walls')
- rects=[(-1.5,1.5,-1.5,1.5)]+[CORRIDORS[a] for a,t in arms]+[ARMS[a] for a,t in arms]
+ rects=[(-1.5,1.5,-1.5,1.5)]+[CORRIDORS[a] for a,t in arms]+[CORRIDORS[a] for a in EXTRA_CORRIDORS]+[ARMS[a] for a,t in arms]
  segments=boundaries(rects)
  for a,t in arms:
   if a in ('west','east'):
-   x=-14 if a=='west' else 12
+   x=ARMS[a][1] if a=='west' else ARMS[a][0]
    segments += [(x,-1.5,x,-1.1),(x,1.1,x,1.5)]
   else:
-   y=12 if a=='north' else -12
+   y=ARMS[a][2] if a=='north' else ARMS[a][3]
    segments += [(-1.5,y,-1.1,y),(1.1,y,1.5,y)]
  for i,seg in enumerate(segments):wall(link,f'wall_{i}',seg)
  objects=[];rooms=[]
@@ -113,7 +115,11 @@ def generate(name,arms):
    child(n,'pose',f'{cx+dx} {cy+dy} {z} 0 0 {yaw}');child(n,'static','true');world.append(n)
    objects.append(dict(name=instance,model=model,room=arm,xy=[cx+dx,cy+dy],z=z))
  E.ElementTree(base).write(OUT/(name+'.world'),encoding='utf-8',xml_declaration=True)
- manifest=dict(scene_version=2,world=name,central_junction=[0,0],spawn=[-3.5,0,0],corridor_width=3,arm_corridor_lengths={'west':14,**{a:12 for a,t in arms if a!='west'}},rooms=rooms,objects=objects,physical_furniture_collisions=True,floor_rectangles=rects)
+ corridor_lengths={}
+ for arm,_theme in arms:
+  x0,x1,y0,y1=CORRIDORS[arm]
+  corridor_lengths[arm]=abs(x1-x0) if arm in ('west','east') else abs(y1-y0)
+ manifest=dict(scene_version=2,world=name,central_junction=[0,0],spawn=list(SPAWN),corridor_only_arms=list(EXTRA_CORRIDORS),corridor_width=3,arm_corridor_lengths=corridor_lengths,rooms=rooms,objects=objects,physical_furniture_collisions=True,floor_rectangles=rects)
  (OUT/(name+'.json')).write_text(json.dumps(manifest,indent=2)+'\n')
  fig,ax=plt.subplots(figsize=(12,12))
  for a,b,c,d in rects:ax.add_patch(Rectangle((a,c),b-a,d-c,fc='#edf2f5',ec='none'))
@@ -151,7 +157,7 @@ def validate_scene(name,manifest):
  xs=np.arange(-24,22,res);ys=np.arange(-22,22,res)
  xx,yy=np.meshgrid(xs,ys);points=np.column_stack((xx.ravel(),yy.ravel()))
  free=np.zeros(xx.shape,dtype=bool)
- for a,b,c,d in manifest['floor_rectangles']:free|=(xx>a)&(xx<b)&(yy>c)&(yy<d)
+ for a,b,c,d in manifest['floor_rectangles']:free|=(xx>=a)&(xx<=b)&(yy>=c)&(yy<=d)
  for shape in shapes:free &= ~PolygonPath(shape['xy']).contains_points(points).reshape(xx.shape)
  safe=free.copy()
  for di in range(-2,3):
@@ -159,14 +165,25 @@ def validate_scene(name,manifest):
    if di*di+dj*dj<=4:safe &= np.roll(free,(di,dj),axis=(0,1))
  free=safe
  def cell(x,y):return int(round((y-ys[0])/res)),int(round((x-xs[0])/res))
- start=cell(-3.5,0);seen={start};queue=deque([start])
+ spawn=manifest.get("spawn",[-3.5,0,0])
+ start=cell(spawn[0],spawn[1]);seen={start};queue=deque([start])
  while queue:
   i,j=queue.popleft()
   for nxt in ((i-1,j),(i+1,j),(i,j-1),(i,j+1)):
    a,b=nxt
    if 0<=a<free.shape[0] and 0<=b<free.shape[1] and free[a,b] and nxt not in seen:seen.add(nxt);queue.append(nxt)
- targets={'west':(-14.9,0),'east':(12.9,0),'north':(0,12.9),'south':(0,-12.9)}
- reachable={arm:cell(*targets[arm]) in seen for arm in rooms}
+ targets={}
+ reachable={}
+ for arm,(x0,x1,y0,y1) in rooms.items():
+  if arm=='west':
+   targets[arm]=[(x1-depth,y) for depth in np.arange(.6,2.6,.2) for y in np.arange(-.6,.61,.2)]
+  elif arm=='east':
+   targets[arm]=[(x0+depth,y) for depth in np.arange(.6,2.6,.2) for y in np.arange(-.6,.61,.2)]
+  elif arm=='north':
+   targets[arm]=[(x,y0+depth) for depth in np.arange(.6,2.6,.2) for x in np.arange(-.6,.61,.2)]
+  else:
+   targets[arm]=[(x,y1-depth) for depth in np.arange(.6,2.6,.2) for x in np.arange(-.6,.61,.2)]
+  reachable[arm]=any(cell(*target) in seen for target in targets[arm])
  checks=dict(models_resolved=not missing,all_objects_inside_rooms=not outside,
              every_room_doorway_reachable_with_040m_clearance=all(reachable.values()),
              at_least_10_objects_per_room=all(sum(o['room']==arm for o in objects.values())>=10 for arm in rooms))
@@ -176,7 +193,7 @@ def validate_scene(name,manifest):
  assert result['passed'],result
  fig,ax=plt.subplots(figsize=(13,11));draw_scene(ax,shapes)
  for arm,(a,b,c,d) in rooms.items():ax.text((a+b)/2,d-.4,arm+' / '+next(r['theme'] for r in manifest['rooms'] if r['arm']==arm),ha='center',fontsize=9)
- ax.scatter(-3.5,0,c='#d74c3c',marker='>',s=80,zorder=10,label='spawn')
+ ax.scatter(manifest.get("spawn",[-3.5,0])[0],manifest.get("spawn",[-3.5,0])[1],c='#d74c3c',marker='>',s=80,zorder=10,label='spawn')
  ax.scatter(0,0,c='#24759c',marker='x',s=80,zorder=10,label='junction')
  ax.set_title(name+': physical furniture / 8 x 8 m rooms / 12-14 m corridors')
  ax.legend();fig.tight_layout();fig.savefig(OUT/(name+'_scene.png'),dpi=180);plt.close(fig)

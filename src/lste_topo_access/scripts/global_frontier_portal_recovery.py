@@ -129,6 +129,16 @@ class GlobalFrontierPortalRecoveryMixin:
             x,
             y,
         )
+        candidate = (
+            row, col, float(x), float(y), path_distance, 0.0, 0.0, 0.0,
+            component, 1, "portal_transition", retry.portal_gate_xy,
+        )
+        if getattr(self, "graph_route_planner_enabled", False):
+            commit = getattr(self, "_commit_portal_recovery_retry", None)
+            candidate = None if not callable(commit) else commit(snapshot, candidate)
+            if candidate is None:
+                self.discard_pending_portal_retry("portal_retry_graph_identity_unavailable")
+                return None, None, False
         self.pending_portal_retry = None
         self.publish_status(
             "portal_transition_recovery_selected",
@@ -143,17 +153,4 @@ class GlobalFrontierPortalRecoveryMixin:
             ),
             path_distance=round(path_distance, 3),
         )
-        return (
-            row,
-            col,
-            float(x),
-            float(y),
-            path_distance,
-            0.0,
-            0.0,
-            0.0,
-            component,
-            1,
-            "portal_transition",
-            retry.portal_gate_xy,
-        ), "portal_recovery_retry", False
+        return candidate, "portal_recovery_retry", False

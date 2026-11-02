@@ -119,6 +119,19 @@ class LocalEgressRecoveryTest(unittest.TestCase):
         self.assertFalse(explorer.prepare_local_egress("stall"))
         self.assertIsNone(explorer.pending_local_egress)
 
+    def test_recovery_skips_parent_side_anchors_and_uses_reached_child_side(self):
+        import numpy as np
+        from types import SimpleNamespace as S
+        explorer = EgressExplorer()
+        explorer.current_place_scope_mask = np.zeros((2, 8), dtype=bool)
+        explorer.current_place_scope_mask[:, 2:] = True
+        explorer.current_place_scope_valid = True
+        explorer.current_place_scope_id = explorer.current_physical_place_id = 8
+        explorer.current_place_scope_message = S(info=S(resolution=1., origin=S(position=S(x=0., y=0.))))
+        self.assertIsNone(explorer.local_egress_anchor())
+        explorer.active_route_history.remember((4.8, 0.), .1)
+        self.assertEqual(explorer.local_egress_anchor(), (4.8, 0.))
+
     def test_odom_history_anchor_is_transformed_only_when_selected(self):
         explorer = OdomEgressExplorer()
 

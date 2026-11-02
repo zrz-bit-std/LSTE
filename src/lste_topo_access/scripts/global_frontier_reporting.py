@@ -263,6 +263,17 @@ class GlobalFrontierReportingMixin:
                 "destination_place_id": record.get("destination_place_id"),
                 "state": state,
                 "physical_gate": record.get("physical_gate"),
+                "physical_bounds": record.get("physical_bounds"),
+                "opening_width": record.get("opening_width"),
+                "gp_authentication_state": record.get("gp_authentication_state"),
+                "gp_authentication_node_id": record.get("gp_authentication_node_id"),
+                "gp_authentication_branch_id": record.get("gp_authentication_branch_id"),
+                "gp_predicted_destination": record.get("gp_predicted_destination"),
+                "gp_inside_witness": record.get("gp_inside_witness"),
+                "gp_authentication_required_depth": record.get("gp_authentication_required_depth"),
+                "semantic_priority": record.get("semantic_priority"),
+                "semantic_score": record.get("semantic_score"),
+                "exploration_suppressed": bool(record.get("exploration_suppressed", False)),
                 "physical_destination": record.get("physical_destination"),
                 "map_gate": record.get("map_gate"),
                 "map_destination": record.get("map_destination"),
@@ -271,6 +282,12 @@ class GlobalFrontierReportingMixin:
                 "failure_count": int(record.get("failure_count", 0)),
                 "execution_failure_count": int(
                     record.get("execution_failure_count", 0)
+                ),
+                "navigation_deferred_until_epoch": record.get(
+                    "navigation_deferred_until_epoch"
+                ),
+                "navigation_deferred_reason": record.get(
+                    "navigation_deferred_reason", ""
                 ),
                 "rejected_map_epoch": record.get("rejected_map_epoch"),
                 "last_rejection_reason": record.get("last_rejection_reason", ""),
@@ -295,6 +312,17 @@ class GlobalFrontierReportingMixin:
             "active_id": int(getattr(self, "active_portal_probe_id", 0) or 0),
             "count": int(sum(counts.values())),
             "states": counts,
+            "records": [
+                {
+                    key: record.get(key)
+                    for key in (
+                        "id", "source_place_id", "physical_gate_xy",
+                        "normal_xy", "state", "portal_id", "work_item_id",
+                        "last_reason", "observation_source",
+                    )
+                }
+                for record in ledger.snapshot()
+            ],
         }
 
     def work_item_report(self):
@@ -410,7 +438,19 @@ class GlobalFrontierReportingMixin:
                     unresolved_work = count(place_id)
         unresolved_portals = 0
         probes = getattr(self, "portal_probe_ledger", None)
-        if probes is not None and place_id is not None:
+        # GP-assisted exploration owns doorway obligations through its
+        # observation tree and authenticated Portal ledger. Legacy SLAM
+        # source probes, especially unbound structural-boundary candidates,
+        # cannot be executed by the GP route planner and must not keep an
+        # otherwise complete Place open indefinitely.
+        gp_portal_assistance = bool(
+            getattr(self, "gp_portal_assistance_enabled", False)
+        )
+        if (
+            probes is not None
+            and place_id is not None
+            and not gp_portal_assistance
+        ):
             count = getattr(probes, "unresolved_count", None)
             if callable(count):
                 unresolved_portals = count(place_id)
@@ -474,6 +514,10 @@ class GlobalFrontierReportingMixin:
             getattr(graph_transaction, "map_epoch", None)
             if graph_transaction is not None
             else getattr(self, "last_map_epoch", None)
+        )
+        authentication = getattr(self, "junction_portal_authentication", None)
+        authentication_snapshot = (
+            None if authentication is None else authentication.snapshot()
         )
 
         def identity_integer(value, default=0):
@@ -621,6 +665,10 @@ class GlobalFrontierReportingMixin:
             "last_controller_lease_release_ack": getattr(
                 self, "last_controller_lease_release_ack", None
             ),
+            # Event kwargs may name an old lease being acknowledged. Preserve
+            # the independently authoritative current execution identity.
+            "active_execution_route_id": int(getattr(self, "active_route_id", 0) or 0),
+            "active_execution_route_kind": str(getattr(self, "active_route_kind", "") or ""),
             "goal_context": self.active_goal_context(),
             "semantic_place": self.semantic_place_report(),
             "place_progress": self.place_progress_report(),
@@ -635,6 +683,30 @@ class GlobalFrontierReportingMixin:
                 ),
             },
             "portal_hypotheses": self.portal_hypothesis_report(),
+            "portal_authentication": authentication_snapshot,
+            "place_navigation_constraint": (None if getattr(self, "place_navigation_constraints", None) is None
+                else self.place_navigation_constraints.last_report),
+            "place_scope": {
+                "place_id": getattr(self, "current_place_scope_id", None),
+                "map_epoch": getattr(self, "current_place_scope_epoch", None),
+                "valid": getattr(self, "current_place_scope_valid", False),
+                "invalidated_reason": getattr(self, "current_place_scope_invalidated_reason", None),
+                "cut_portal_ids": getattr(self, "current_place_scope_portal_ids", []),
+                "leaking_portal_ids": getattr(self, "current_place_scope_leaking_portal_ids", []),
+                "frontier_count": getattr(self, "current_place_scope_frontier_count", None),
+                "frontier_clearance_m": getattr(self, "frontier_clearance", None),
+                "pending_frontier_count": getattr(self, "current_place_scope_pending_frontier_count", None),
+                "frontier_work_evidence": getattr(self, "current_place_scope_frontier_work_evidence", None),
+                "map_stamp": getattr(self, "current_place_scope_map_stamp", None),
+                "seed_map_xy": getattr(self, "current_place_scope_seed_xy", None),
+                "seed_source": getattr(self, "current_place_scope_seed_source", None),
+                "entry_portal_id": getattr(self, "current_place_scope_entry_portal_id", None),
+                "projected_portals": getattr(self, "current_place_scope_projected_portals", []),
+            },
+            "place_dfs": (None if getattr(self, "place_dfs", None) is None
+                          else self.place_dfs.snapshot()),
+            "active_semantic_room": getattr(self, "active_semantic_room", None),
+            "active_semantic_rooms": list(getattr(self, "active_semantic_rooms", ()) or ()),
             "portal_probes": self.portal_probe_report(),
             "work_items": self.work_item_report(),
             "portal_selection_audit": self.portal_selection_audit_report(),
@@ -826,7 +898,8 @@ class GlobalFrontierReportingMixin:
         route_map_epoch = (
             getattr(graph_transaction, "map_epoch", None)
             if graph_transaction is not None
-            else getattr(self, "last_map_epoch", None)
+            else (getattr(self, "active_route_map_epoch", None)
+                  or getattr(self, "last_map_epoch", None))
         )
         if route_map_epoch is None:
             # A route command is only published after snapshot construction.
@@ -838,6 +911,18 @@ class GlobalFrontierReportingMixin:
         graph_transaction_id = int(
             getattr(graph_transaction, "graph_transaction_id", 0) or 0
         )
+        auth_getter = getattr(self, "active_portal_authentication", None)
+        auth = auth_getter() if callable(auth_getter) else None
+        if graph_transaction_id <= 0 and auth is not None:
+            # Authentication waypoints are temporary GP work, but the
+            # persistent GoalManager still requires a positive route identity.
+            activated = getattr(self, "active_route_dispatch_contract", None) or {}
+            if int(activated.get("route_id", 0) or 0) != int(self.active_route_id):
+                activated = {}
+            graph_transaction_id = max(
+                1, int(activated.get("graph_transaction_id", 0) or
+                       getattr(self, "active_route_id", 0) or 0)
+            )
         lifecycle_getter = getattr(self, "route_lifecycle_transaction_id", None)
         lifecycle_transaction_id = int(
             lifecycle_getter()
@@ -865,7 +950,9 @@ class GlobalFrontierReportingMixin:
         projection_epoch = (
             getattr(graph_transaction, "projection_epoch", None)
             if graph_transaction is not None
-            else getattr(self, "last_graph_snapshot_epoch", None) or route_map_epoch
+            # GP authentication has no WI graph transaction. Its projection
+            # belongs to this activated route, never to the previous WI plan.
+            else route_map_epoch
         )
         if projection_epoch is None:
             projection_epoch = route_map_epoch
@@ -939,6 +1026,16 @@ class GlobalFrontierReportingMixin:
             "projection_epoch": projection_epoch,
             "stamp": rospy.Time.now().to_sec(),
         }
+        if (auth is not None and getattr(auth, "state", "") == "turning"
+                and route_kind == "frontier_turn_connector"):
+            payload["authentication_turn"] = {
+                "route_id": int(self.active_route_id),
+                "graph_transaction_id": graph_transaction_id,
+                "lifecycle_transaction_id": lifecycle_transaction_id,
+                "frame_id": "odom", "target_yaw": float(auth.target_yaw),
+                "direction": auth.turn_direction,
+                "node_id": int(auth.node_id), "branch_id": int(auth.branch_id),
+            }
         decision_scheduler = getattr(self, "decision_wake_scheduler", None)
         if decision_scheduler is not None:
             # ``route_command`` is the handoff from the slow graph to the
@@ -950,4 +1047,16 @@ class GlobalFrontierReportingMixin:
         tree = getattr(self, "gp_exploration_tree", None)
         if tree is not None and tree.active_branch_id is not None:
             payload["branch_context"] = dict(tree.branches[tree.active_branch_id])
+        if graph_transaction is None and auth is not None:
+            # GP waypoints have no durable WI transaction. Keep the exact wire
+            # identity as the local contract before asynchronous Bridge adoption
+            # can arrive; never reconstruct it from a newer graph sequence.
+            activated = dict(getattr(self, "active_route_dispatch_contract", None) or {})
+            if int(activated.get("route_id", 0) or 0) != int(self.active_route_id):
+                activated = {}
+            for field in ("route_id", "transaction_id", "lifecycle_transaction_id",
+                          "action_generation", "graph_transaction_id", "map_epoch",
+                          "origin_epoch", "projection_epoch", "route_kind", "mission_route_kind"):
+                activated[field] = payload[field]
+            self.active_route_dispatch_contract = activated
         self.command_publisher.publish(String(data=json.dumps(payload, sort_keys=True)))

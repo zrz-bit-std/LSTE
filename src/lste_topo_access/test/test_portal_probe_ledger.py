@@ -194,6 +194,17 @@ class PortalProbeLedgerTest(unittest.TestCase):
         self.assertEqual(certified["state"], PROBE_CERTIFIED)
         self.assertEqual(certified["portal_id"], 11)
 
+    def test_gp_portal_certification_satisfies_matching_pending_probe(self):
+        ledger = PortalProbeLedger(match_radius=0.35)
+        record = ledger.observe(7, (4.0, 2.0), (1.0, 0.0), now=1.0)
+        certified = ledger.certify_matching(
+            7, (4.1, 2.0), (1.0, 0.0), portal_id=11, now=2.0,
+        )
+        self.assertEqual(certified["id"], record["id"])
+        self.assertEqual(certified["state"], PROBE_CERTIFIED)
+        self.assertEqual(certified["portal_id"], 11)
+        self.assertFalse(ledger.available(record["id"]))
+
     def test_source_arrival_rehydrates_one_new_destination_viewpoint(self):
         ledger = PortalProbeLedger(match_radius=0.35)
         record = ledger.observe(7, (4.0, 2.0), (1.0, 0.0), now=1.0)
@@ -367,6 +378,30 @@ class PortalProbeLedgerTest(unittest.TestCase):
         self.assertTrue(ledger.available(record["id"]))
         self.assertFalse(ledger.viewpoint_available(record["id"], (5.1, 2.0)))
         self.assertTrue(ledger.viewpoint_available(record["id"], (6.0, 2.0)))
+
+    def test_deferred_probe_releases_lease_without_recording_failure(self):
+        ledger = PortalProbeLedger(match_radius=0.35)
+        record = ledger.observe(
+            7, (4.0, 2.0), (1.0, 0.0), map_epoch=10, now=1.0,
+        )
+        ledger.start(record["id"], now=2.0, viewpoint_xy=(3.0, 2.0))
+
+        deferred = ledger.finish(
+            record["id"], "deferred", now=3.0,
+            reason="portal_junction_observation_period",
+        )
+
+        self.assertEqual(deferred["state"], PROBE_PENDING)
+        self.assertEqual(deferred["attempt_count"], 1)
+        self.assertEqual(deferred["viewpoint_records"][-1]["outcome"], "deferred")
+        self.assertEqual(deferred["viewpoint_records"][-1]["map_epoch"], 10)
+        self.assertEqual(
+            ledger.get(record["id"]).get("failed_viewpoints", []), [],
+        )
+        self.assertEqual(
+            [item["id"] for item in ledger.pending_for_source(7)],
+            [record["id"]],
+        )
 
     def test_destination_route_failure_reopens_same_epoch_for_new_viewpoint(self):
         ledger = PortalProbeLedger(match_radius=0.35)

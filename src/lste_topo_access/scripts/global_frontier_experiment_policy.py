@@ -41,11 +41,17 @@ class ExplorationMethodCapabilities:
     # deliberation.  Baselines keep their historical timer-driven selector so
     # this architectural change remains an explicit ablation.
     event_driven_deliberation: bool = False
+    # GP contributes only Portal discovery/authentication; regular navigation
+    # and completion continue to use the named method's WorkItem policy.
+    gp_portal_assistance: bool = False
 
 
 _METHODS = {
     "gp_branch_tree": ExplorationMethodCapabilities(
-        "gp_branch_tree", False, False, False, False, False, False, True,
+        "gp_branch_tree", True, True, True, False, True, True, True,
+        task_semantic_value=True, branch_first=True,
+        frontier_action_policy="event_pareto", graph_route_planner=False,
+        event_driven_deliberation=True, gp_portal_assistance=True,
     ),
     # A conventional online frontier selector: information gain and path cost
     # only.  It intentionally has neither durable completion memory nor a
@@ -73,7 +79,7 @@ _METHODS = {
         branch_first=True,
         frontier_action_policy="event_pareto",
         graph_route_planner=True,
-        event_driven_deliberation=True,
+        event_driven_deliberation=True, gp_portal_assistance=True,
     ),
     # Selector-only ablation: keep the same durable graph and branch-first
     # transition, but retain the scalar local rank to isolate this paper's

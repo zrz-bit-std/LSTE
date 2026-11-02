@@ -8,6 +8,8 @@ important boundary explicit and lets tests exercise it without ROS or Gazebo.
 from dataclasses import dataclass
 import math
 
+from global_frontier_portal_crossing import portal_section_destination
+
 
 def finite_xy(value):
     """Return a finite planar pair or ``None``."""
@@ -65,6 +67,12 @@ def project_record(record, project_physical_to_map=None):
 
     gate = finite_xy(record.get("physical_gate"))
     destination = finite_xy(record.get("physical_destination"))
+    if gate is not None and destination is not None:
+        destination = finite_xy(portal_section_destination(
+            gate, destination, record.get("physical_bounds"),
+        ))
+        if destination is None:
+            return None
     if project_physical_to_map is not None and gate is not None and destination is not None:
         try:
             projected_gate = finite_xy(

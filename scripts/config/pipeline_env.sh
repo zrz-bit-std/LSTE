@@ -78,16 +78,20 @@ fi
 # visible to Gazebo and the dynamic linker; otherwise the sensor exists in
 # Gazebo transport but never advertises its ROS image topic.
 GAZEBO_SYSTEM_PLUGIN_DIR="/usr/lib/x86_64-linux-gnu/gazebo-11/plugins"
-if [ -d "$GAZEBO_SYSTEM_PLUGIN_DIR" ]; then
+GAZEBO_ROS_PLUGIN_DIR="/opt/ros/noetic/lib"
+for gazebo_plugin_dir in "$GAZEBO_SYSTEM_PLUGIN_DIR" "$GAZEBO_ROS_PLUGIN_DIR"; do
+  if [ ! -d "$gazebo_plugin_dir" ]; then
+    continue
+  fi
   case ":${GAZEBO_PLUGIN_PATH:-}:" in
-    *":$GAZEBO_SYSTEM_PLUGIN_DIR:"*) ;;
-    *) GAZEBO_PLUGIN_PATH="$GAZEBO_SYSTEM_PLUGIN_DIR${GAZEBO_PLUGIN_PATH:+:$GAZEBO_PLUGIN_PATH}" ;;
+    *":$gazebo_plugin_dir:"*) ;;
+    *) GAZEBO_PLUGIN_PATH="${GAZEBO_PLUGIN_PATH:+$GAZEBO_PLUGIN_PATH:}$gazebo_plugin_dir" ;;
   esac
   case ":${LD_LIBRARY_PATH:-}:" in
-    *":$GAZEBO_SYSTEM_PLUGIN_DIR:"*) ;;
-    *) LD_LIBRARY_PATH="$GAZEBO_SYSTEM_PLUGIN_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+    *":$gazebo_plugin_dir:"*) ;;
+    *) LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$gazebo_plugin_dir" ;;
   esac
-fi
+done
 export GAZEBO_PLUGIN_PATH
 export LD_LIBRARY_PATH
 

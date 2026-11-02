@@ -6,7 +6,7 @@ DINO_INTERVAL_PASS=${DINO_INTERVAL_PASS:-${CFG_DINO_INTERVAL_PASS:-1.5}}
 DINO_INTERVAL_SUSPICIOUS=${DINO_INTERVAL_SUSPICIOUS:-${CFG_DINO_INTERVAL_SUSPICIOUS:-1.5}}
 DINO_INTERVAL_LOCKED=${DINO_INTERVAL_LOCKED:-${CFG_DINO_INTERVAL_LOCKED:-1.5}}
 DINO_INTERVAL_EXHAUSTED=${DINO_INTERVAL_EXHAUSTED:-${CFG_DINO_INTERVAL_EXHAUSTED:-3.0}}
-DETECTOR=${DETECTOR:-${CFG_DETECTOR:-wedetect-large}}
+DETECTOR=${DETECTOR:-${CFG_DETECTOR:-wedetect-base}}
 DETECTION_TRACKING_MODE=${DETECTION_TRACKING_MODE:-${CFG_DETECTION_TRACKING_MODE:-auto}}
 DETECTION_VISUAL_TRACKING_ENABLED=${DETECTION_VISUAL_TRACKING_ENABLED:-${CFG_DETECTION_VISUAL_TRACKING_ENABLED:-true}}
 DETECTION_DISPLAY_SYNC_MODE=${DETECTION_DISPLAY_SYNC_MODE:-${CFG_DETECTION_DISPLAY_SYNC_MODE:-latest_frame}}
@@ -71,6 +71,15 @@ case "$DETECTOR" in
   groundingdino)
     DETECTOR_BACKEND=groundingdino
     ;;
+  wedetect-tiny)
+    DETECTOR_BACKEND=wedetect
+    WDETECT_VARIANT=tiny
+    WDETECT_CHECKPOINT="$WS/model/WeDetect/checkpoints/wedetect_tiny.pth"
+    WDETECT_LANGUAGE_MODEL="$WS/model/WeDetect/xlm-roberta-base"
+    WDETECT_VISION_ONNX="$WS/model/WeDetect/deploy/onnx_models/wedetect_base_vision.onnx"
+    WDETECT_TRT_ENGINE_CACHE="$WS/model/WeDetect/deploy/trt_cache_tiny"
+    WDETECT_RUNTIME=pytorch
+    ;;
   wedetect-base)
     DETECTOR_BACKEND=wedetect
     WDETECT_VARIANT=base
@@ -90,12 +99,16 @@ case "$DETECTOR" in
     WDETECT_RUNTIME=${WDETECT_RUNTIME:-${CFG_WDETECT_RUNTIME:-tensorrt}}
     ;;
   *)
-    echo "[error] DETECTOR must be groundingdino, wedetect-base, or wedetect-large (got '$DETECTOR')" >&2
+    echo "[error] DETECTOR must be groundingdino, wedetect-tiny, wedetect-base, or wedetect-large (got '$DETECTOR')" >&2
     exit 1
     ;;
 esac
 
 if [[ "$DETECTOR_BACKEND" == "wedetect" ]]; then
+  if [[ ! -s "$WDETECT_CHECKPOINT" || ! -d "$WDETECT_LANGUAGE_MODEL" ]]; then
+    echo "[error] WeDetect checkpoint or language model is missing for $DETECTOR ($WDETECT_CHECKPOINT)" >&2
+    exit 1
+  fi
   DETECTOR_MIN_INTERVAL=$WDETECT_MIN_INTERVAL
   DETECTOR_INTERVAL_PASS=$WDETECT_INTERVAL_PASS
   DETECTOR_INTERVAL_SUSPICIOUS=$WDETECT_INTERVAL_SUSPICIOUS

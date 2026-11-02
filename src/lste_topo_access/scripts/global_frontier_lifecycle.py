@@ -190,8 +190,12 @@ class GlobalFrontierLifecycleMixin:
         )
 
     def on_detections(self, message):
-        return self._enqueue_lifecycle_event(
-            EventType.DETECTIONS_UPDATED, deepcopy(message)
+        # Capture the active Portal branch at ROS ingress. The lifecycle tick
+        # may apply this detection after authentication advances to another
+        # branch, so looking up the branch only during event handling can drop
+        # or misattribute the room-semantic frame.
+        return GlobalFrontierEventCallbacksMixin.gather_detections(
+            self, deepcopy(message)
         )
 
     def on_goal_arbitration(self, message):

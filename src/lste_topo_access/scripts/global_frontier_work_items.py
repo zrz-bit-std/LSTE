@@ -9,6 +9,7 @@ from turning one office into a stream of newly minted exploration places.
 import math
 
 from global_frontier_work_item_components import support_overlap
+from global_frontier_room_scope import work_item_belongs_to_branch
 
 
 # A WorkItem answers one semantic question: has this unknown-side boundary
@@ -29,6 +30,7 @@ ATTEMPT_ACTIVE = "active"
 ATTEMPT_FAILED = "failed"
 ATTEMPT_BLOCKED = "blocked"
 ATTEMPT_SUCCEEDED = "succeeded"
+ATTEMPT_SUSPENDED = "suspended"
 
 
 class PlaceWorkItemLedger:
@@ -50,6 +52,7 @@ class PlaceWorkItemLedger:
         self._next_id = 1
         self._next_attempt_id = 1
         self._items = {}
+        self._closed_place_ids = set()
 
     @staticmethod
     def _normalise_support(support_cells):
@@ -111,6 +114,10 @@ class PlaceWorkItemLedger:
         item = {
             "id": self._next_id,
             "place_id": int(place_id),
+            "kind": "frontier_observation",
+            "portal_id": None,
+            "priority": None,
+            "semantic_score": None,
             "x": None if xy is None else xy[0],
             "y": None if xy is None else xy[1],
             "anchor_xy": self._normalise_xy(anchor_xy),
@@ -216,6 +223,11 @@ class PlaceWorkItemLedger:
         """
         if place_id is None:
             return {}, {}
+        try:
+            if int(place_id) in self._closed_place_ids:
+                return {}, {}
+        except (TypeError, ValueError):
+            return {}, {}
         cell_to_item = {}
         details = {}
         for support in supports:
@@ -228,6 +240,8 @@ class PlaceWorkItemLedger:
             matches = []
             for item in self._items.values():
                 if int(item["place_id"]) != int(place_id):
+                    continue
+                if item.get("kind") == "portal_entry":
                     continue
                 prior_state = item["state"]
                 overlap = support_overlap(support_cells, item.get("support_cells", ()))
@@ -247,9 +261,7 @@ class PlaceWorkItemLedger:
                     # this unknown patch was observed.  A later frontier that
                     # overlaps that patch is its descendant even when the
                     # frontier anchor has advanced beyond the identity radius.
-                    if not anchor_match and not (
-                        overlap and prior_state == WORK_RESOLVED
-                    ):
+                    if not anchor_match:
                         continue
                     identity_match = anchor_match or bool(overlap)
                     match_quality = 2 if anchor_match else 1
@@ -296,6 +308,9 @@ class PlaceWorkItemLedger:
                     normal_xy=getattr(support, "normal_xy", None),
                 )
                 match = "created"
+            boundary = self._normalise_xy(getattr(support, "boundary_xy", None))
+            if boundary is not None:
+                item["place_boundary_xy"] = boundary
             item_id = int(item["id"])
             detail = {
                 "id": item_id,
@@ -309,6 +324,30 @@ class PlaceWorkItemLedger:
             for cell in support.frontier_cells:
                 cell_to_item[(int(cell[0]), int(cell[1]))] = item_id
         return cell_to_item, details
+
+    def transfer_observation_work_to_place(self, place_id, contains, now):
+        """Rebind unresolved frontier evidence after a real Portal crossing.
+
+        A boundary seen from the parent before its Portal was discovered must
+        belong to the child once the child's certified SLAM component proves it.
+        Active attempts and Portal-entry obligations retain their own owners.
+        """
+        moved = []
+        if self.place_is_closed(place_id):
+            return moved
+        for item in self._items.values():
+            boundary = item.get("place_boundary_xy")
+            if (item.get("state") != WORK_UNRESOLVED or item.get("kind") == "portal_entry"
+                    or item.get("active_attempt_id") is not None or boundary is None
+                    or int(item["place_id"]) == int(place_id) or not contains(boundary)):
+                continue
+            prior = int(item["place_id"])
+            item["place_id"] = int(place_id)
+            item["updated_at"] = float(now)
+            item["last_reason"] = "certified_slam_place_ownership"
+            moved.append(dict(work_item_id=int(item["id"]), prior_place_id=prior,
+                              place_id=int(place_id), boundary_xy=list(boundary)))
+        return moved
 
     def work_item_is_available(self, item_id):
         """Return whether an unresolved boundary has no active Attempt."""
@@ -448,6 +487,8 @@ class PlaceWorkItemLedger:
         for item in self._items.values():
             if int(item["place_id"]) != int(place_id):
                 continue
+            if item.get("kind") == "portal_entry":
+                continue
             if item.get("x") is None or item.get("y") is None:
                 continue
             distance = math.hypot(x - item["x"], y - item["y"])
@@ -460,6 +501,56 @@ class PlaceWorkItemLedger:
         """Return whether a nearby WorkItem permits this physical viewpoint."""
         item = self._nearby(place_id, xy)
         return item is None or self.viewpoint_is_available(item["id"], xy)
+
+    def ensure_portal_entry(self, portal_id, place_id, goal_xy, priority, semantic_score, now):
+        """Create/update one source-Place WorkItem for entering a ranked Portal."""
+        try:
+            portal_id, place_id = int(portal_id), int(place_id)
+            priority, semantic_score = int(priority), float(semantic_score)
+        except (TypeError, ValueError):
+            return None
+        goal_xy = self._normalise_xy(goal_xy)
+        if portal_id <= 0 or place_id <= 0 or goal_xy is None:
+            return None
+        for item in self._items.values():
+            if item.get("kind") == "portal_entry" and int(item.get("portal_id", -1)) == portal_id:
+                try:
+                    current_priority = int(item.get("priority"))
+                except (TypeError, ValueError):
+                    current_priority = priority
+                if priority <= current_priority:
+                    item.update({
+                        "place_id": place_id, "x": goal_xy[0], "y": goal_xy[1],
+                        "priority": priority, "semantic_score": semantic_score,
+                        "updated_at": float(now),
+                    })
+                return int(item["id"])
+        item = self._new_item(
+            place_id, frozenset(), now, xy=goal_xy,
+            reason="semantic_portal_entry_priority",
+        )
+        item.update({
+            "kind": "portal_entry", "portal_id": portal_id,
+            "priority": priority, "semantic_score": semantic_score,
+        })
+        return int(item["id"])
+
+    def resolve_portal_entry(self, portal_id, now, reason="portal_crossing_created_place"):
+        """Complete the Portal entry WorkItem only after destination Place commit."""
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return None
+        for item in self._items.values():
+            if item.get("kind") != "portal_entry" or int(item.get("portal_id", -1)) != portal_id:
+                continue
+            if item.get("state") == WORK_RESOLVED:
+                return item
+            item["state"] = WORK_RESOLVED
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            return item
+        return None
 
     def dispatch(self, place_id, xy, now, map_epoch=None):
         """Create or reserve the one work item represented by ``xy``."""
@@ -478,6 +569,17 @@ class PlaceWorkItemLedger:
             route_kind="frontier_endpoint",
             map_epoch=map_epoch,
         )
+
+    def suspend_attempt(self, item_id, now, reason="preempted_for_portal_authentication", attempt_id=None):
+        """Pause an unresolved WorkItem lease without recording failure."""
+        item = self._items.get(item_id)
+        if item is None or item.get("state") != WORK_UNRESOLVED:
+            return None, None
+        active = self._active_attempt(item)
+        if active is None or (attempt_id is not None and int(active["id"]) != int(attempt_id)):
+            return item, None
+        attempt = self._finish_active_attempt(item, ATTEMPT_SUSPENDED, now, reason)
+        return item, attempt
 
     def _finish_active_attempt(self, item, state, now, reason):
         attempt = self._active_attempt(item)
@@ -505,6 +607,13 @@ class PlaceWorkItemLedger:
                 return None
             self._finish_active_attempt(item, ATTEMPT_SUCCEEDED, now, reason)
         elif attempt_id is not None:
+            return None
+        elif any(attempt.get("state") == ATTEMPT_SUSPENDED
+                 for attempt in item.get("attempts", [])):
+            # A delayed observation terminal from before Portal watching must
+            # not settle the frozen parent WI. It can resolve only after a
+            # replacement attempt owns the result; the DFS planner will resume
+            # this same item once the observation subtree returns.
             return None
         item["state"] = WORK_RESOLVED
         item["last_reason"] = str(reason)
@@ -543,6 +652,96 @@ class PlaceWorkItemLedger:
             item, _attempt = self.fail_attempt(item_id, now, reason)
             return item
         raise ValueError("resolved work item or deferred attempt required")
+
+    def close_place(self, place_id, now, reason="room_exploration_completed"):
+        """Resolve and permanently suppress local WorkItems for one Place."""
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return []
+        if place_id <= 0:
+            return []
+        self._closed_place_ids.add(place_id)
+        closed = []
+        for item in self._items.values():
+            if int(item.get("place_id", -1)) != place_id or item.get("state") != WORK_UNRESOLVED:
+                continue
+            attempt = self._active_attempt(item)
+            if attempt is not None:
+                self._finish_active_attempt(item, ATTEMPT_SUSPENDED, now, reason)
+            item["state"] = WORK_RESOLVED
+            item["dismissed"] = True
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            closed.append(int(item["id"]))
+        return closed
+
+    def close_scoped_place(self, place_id, parent_place_id, branch_scope, now,
+                           reason="semantic_room_explored_returned_to_junction"):
+        """Close one explored entrance arm and return sibling work to its parent.
+
+        A connected SLAM Place may span a T or cross junction.  The active
+        branch scope identifies the arm just explored; unresolved items in
+        sibling arms stay open and are reassigned to the junction Place.
+        """
+        try:
+            place_id = int(place_id)
+            parent_place_id = int(parent_place_id)
+        except (TypeError, ValueError):
+            return [], []
+        if place_id <= 0 or parent_place_id <= 0 or place_id == parent_place_id:
+            return [], []
+        self._closed_place_ids.add(place_id)
+        closed = []
+        reassigned = []
+        scoped = isinstance(branch_scope, dict)
+        for item in self._items.values():
+            if int(item.get("place_id", -1)) != place_id or item.get("state") != WORK_UNRESOLVED:
+                continue
+            in_selected_arm = (
+                not scoped or work_item_belongs_to_branch(item, branch_scope)
+            )
+            attempt = self._active_attempt(item)
+            if attempt is not None:
+                self._finish_active_attempt(item, ATTEMPT_SUSPENDED, now, reason)
+            if in_selected_arm:
+                item["state"] = WORK_RESOLVED
+                item["dismissed"] = True
+                item["last_reason"] = str(reason)
+                closed.append(int(item["id"]))
+            else:
+                item["place_id"] = parent_place_id
+                item["dismissed"] = False
+                item["last_reason"] = "room_sibling_work_reassigned_to_parent"
+                reassigned.append(int(item["id"]))
+            item["updated_at"] = float(now)
+        return closed, reassigned
+
+    def unresolved_ids(self, place_id, branch_scope=None):
+        """Return unresolved WorkItems, optionally limited to one GP arm.
+
+        A SLAM Place can span multiple branches at a junction. During a
+        semantic-room return, only pending observations assigned to the
+        selected branch should keep that room open; sibling observations are
+        handed back to the parent Place by close_scoped_place.
+        """
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return []
+        return sorted(
+            int(item["id"]) for item in self._items.values()
+            if int(item.get("place_id", -1)) == place_id
+            and item.get("state") == WORK_UNRESOLVED
+            and (not isinstance(branch_scope, dict)
+                 or work_item_belongs_to_branch(item, branch_scope))
+        )
+
+    def place_is_closed(self, place_id):
+        try:
+            return int(place_id) in self._closed_place_ids
+        except (TypeError, ValueError):
+            return False
 
     def unresolved_count(self, place_id):
         """Return work still eligible for this physical place."""
@@ -658,12 +857,17 @@ class PlaceWorkItemLedger:
                 {
                     "id": int(item["id"]),
                     "place_id": int(item["place_id"]),
+                    "kind": str(item.get("kind", "frontier_observation")),
+                    "portal_id": item.get("portal_id"),
+                    "priority": item.get("priority"),
+                    "semantic_score": item.get("semantic_score"),
                     "state": str(item.get("state", WORK_UNRESOLVED)),
                     "x": item.get("x"),
                     "y": item.get("y"),
                     "anchor_xy": item.get("anchor_xy"),
                     "normal_xy": item.get("normal_xy"),
                     "support_cell_count": len(item.get("support_cells", ())),
+                    "place_boundary_xy": item.get("place_boundary_xy"),
                     "active_attempt_id": (
                         None
                         if item.get("active_attempt_id") is None
@@ -761,6 +965,8 @@ class GlobalFrontierWorkItemLifecycleMixin:
         self.active_work_item_place_id = None
         self.active_work_item_goal = None
         self.active_work_item_route_kind = None
+        self.active_work_item_normal_xy = None
+        self.active_work_item_map_yaw = None
         self.active_work_item_dispatch_announced = False
         if not getattr(self, "work_item_memory_enabled", True):
             return None
@@ -798,6 +1004,14 @@ class GlobalFrontierWorkItemLifecycleMixin:
                 map_epoch=map_epoch,
             )
         self.active_work_item_id = item_id
+        suspended_id = getattr(self, "suspended_work_item_id", None)
+        if item_id is not None and suspended_id is not None and int(item_id) == int(suspended_id):
+            self.publish_status(
+                "work_item_resumed", work_item_id=int(item_id),
+                place_id=int(region["id"]),
+                reason="portal_observation_period_completed",
+            )
+            self.suspended_work_item_id = None
         if item_id is not None:
             self.active_work_item_attempt_id = self.place_work_items.active_attempt_id(
                 item_id,
@@ -805,6 +1019,16 @@ class GlobalFrontierWorkItemLifecycleMixin:
             self.active_work_item_place_id = int(region["id"])
             self.active_work_item_goal = (float(selection.x), float(selection.y))
             self.active_work_item_route_kind = str(selection.route_kind)
+            normal = getattr(selection, "work_item_normal_xy", None)
+            try:
+                normal = (float(normal[0]), float(normal[1]))
+                norm = math.hypot(*normal)
+                self.active_work_item_normal_xy = (
+                    (normal[0] / norm, normal[1] / norm) if norm > 1e-6 else None
+                )
+            except (TypeError, ValueError, IndexError):
+                self.active_work_item_normal_xy = None
+            self.active_work_item_map_yaw = None
         return item_id
 
     def record_work_item_route_rejection(
@@ -864,6 +1088,8 @@ class GlobalFrontierWorkItemLifecycleMixin:
         self.active_work_item_place_id = None
         self.active_work_item_goal = None
         self.active_work_item_route_kind = None
+        self.active_work_item_normal_xy = None
+        self.active_work_item_map_yaw = None
         self.active_work_item_dispatch_announced = False
         if not getattr(self, "work_item_memory_enabled", True) or region is None:
             return None
@@ -931,8 +1157,18 @@ class GlobalFrontierWorkItemLifecycleMixin:
         self, item_id, attempt_id, region, route_kind, x, y,
     ):
         """Emit the one stable start event used by experiment reduction."""
+        membership = None
+        mask = getattr(self, "current_place_scope_mask", None)
+        message = getattr(self, "current_place_scope_message", None)
+        if mask is not None and message is not None:
+            origin = message.info.origin.position
+            resolution = float(message.info.resolution)
+            col, row = int((float(x)-origin.x)//resolution), int((float(y)-origin.y)//resolution)
+            membership = dict(scope_place_id=getattr(self, "current_place_scope_id", None),
+                cell=[row,col], viewpoint_map=[float(x),float(y)],
+                in_place=bool(0 <= row < mask.shape[0] and 0 <= col < mask.shape[1] and mask[row,col]))
         self.publish_status(
-            "work_item_dispatched",
+            "work_item_dispatched", place_membership=membership,
             work_item_id=int(item_id),
             attempt_id=(None if attempt_id is None else int(attempt_id)),
             place_id=(None if region is None else int(region["id"])),
@@ -941,6 +1177,84 @@ class GlobalFrontierWorkItemLifecycleMixin:
             work_item_state=WORK_UNRESOLVED,
             attempt_state=ATTEMPT_ACTIVE,
         )
+
+    def suspend_active_work_item(self, now, reason="portal_authentication_started"):
+        """Freeze the current observation task so Portal authentication can run."""
+        item_id = getattr(self, "active_work_item_id", None)
+        if item_id is None:
+            # A just-completed WI may be followed by a Portal candidate before
+            # the next local WI is dispatched. Preserve the next pending WI in
+            # the same Place as the resume target, so the observation phase
+            # cannot let another graph edge bypass normal WorkItem exploration.
+            existing = getattr(self, "suspended_work_item_id", None)
+            ledger = getattr(self, "place_work_items", None)
+            current_place = getattr(self, "current_physical_place_id", None)
+            dfs = getattr(self, "place_dfs", None)
+            if dfs is not None and current_place in dfs.nodes:
+                # An ancestor's frozen WI must not suppress a child's own
+                # resume target when certification starts between attempts.
+                existing = dfs.nodes[current_place].get("suspended_work_item_id")
+            if existing is not None or ledger is None or current_place is None:
+                return None
+            snapshot = getattr(ledger, "snapshot", None)
+            if not callable(snapshot):
+                return None
+            pending = []
+            for record in snapshot():
+                try:
+                    if (int(record.get("place_id", -1)) != int(current_place)
+                            or str(record.get("state", "")).lower() != WORK_UNRESOLVED
+                            or record.get("active_attempt_id") is not None
+                            or str(record.get("kind", "")) == "portal_entry"):
+                        continue
+                    pending.append(record)
+                except (TypeError, ValueError):
+                    continue
+            if not pending:
+                return None
+            pending.sort(key=lambda record: (
+                int(record.get("priority") or 0), int(record.get("id", 0))
+            ))
+            selected = pending[0]
+            item_id = int(selected["id"])
+            self.suspended_work_item_id = item_id
+            dfs = getattr(self, "place_dfs", None)
+            if dfs is not None and int(current_place) in dfs.nodes:
+                dfs.nodes[int(current_place)]["suspended_work_item_id"] = item_id
+            self.publish_status(
+                "work_item_resume_target_selected",
+                work_item_id=item_id,
+                place_id=int(current_place),
+                reason=str(reason),
+                attempt_id=None,
+                no_active_attempt=True,
+            )
+            return selected
+        attempt_id = getattr(self, "active_work_item_attempt_id", None)
+        self.suspended_work_item_id = int(item_id)
+        dfs = getattr(self, "place_dfs", None)
+        owner = getattr(self, "active_work_item_place_id", None)
+        if dfs is not None and owner in dfs.nodes:
+            dfs.nodes[owner]["suspended_work_item_id"] = int(item_id)
+        item, attempt = self.place_work_items.suspend_attempt(
+            item_id, now, reason, attempt_id=attempt_id,
+        )
+        if attempt is not None:
+            self.publish_status(
+                "work_item_suspended", work_item_id=int(item_id),
+                attempt_id=int(attempt["id"]), place_id=int(item["place_id"]),
+                work_item_state=WORK_UNRESOLVED,
+                attempt_state=ATTEMPT_SUSPENDED, reason=str(reason),
+            )
+        self.active_work_item_id = None
+        self.active_work_item_attempt_id = None
+        self.active_work_item_place_id = None
+        self.active_work_item_goal = None
+        self.active_work_item_route_kind = None
+        self.active_work_item_normal_xy = None
+        self.active_work_item_map_yaw = None
+        self.active_work_item_dispatch_announced = False
+        return item
 
     def settle_active_work_item(self, now, state, reason):
         """Finish an Attempt and resolve WorkItem only from observation proof."""
@@ -994,5 +1308,7 @@ class GlobalFrontierWorkItemLifecycleMixin:
         self.active_work_item_place_id = None
         self.active_work_item_goal = None
         self.active_work_item_route_kind = None
+        self.active_work_item_normal_xy = None
+        self.active_work_item_map_yaw = None
         self.active_work_item_dispatch_announced = False
         return item

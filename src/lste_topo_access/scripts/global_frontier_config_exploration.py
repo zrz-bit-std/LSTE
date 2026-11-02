@@ -25,6 +25,9 @@ class GlobalFrontierExplorationConfigurationMixin:
             rospy.logerr("Global frontier configuration rejected: %s", exc)
             raise
         self.exploration_method = self.exploration_capabilities.name
+        self.gp_portal_assistance_enabled = bool(
+            getattr(self.exploration_capabilities, "gp_portal_assistance", False)
+        )
         self.place_memory_enabled = self.exploration_capabilities.place_memory
         self.work_item_memory_enabled = self.exploration_capabilities.work_items
         self.distance_deduplication_enabled = (

@@ -13,6 +13,7 @@ if str(SCRIPTS) not in sys.path:
 from global_frontier_graph_route_gate import (  # noqa: E402
     candidate_refines_graph_plan,
     candidate_matches_graph_plan,
+    candidate_matches_tsp_work_item,
     graph_plan_is_exclusive,
 )
 from global_frontier_graph_route_planner import (  # noqa: E402
@@ -77,6 +78,40 @@ class GraphRouteGateTest(unittest.TestCase):
         )
 
         self.assertTrue(candidate_refines_graph_plan(bootstrap_plan(), candidate))
+
+    def test_tsp_bootstrap_accepts_same_head_as_local_observation(self):
+        prepared = GraphRoutePlan(
+            PLAN_READY,
+            ACTION_BOOTSTRAP,
+            current_place_id=1,
+            target_place_id=1,
+            obligation_kind="work_item",
+            obligation_id=7,
+            work_item_tour=(7, 8),
+        )
+        candidate = SimpleNamespace(
+            route=route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=7),
+            place_id=1,
+        )
+
+        self.assertTrue(candidate_matches_tsp_work_item(prepared, candidate))
+
+    def test_tsp_bootstrap_still_rejects_sibling_work_item(self):
+        prepared = GraphRoutePlan(
+            PLAN_READY,
+            ACTION_BOOTSTRAP,
+            current_place_id=1,
+            target_place_id=1,
+            obligation_kind="work_item",
+            obligation_id=7,
+            work_item_tour=(7, 8),
+        )
+        sibling = SimpleNamespace(
+            route=route(ACTION_OBSERVE_LOCAL_WORK, work_item_id=8),
+            place_id=1,
+        )
+
+        self.assertFalse(candidate_matches_tsp_work_item(prepared, sibling))
 
     def test_bootstrap_accepts_same_place_work_item_refinement(self):
         candidate = SimpleNamespace(

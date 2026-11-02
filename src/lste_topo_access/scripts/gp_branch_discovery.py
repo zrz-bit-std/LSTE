@@ -14,6 +14,52 @@ def angle_delta(a, b):
     return math.atan2(math.sin(a-b), math.cos(a-b))
 
 
+def has_confirmed_three_way_fan(headings, minimum_separation=1.4):
+    """Require any three map-supported arms with pairwise angular separation.
+
+    Check triples directly instead of greedily collapsing close headings. A
+    greedy representative can discard a valid arm because it is close to a
+    different arm that is itself not part of the valid three-way fan.
+    """
+    values=[]
+    for value in headings:
+        try:
+            heading=float(value)
+        except (TypeError,ValueError):
+            continue
+        if math.isfinite(heading):values.append(heading)
+    threshold=float(minimum_separation)
+    for i,a in enumerate(values):
+        for j in range(i+1,len(values)):
+            b=values[j]
+            if abs(angle_delta(a,b)) < threshold:continue
+            for c in values[j+1:]:
+                if (abs(angle_delta(a,c)) >= threshold
+                        and abs(angle_delta(b,c)) >= threshold):
+                    return True
+    return False
+
+
+def has_local_fork(headings, minimum_separation=0.5):
+    """Recognize a local fan worth refining against the SLAM map.
+
+    The wider 0.9 rad confirmation threshold remains appropriate for durable
+    branch identity, but it can suppress map re-projection when a real T is
+    viewed obliquely from the stem. This looser trigger only requests a second
+    estimate at the map anchor; tree confirmation still applies its own rules.
+    """
+    distinct=[]
+    for heading in headings:
+        if not any(abs(angle_delta(float(heading), prior)) < minimum_separation
+                   for prior in distinct):
+            distinct.append(float(heading))
+    if len(distinct) >= 3:
+        return all(abs(angle_delta(a, b)) >= minimum_separation
+                   for i, a in enumerate(distinct) for b in distinct[i+1:])
+    return (len(distinct) == 2 and
+            1.1 <= abs(angle_delta(distinct[0], distinct[1])) <= 2.1)
+
+
 @dataclass(frozen=True)
 class DirectionProposal:
     heading: float
@@ -143,7 +189,7 @@ def entrance_geometry(grid, resolution, origin, source, heading, reach,
                              width=width, bounds=[None if x is None else x[1] for x in bounds],
                              distance=float(distance),
                              passability='unknown' if width is None else
-                             ('open' if width >= max(0.65, 1.5*clearance) else 'blocked')))
+                             ('open' if width >= max(0.65, 2.0*clearance) else 'blocked')))
     measured = [x for x in sections if x['width'] is not None]
     if not measured:
         return sections[0] if sections else None

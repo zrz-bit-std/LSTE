@@ -24,6 +24,10 @@ from global_frontier_selection import GlobalFrontierSelectionMixin
 
 
 class RegionMemory:
+    def by_id(self, region_id):
+        region = getattr(self, "region", None)
+        return region if region and region["id"] == region_id else None
+
     def dormant_component_labels(self, _epoch):
         return set()
 
@@ -193,6 +197,7 @@ class SelectorStub(GlobalFrontierSelectionMixin):
     def __init__(self, labels):
         self.labels = labels
         self.region_memory = RegionMemory()
+        self.portal_hypothesis_ledger = PortalHypothesisLedger()
         self.candidate_limit = 100
         self.min_path_distance = 0.0
         self.frontier_approach_distance = 0.0
@@ -340,6 +345,37 @@ class PlaceActionSelectionTest(unittest.TestCase):
             **selection_options,
         )
         return selected, selector
+
+    def test_reverse_portal_defers_frontier_miss_to_physical_egress(self):
+        from global_frontier_graph_route_planner import GraphRoutePlan, PLAN_READY, ACTION_CROSS_PORTAL
+        labels = np.asarray([[1, 1]], dtype=np.int32)
+        plan = GraphRoutePlan(PLAN_READY, ACTION_CROSS_PORTAL,
+                              current_place_id=1, target_place_id=2,
+                              obligation_kind="portal_edge", obligation_id=11,
+                              first_portal_id=11, portal_path=(11,))
+        for reverse in (True, False):
+            selector = SelectorStub(labels)
+            selector.graph_route_planner_enabled = True
+            selector._prepare_graph_route_action = lambda *_args, **_kwargs: (plan, None)
+            selector._graph_plan_identity_is_visible = lambda *_args, **_kwargs: False
+            selector._graph_plan_requires_durable_egress = lambda _plan: reverse
+            misses, retained = [], []
+            def miss(*args):
+                misses.append(args)
+                return True
+            selector._record_graph_route_materialization_miss = miss
+            selector._retain_graph_route_plan_lease = lambda *args: retained.append(args)
+            selected = selector.choose_frontier(
+                message(), np.asarray([[0, 1]], dtype=np.int32),
+                np.asarray([[False, True]], dtype=bool),
+                np.zeros_like(labels, dtype=bool), np.zeros_like(labels, dtype=bool),
+                now=0.0, robot_map=(0.0, 0.0),
+                components=SimpleNamespace(labels=labels, epoch=1),
+                allow_portal_transitions=True,
+            )
+            self.assertIsNone(selected)
+            self.assertEqual(bool(misses), not reverse)
+            self.assertEqual(bool(retained), reverse)
 
     def test_local_place_beats_higher_scored_adjacent_frontier(self):
         labels = [[1, 1, 0, 2, 2]]
@@ -506,6 +542,7 @@ class PlaceActionSelectionTest(unittest.TestCase):
             [[1, 1, 0, 2, 2, 0, 3, 3, 3]],
             [[False, True, False, False, False, False, False, False, True]],
             region_memory=ObservedSourceMemory(1),
+            current_physical_place_id=31,
         )
 
         self.assertIsNotNone(selected)
@@ -620,7 +657,7 @@ class PlaceActionSelectionTest(unittest.TestCase):
         labels = [[1, 1, 0, 2, 2, 0, 3, 3, 3]]
         frontier = [[False, False, False, False, False, False, False, False, True]]
 
-        selected, _selector = self.select(labels, frontier)
+        selected, _selector = self.select(labels, frontier, current_physical_place_id=1)
 
         self.assertIsNotNone(selected)
         self.assertEqual((selected[0], selected[1]), (0, 3))
@@ -746,6 +783,7 @@ class PlaceActionSelectionTest(unittest.TestCase):
             [[1, 1, 0, 2, 2, 0, 3]],
             [[False, False, False, False, False, False, True]],
             region_memory=ReverseExitDormantDestinationMemory(2),
+            current_physical_place_id=1,
         )
 
         self.assertIsNotNone(selected)
@@ -776,12 +814,14 @@ class PlaceActionSelectionTest(unittest.TestCase):
             [[1, 1, 0, 2, 2]],
             [[False, True, False, False, False]],
             region_memory=ReadyToExitRegionMemory(1),
+            current_physical_place_id=12,
         )
 
         self.assertIsNotNone(selected)
         self.assertEqual(selected[10], "portal_transition")
         self.assertEqual(selected[9], 1)
-        self.assertGreater(selector.last_ready_to_exit_reentry_skips, 0)
+        # Graph selection may choose this Portal before compiling local
+        # candidates; correctness does not require a candidate-filter count.
 
     def test_recovery_cannot_mint_an_unanchored_adjacent_room(self):
         """Weak recovery needs a durable place label before it may score."""

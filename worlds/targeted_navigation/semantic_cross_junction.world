@@ -5230,5 +5230,76 @@
     
     <allow_auto_disable>1</allow_auto_disable>
   <pose>2.8 -13.2 0 0 0 0</pose><static>true</static></model>
-</world>
+    <!-- Large visual-only table cue inside this arm keeps WeDetect scoring observable
+         from the junction doorway; collision geometry is omitted to keep
+         the corridor traversal unchanged. -->
+    <model name="cross_observation_cue_east_table">
+      <static>true</static>
+      <pose>4.0 0.95 0 0 0 0</pose>
+      <link name="cue">
+        <visual name="cafe_table">
+          <geometry>
+            <mesh>
+              <uri>model://cafe_table/meshes/cafe_table.dae</uri>
+              <scale>1 1 1</scale>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Large visual-only table cue inside this arm keeps WeDetect scoring observable
+         from the junction doorway; collision geometry is omitted to keep
+         the corridor traversal unchanged. -->
+    <model name="cross_observation_cue_west_table">
+      <static>true</static>
+      <pose>-4.0 -0.95 0 0 0 3.141592653589793</pose>
+      <link name="cue">
+        <visual name="cafe_table">
+          <geometry>
+            <mesh>
+              <uri>model://cafe_table/meshes/cafe_table.dae</uri>
+              <scale>1 1 1</scale>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Large visual-only table cue inside this arm keeps WeDetect scoring observable
+         from the junction doorway; collision geometry is omitted to keep
+         the corridor traversal unchanged. -->
+    <model name="cross_observation_cue_north_table">
+      <static>true</static>
+      <pose>0.95 4.0 0 0 0 1.5707963267948966</pose>
+      <link name="cue">
+        <visual name="cafe_table">
+          <geometry>
+            <mesh>
+              <uri>model://cafe_table/meshes/cafe_table.dae</uri>
+              <scale>1 1 1</scale>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Large visual-only table cue inside this arm keeps WeDetect scoring observable
+         from the junction doorway; collision geometry is omitted to keep
+         the corridor traversal unchanged. -->
+    <model name="cross_observation_cue_south_table">
+      <static>true</static>
+      <pose>-0.95 -4.0 0 0 0 -1.5707963267948966</pose>
+      <link name="cue">
+        <visual name="cafe_table">
+          <geometry>
+            <mesh>
+              <uri>model://cafe_table/meshes/cafe_table.dae</uri>
+              <scale>1 1 1</scale>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+  </world>
 </sdf>

@@ -95,6 +95,19 @@ class PortalBeliefTest(unittest.TestCase):
         self.assertEqual(second["certification_count"], 2)
         self.assertEqual(second["map_gate"], [10.0, 10.0])
 
+    def test_nearby_cross_junction_branches_keep_distinct_portal_ids(self):
+        ledger = PortalHypothesisLedger(match_radius=0.67)
+        first, first_created = ledger.certify(
+            1, (-1.5783, -0.4204), (-0.1765, -2.3684), now=1.0,
+        )
+        second, second_created = ledger.certify(
+            1, (-1.3351, 0.1533), (1.0397, 0.5002), now=2.0,
+        )
+
+        self.assertTrue(first_created)
+        self.assertTrue(second_created)
+        self.assertNotEqual(first["id"], second["id"])
+
     def test_slam_projection_does_not_rewrite_physical_portal_witness(self):
         ledger = PortalHypothesisLedger(match_radius=0.30)
         first, _created = ledger.certify(

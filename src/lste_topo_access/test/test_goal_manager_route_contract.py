@@ -54,6 +54,7 @@ class RouteContractLifecycle:
         self.frontier_goal_sent_at = None
         self.last_goal_source = "other"
         self.goal_source = "other"
+        self.global_frontier_command_enabled = False
         self.next_update_time = 1.0
 
 

@@ -59,7 +59,10 @@
     <!-- Gazebo requires the ouster_gazebo_plugins package -->
     <gazebo reference="${name}">
         <sensor type="ray" name="${name}-OS1-64">
-          <pose>0 0 0 0 0 0</pose>
+          <!-- Point coordinates are published in lidar_link, whose origin is
+               36.18 mm above the sensor housing. Match the ray origin to
+               that frame so floor returns transform to z=0, not z=0.03618. -->
+          <pose>0 0 0.03618 0 0 0</pose>
           <visualize>false</visualize>
           <update_rate>${hz}</update_rate>
           <ray>

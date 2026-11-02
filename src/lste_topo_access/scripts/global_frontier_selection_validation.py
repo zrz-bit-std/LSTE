@@ -111,6 +111,10 @@ class GlobalFrontierSelectionValidationMixin:
                 if candidate is None:
                     break
 
+                constraints = getattr(self, "place_navigation_constraints", None)
+                if constraints is not None and not constraints.prepare_candidate(self, candidate):
+                    self.frontier_validation_pending = True
+                    return None
                 reachable = self.navfn_goal_reachable(
                     robot_map,
                     (candidate[2], candidate[3]),

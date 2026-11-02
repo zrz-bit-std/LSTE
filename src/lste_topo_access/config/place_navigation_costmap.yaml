@@ -1,0 +1,34 @@
+# Ordinary WI routes stay in the current online-SLAM Place in both planners.
+# The global raster survives SLAM master resize; local input is physically odom.
+# Both are transparent during explicit Portal/auth transactions.
+global_costmap:
+  plugins:
+    - {name: static_layer, type: "costmap_2d::StaticLayer"}
+    - {name: place_scope_layer, type: "lste_topo_access::PlaceScopeLayer"}
+    - {name: obstacle_layer, type: "costmap_2d::VoxelLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+  obstacle_layer:
+    combination_method: 1
+  place_scope_layer:
+    map_topic: /lste/place_navigation_mask
+    first_map_only: false
+    subscribe_to_updates: false
+    track_unknown_space: true
+    use_maximum: true
+    trinary_costmap: true
+local_costmap:
+  plugins:
+    - {name: place_scope_layer, type: "costmap_2d::StaticLayer"}
+    - {name: obstacle_layer, type: "costmap_2d::VoxelLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+  # Match Costmap2DROS's existing default; the following voxel layer retains
+  # every physical obstacle. The scope layer never overwrites that layer.
+  obstacle_layer:
+    combination_method: 1
+  place_scope_layer:
+    map_topic: /lste/place_navigation_mask_odom
+    first_map_only: false
+    subscribe_to_updates: false
+    track_unknown_space: false
+    use_maximum: false
+    trinary_costmap: true

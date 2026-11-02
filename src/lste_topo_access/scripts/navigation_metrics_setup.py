@@ -59,6 +59,7 @@ class NavigationMetricsSetupMixin:
         # manually started metrics node safe and keeps old commands working.
         _init_metrics_node()
         self.lock = threading.RLock()
+        self.log_write_lock = threading.RLock()
         self.process_name = "lste_navigation_metrics"
         self.log_root = self._resolve_path(
             rospy.get_param("~log_dir", "runtime/navigation/logs")
@@ -82,7 +83,8 @@ class NavigationMetricsSetupMixin:
         # directory. Preserve the existing evidence in that case; a newly
         # allocated directory is still initialized as a fresh log.
         log_mode = "a" if self.log_path.exists() else "w"
-        self.stream = self.log_path.open(log_mode, encoding="utf-8", buffering=1)
+        from navigation_metrics_line_stream import VerifiedAsciiAppendLog
+        self.stream = VerifiedAsciiAppendLog(self.log_path)
         # This parameter is written by the benchmark stop boundary.  Remove a
         # value left by an older process so a normal/manual shutdown cannot be
         # mistaken for the next trial's timeout.

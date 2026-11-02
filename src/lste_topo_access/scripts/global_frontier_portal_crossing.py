@@ -11,7 +11,7 @@ import math
 from global_frontier_models import PortalCrossingEvidence
 
 
-def portal_crossing_depth(clearance):
+def portal_crossing_depth(clearance, record=None):
     """Return the geometric depth needed to call a doorway crossed.
 
     ``completed_radius`` describes how much of a *room* has been observed. It
@@ -21,7 +21,13 @@ def portal_crossing_depth(clearance):
     half that clearance beyond the gate plane, it is on the destination side
     rather than in the opening itself.
     """
-    return max(0.05, 0.5 * max(0.0, float(clearance)))
+    depth=max(0.05, 0.5 * max(0.0, float(clearance)))
+    if isinstance(record, dict) and record.get('gp_authentication_state')=='completed':
+        try:
+            witnessed=float(record.get('gp_authentication_required_depth'))
+            if math.isfinite(witnessed) and witnessed>0:depth=max(depth,witnessed)
+        except (TypeError,ValueError):pass
+    return depth
 
 
 def portal_execution_goal(route_kind, map_frame, map_xy, frozen_odom_xy):
@@ -45,7 +51,30 @@ def portal_execution_goal(route_kind, map_frame, map_xy, frozen_odom_xy):
     )
 
 
-def portal_signed_distance(point_xy, gate_xy, destination_xy):
+def portal_section_destination(gate_xy, destination_xy, bounds_xy=None):
+    """Use the measured section normal, keeping the witnessed destination side."""
+    if bounds_xy is None:
+        return destination_xy
+    try:
+        a, b = bounds_xy
+        tx, ty = float(b[0])-float(a[0]), float(b[1])-float(a[1])
+        width = math.hypot(tx, ty)
+        dx = float(destination_xy[0])-float(gate_xy[0])
+        dy = float(destination_xy[1])-float(gate_xy[1])
+        depth = math.hypot(dx, dy)
+        if not all(math.isfinite(v) for v in (tx, ty, depth)) or min(width, depth) <= 1e-6:
+            return None
+        nx, ny = -ty/width, tx/width
+        side = dx*nx+dy*ny
+        if abs(side) <= 1e-6:
+            return None
+        if side < 0:nx, ny = -nx, -ny
+        return (float(gate_xy[0])+depth*nx, float(gate_xy[1])+depth*ny)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def portal_signed_distance(point_xy, gate_xy, destination_xy, bounds_xy=None):
     """Project a physical point onto a portal's directed normal.
 
     Negative values lie on the source side of the gate; positive values lie
@@ -53,6 +82,9 @@ def portal_signed_distance(point_xy, gate_xy, destination_xy):
     physical directed edge and must not be treated as a portal transaction.
     """
     if not all((point_xy, gate_xy, destination_xy)):
+        return None
+    destination_xy = portal_section_destination(gate_xy, destination_xy, bounds_xy)
+    if destination_xy is None:
         return None
     try:
         direction_x = float(destination_xy[0]) - float(gate_xy[0])
@@ -80,6 +112,7 @@ def portal_source_side_is_proven(source_xy, gate_xy, destination_xy):
 def portal_crossing_evidence(
     start_xy, gate_xy, destination_xy, terminal_xy, gate_approached,
     minimum_destination_depth, preobserved=False, source_side_proven=False,
+    bounds_xy=None,
 ):
     """Return whether the terminal is physically beyond the directed gate.
 
@@ -108,9 +141,9 @@ def portal_crossing_evidence(
             terminal_signed_distance=None,
             required_destination_depth=float(minimum_destination_depth),
         )
-    source_signed = portal_signed_distance(start_xy, gate_xy, destination_xy)
+    source_signed = portal_signed_distance(start_xy, gate_xy, destination_xy, bounds_xy)
     terminal_signed = portal_signed_distance(
-        terminal_xy, gate_xy, destination_xy,
+        terminal_xy, gate_xy, destination_xy, bounds_xy,
     )
     if source_signed is None or terminal_signed is None:
         return PortalCrossingEvidence(

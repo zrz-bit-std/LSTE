@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+import sys
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 SOURCE = SCRIPTS_DIR / "global_frontier_event_callbacks.py"
+sys.path.insert(0, str(SCRIPTS_DIR))
+from global_frontier_route_state import GlobalFrontierRouteStateMixin  # noqa: E402
 
 
 def _load_callback():
@@ -78,8 +81,115 @@ class _Explorer:
     def publish_status(self, event, **fields):
         self.status.append((event, fields))
 
+    def _remember_bridge_dispatch_contract(self, _payload):
+        return None
+
+    def _bridge_status_contract(self, payload):
+        return {
+            "route_id": int(payload.get("active_route_id", 0)),
+            "route_kind": payload.get("active_route_kind", ""),
+            "mission_route_kind": payload.get("active_mission_route_kind", ""),
+            "action_generation": 1,
+        }
+
+    def _bridge_terminal_matches_dispatch(self, _payload, _contract):
+        return True, "matched"
+
+
+class _ReleaseOwner(GlobalFrontierRouteStateMixin):
+    def __init__(self):
+        self.active_route_kind = "frontier_endpoint"
+        self.active_route_id = 56
+        self.active_terminal_received = True
+        self.active_terminal_contract = {
+            "route_id": 56, "transaction_id": 181, "action_generation": 0,
+            "graph_transaction_id": 181, "reason": "terminal_boundary",
+        }
+        self._bridge_dispatch_contracts = {
+            56: {
+                "route_id": 56, "transaction_id": 56, "action_generation": 99,
+                "graph_transaction_id": 181,
+                "lifecycle_transaction_id": 2584865440244308403995277696943906430,
+                "map_epoch": 264, "origin_epoch": 264, "projection_epoch": 264,
+                "route_kind": "frontier_endpoint",
+            }
+        }
+        self.active_route_dispatch_contract = None
+        self.controller_owned_route_failure = False
+        self.place_departure = SimpleNamespace(active=False)
+        self.active_frontier = (0, 0, 1.0, 2.0)
+        self.active_visited_odom_cells = set()
+        self.status = []
+        self.pending_contract = None
+        self.pending_controller_lease_releases = {}
+
+    def publish_status(self, event, **fields):
+        self.status.append((event, fields))
+
+    def _controller_release_ack_matches(self, _contract):
+        return False
+
+    def _remember_controller_release_contract(self, contract):
+        self.pending_contract = dict(contract)
+        self.pending_controller_lease_releases[contract["route_id"]] = dict(contract)
+        self.awaiting_controller_lease_release_ack = True
+
+    def _clear_graph_route_plan_lease(self, _reason):
+        pass
+
+    def clear_active_route_history(self):
+        pass
+
 
 class ReleasedControllerLeaseTest(unittest.TestCase):
+    def test_unstarted_semantic_route_never_waits_for_transport_ack(self):
+        policy = GlobalFrontierRouteStateMixin.controller_release_requires_ack
+        self.assertFalse(policy(47, 0, False))
+        self.assertFalse(policy(0, 91, False))
+
+    def test_terminal_semantic_identity_cannot_overwrite_bridge_dispatch_identity(self):
+        merge = GlobalFrontierRouteStateMixin.merge_route_release_contract
+        exact = {
+            "route_id": 56, "transaction_id": 56, "action_generation": 99,
+            "graph_transaction_id": 181, "lifecycle_transaction_id": 2584865440244308403995277696943906430,
+            "map_epoch": 264, "route_kind": "frontier_endpoint",
+        }
+        stale_semantic = {
+            "route_id": 56, "transaction_id": 181, "action_generation": 0,
+            "graph_transaction_id": 181, "reason": "terminal_boundary",
+        }
+        merged = merge(56, exact, None, stale_semantic, None)
+        self.assertEqual(merged["route_id"], 56)
+        self.assertEqual(merged["transaction_id"], 56)
+        self.assertEqual(merged["action_generation"], 99)
+        self.assertEqual(merged["graph_transaction_id"], 181)
+        self.assertEqual(merged["reason"], "terminal_boundary")
+
+    def test_release_publishes_exact_bridge_identity_after_stale_terminal(self):
+        owner = _ReleaseOwner()
+        self.assertTrue(owner.release_active_frontier(queue_successor=False, preserve_place_departure=True))
+        released = next(fields for event, fields in owner.status
+                        if event == "controller_lease_released")
+        self.assertEqual(released["route_id"], 56)
+        self.assertEqual(released["transaction_id"], 56)
+        self.assertEqual(released["action_generation"], 99)
+        self.assertEqual(owner.pending_contract["transaction_id"], 56)
+        self.assertEqual(owner.pending_contract["action_generation"], 99)
+        self.assertEqual(released["release_phase"], "awaiting_transport_ack")
+
+    def test_release_merge_ignores_a_different_route_terminal(self):
+        merge = GlobalFrontierRouteStateMixin.merge_route_release_contract
+        exact = {"route_id": 56, "transaction_id": 56, "action_generation": 99}
+        successor = {"route_id": 57, "transaction_id": 57, "action_generation": 99}
+        merged = merge(56, exact, None, successor, None)
+        self.assertEqual(merged["route_id"], 56)
+        self.assertEqual(merged["transaction_id"], 56)
+
+    def test_dispatched_route_and_observed_terminal_still_require_ack(self):
+        policy = GlobalFrontierRouteStateMixin.controller_release_requires_ack
+        self.assertTrue(policy(47, 75, False))
+        self.assertTrue(policy(47, 0, True))
+
     def test_delayed_failure_is_cleanup_after_logical_terminal(self):
         explorer = _Explorer()
         payload = {

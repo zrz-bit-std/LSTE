@@ -3,6 +3,23 @@
 import rospy
 
 
+PORTAL_AUTH_RETRY_MIN_SECONDS = 8.0
+PORTAL_AUTH_RETRY_MAX_SECONDS = 12.0
+
+
+def portal_authentication_retry_budget(active_timeout):
+    # Allow a fresh lease for a transient fault, but bound the whole doorway
+    # phase well below the former 60–90 second retry window.
+    try:
+        timeout = float(active_timeout)
+    except (TypeError, ValueError):
+        timeout = PORTAL_AUTH_RETRY_MIN_SECONDS
+    return min(
+        PORTAL_AUTH_RETRY_MAX_SECONDS,
+        max(PORTAL_AUTH_RETRY_MIN_SECONDS, 0.5 * timeout),
+    )
+
+
 class GlobalFrontierExecutionResolutionMixin:
     """Commit a finished route or invalidate it with complete lifecycle data."""
 
@@ -197,14 +214,22 @@ class GlobalFrontierExecutionResolutionMixin:
             turn_started = float(getattr(
                 self, "portal_auth_watchdog_turn_started_at", now))
             auth_turn_watchdog_grace = (
-                float(now) - turn_started < max(60.0, 2.0 * float(self.active_timeout))
+                float(now) - turn_started < portal_authentication_retry_budget(self.active_timeout)
             )
         elif getattr(self, "portal_auth_watchdog_stage_key", None) is not None:
             self.portal_auth_watchdog_stage_key = None
             self.portal_auth_watchdog_turn_started_at = None
-        endpoint_reached = (
-            distance <= self.endpoint_terminal_wait_radius and waypoint_reached
+        auth_entry_approach_pending = bool(
+            auth_phase == "entering" and auth is not None
+            and auth.state == "entering"
+            and getattr(self, "active_portal_authentication_entry_approach", False)
         )
+        endpoint_tolerance = (
+            max(float(self.endpoint_terminal_wait_radius), 0.55)
+            if auth_entry_approach_pending
+            else float(self.endpoint_terminal_wait_radius)
+        )
+        endpoint_reached = distance <= endpoint_tolerance and waypoint_reached
         if auth_turning:
             # XY arrival alone is not a completed turn connector. Keep the
             # locked-yaw route live until the authentication pose samples are
@@ -224,6 +249,11 @@ class GlobalFrontierExecutionResolutionMixin:
         # stationary connector, so do not hold the doorway ledger on it.
         auth_turn_contract = bool(auth_turning and auth is not None
                                   and auth.rotation_ready)
+        auth_entry_approach_contract = bool(
+            auth_phase == "entering" and auth is not None
+            and auth.state == "entering" and endpoint_reached
+            and getattr(self, "active_portal_authentication_entry_approach", False)
+        )
         # A failed MoveBase terminal is stronger evidence than geometric
         # proximity. The base can stop inside the wait envelope after local
         # recovery, but it cannot later emit the terminal for this lease.
@@ -279,6 +309,7 @@ class GlobalFrontierExecutionResolutionMixin:
         if endpoint_reached and (
             not terminal_required or self.active_terminal_received
             or auth_turn_contract or auth_return_contract
+            or auth_entry_approach_contract
         ):
             auth_phase = str(getattr(
                 self, "active_portal_authentication_phase", "") or ""
@@ -298,11 +329,23 @@ class GlobalFrontierExecutionResolutionMixin:
                     elif auth_phase == "entering":
                         if auth.state == "entering":
                             auth.update_entry(pose_xy)
+                            if auth.state == "inside":
+                                auth.entry_approach_goal_odom = None
+                                self.active_portal_authentication_entry_approach = False
                             if auth.state != "inside":
-                                auth.request_failure_return(
-                                    "entry_terminal_before_fully_inside",
-                                    pose_xy=pose_xy,
-                                )
+                                if getattr(self, "active_portal_authentication_entry_approach", False):
+                                    self.active_portal_authentication_entry_approach = False
+                                    auth.entry_approach_goal_odom = None
+                                    self.publish_status(
+                                        "portal_authentication_entry_approach_terminal",
+                                        node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+                                        pose=None if pose_xy is None else list(pose_xy),
+                                    )
+                                else:
+                                    auth.request_failure_return(
+                                        "entry_terminal_before_fully_inside",
+                                        pose_xy=pose_xy,
+                                    )
                         # After full entry, wait for a fresh SLAM frontier scan
                         # before releasing the goal or accepting the branch.
                         stage_complete = auth.state in ("turning", "returning", "failed")
@@ -344,6 +387,14 @@ class GlobalFrontierExecutionResolutionMixin:
             if self.prefetched_frontier is None:
                 self.prefetched_goal_map = None
             return None
+
+        if auth_turning and auth_turn_watchdog_grace:
+            # A turn connector intentionally has no XY progress. Keep its
+            # lease alive while the locked-yaw controller settles; otherwise
+            # the generic watchdog deactivates it on every planning cycle and
+            # repeatedly restarts the same doorway turn.
+            return (row, col, x, y,
+                    float(route_steps[row, col]) * resolution, 0.0)
 
         if endpoint_reached and terminal_required:
             # Map coverage and endpoint distance do not own the controller
@@ -412,7 +463,7 @@ class GlobalFrontierExecutionResolutionMixin:
                 self.portal_auth_entry_started_at = float(now)
             entry_started = float(getattr(
                 self, "portal_auth_entry_started_at", now))
-            entry_budget = max(60.0, 2.0 * float(self.active_timeout))
+            entry_budget = portal_authentication_retry_budget(self.active_timeout)
             if float(now) - entry_started < entry_budget:
                 self.publish_status(
                     "portal_authentication_entry_route_retry",
@@ -430,7 +481,7 @@ class GlobalFrontierExecutionResolutionMixin:
             if turn_started is None:
                 turn_started = float(now)
                 self.portal_auth_watchdog_turn_started_at = turn_started
-            turn_budget = max(60.0, 2.0 * float(self.active_timeout))
+            turn_budget = portal_authentication_retry_budget(self.active_timeout)
             if float(now) - float(turn_started) < turn_budget:
                 self.publish_status(
                     "portal_authentication_turn_route_retry",
@@ -442,13 +493,18 @@ class GlobalFrontierExecutionResolutionMixin:
                 # target, and let GP activate a fresh connector for this branch.
                 self.active_portal_authentication_phase = ""
                 auth_phase = ""
+            else:
+                auth._event("doorway_navigation_phase_budget_expired",
+                    phase="turning", timeout=float(turn_budget),
+                    elapsed=round(float(now)-float(turn_started), 3),
+                    reason=str(reason), route_id=int(getattr(self, "active_route_id", 0)))
         if auth is not None and auth.state == "returning":
             return_key = int(auth.branch_id)
             if getattr(self, "portal_auth_return_retry_branch_id", None) != return_key:
                 self.portal_auth_return_retry_branch_id = return_key
                 self.portal_auth_return_started_at = float(now)
             return_started = float(getattr(self, "portal_auth_return_started_at", now))
-            return_budget = max(60.0, 2.0 * float(self.active_timeout))
+            return_budget = portal_authentication_retry_budget(self.active_timeout)
             if float(now) - return_started < return_budget:
                 # A transient controller failure is not a false doorway. Keep
                 # the same source node and retry returning under a fresh lease.
@@ -460,6 +516,20 @@ class GlobalFrontierExecutionResolutionMixin:
                 )
                 self.active_portal_authentication_phase = ""
                 auth_phase = ""
+        if (auth is not None and auth.state == "returning"
+                and auth_phase == "returning"):
+            # A controller terminal cannot fail/finish a branch while the robot
+            # is still away from its source node. Retire this lease and let the
+            # GP adapter select a bounded, Navfn-reachable source-side fallback.
+            auth.note_return_route_failure(reason)
+            self.publish_status(
+                "portal_authentication_return_route_failed",
+                node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+                reason=str(reason), source_xy=list(auth.source_xy or ()),
+                retry_count=int(getattr(auth, "return_controller_failure_count", 0)),
+            )
+            self.active_portal_authentication_phase = ""
+            auth_phase = ""
         if auth_phase:
             auth = getattr(self, "active_portal_authentication", lambda: None)()
             if (auth is not None and auth.state in ("turning", "returning")
@@ -512,22 +582,20 @@ class GlobalFrontierExecutionResolutionMixin:
             portal_id = int(getattr(self, "last_portal_hypothesis_id", 0) or 0)
             if ledger is not None and portal_id > 0:
                 record = getattr(ledger, "get", lambda _id: None)(portal_id)
-                is_crossed = (
-                    isinstance(record, dict)
-                    and str(record.get("state", "")).strip().lower()
-                    == "crossed"
-                )
+                # Navigation/controller failure does not disprove a doorway.
+                # Keep the authenticated candidate discoverable for retry;
+                # only doorway evidence (for example, no frontier after entry)
+                # may transition it to failed.
                 recorder = getattr(ledger, "execution_failed", None)
-                if is_crossed:
-                    failed = (
-                        record
-                        if not callable(recorder)
-                        else recorder(portal_id, now=now)
-                    )
-                    failure_event = "portal_execution_failure_observed"
-                else:
-                    failed = ledger.failed(portal_id, now=now)
-                    failure_event = "portal_hypothesis_failed"
+                map_epoch = getattr(self, "last_map_epoch", None)
+                if map_epoch is None:
+                    map_epoch = getattr(self, "topology_component_epoch", None)
+                failed = (
+                    record
+                    if not callable(recorder)
+                    else recorder(portal_id, now=now, map_epoch=map_epoch)
+                )
+                failure_event = "portal_execution_failure_observed"
                 if failed is not None:
                     self.publish_status(
                         failure_event,

@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 
+from global_frontier_grid import cell_xy
 from global_frontier_models import FrontierCandidateRoute, PortalSource
 from global_frontier_portal_certification import (
     certified_adjacent_place_transitions,
@@ -245,6 +246,44 @@ class GlobalFrontierCandidatePortalMixin:
         )
         if nearest_reachable is None and request.steps[destination_cell] >= 0:
             endpoint = destination_cell
+
+        # The authenticated destination may land in an unknown or occupied
+        # cell after a SLAM update even though the branch was physically
+        # traversed. Reproject to reachable free cells strictly inside the
+        # certified doorway axis; never fall back to a gate-side viewpoint.
+        gate_dx = float(destination_xy[0]) - float(gate_xy[0])
+        gate_dy = float(destination_xy[1]) - float(gate_xy[1])
+        gate_length = math.hypot(gate_dx, gate_dy)
+        if gate_length <= 1e-6:
+            return None
+        unit_x, unit_y = gate_dx / gate_length, gate_dy / gate_length
+        minimum_depth = max(
+            0.35,
+            float(getattr(self, "robot_radius", 0.30))
+            + float(getattr(self, "endpoint_terminal_wait_radius", 0.45)),
+        )
+        lateral_limit = max(0.55, float(getattr(self, "region_topology_clearance", 0.50)))
+
+        def interior(cell):
+            if cell is None or request.steps[cell] < 0:
+                return None
+            point = cell_xy(request.message, int(cell[0]), int(cell[1]))
+            dx, dy = float(point[0]) - float(gate_xy[0]), float(point[1]) - float(gate_xy[1])
+            depth = dx * unit_x + dy * unit_y
+            lateral = abs(dx * unit_y - dy * unit_x)
+            return point if depth >= minimum_depth and lateral <= lateral_limit else None
+
+        if interior(endpoint) is None:
+            reachable = np.argwhere(np.asarray(request.steps) >= 0)
+            best = None
+            for row, col in reachable:
+                point = interior((int(row), int(col)))
+                if point is None:
+                    continue
+                cost = (float(point[0]) - float(destination_xy[0])) ** 2 + (float(point[1]) - float(destination_xy[1])) ** 2
+                if best is None or cost < best[0]:
+                    best = (cost, (int(row), int(col)))
+            endpoint = None if best is None else best[1]
         if endpoint is None or request.steps[endpoint] < 0:
             return None
         return PortalSource(
@@ -383,6 +422,11 @@ class GlobalFrontierCandidatePortalMixin:
         selecting the nearest current frontier keeps the information task
         alive without minting a new WorkItem or Place.
         """
+        if getattr(self, "gp_portal_assistance_enabled", False):
+            # GP owns discovery and the complete enter/observe/return proof.
+            # Legacy structural probes must not compete with Place WI/TSP.
+            return []
+
         ledger = getattr(self, "portal_probe_ledger", None)
         source_place_id = getattr(context, "source_place_id", None)
         if ledger is None or source_place_id is None or frontier is None:
@@ -561,6 +605,11 @@ class GlobalFrontierCandidatePortalMixin:
         unverified graph boundary.  The returned route remains source-side and
         carries a durable probe identity; it cannot authorize a crossing.
         """
+        if getattr(self, "gp_portal_assistance_enabled", False):
+            # GP owns discovery and the complete enter/observe/return proof.
+            # Legacy structural probes must not compete with Place WI/TSP.
+            return []
+
         if (
             context is None
             or not getattr(context, "source_place_observed", False)

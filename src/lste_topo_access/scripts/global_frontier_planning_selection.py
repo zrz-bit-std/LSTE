@@ -146,6 +146,22 @@ class GlobalFrontierPlanningSelectionMixin:
         if pending is None:
             return None, None, False
         x, y = pending["anchor_map"]
+        constraints = getattr(self, "place_navigation_constraints", None)
+        if constraints is not None:
+            if (not constraints.set_mode(self, not pending.get("resume_portal_transition", False))
+                    or not constraints.ready(self)):
+                return None, None, True
+        from global_frontier_place_partition import point_in_place_scope
+        if (not pending.get("resume_portal_transition", False)
+                and point_in_place_scope(self, (x, y)) is False):
+            self.pending_local_egress = None
+            lease = getattr(self, "local_egress_place_lease", None)
+            if lease is not None:
+                lease.clear()
+            self.publish_status("local_egress_discarded",
+                source_route_id=int(pending["source_route_id"]),
+                recovery_goal=[float(x), float(y)], reason="outside_current_place_scope")
+            return None, None, False
         route_graph = snapshot.route_graph
         reassociated = self.nearest_reachable_cell(
             snapshot.message,
@@ -278,7 +294,33 @@ class GlobalFrontierPlanningSelectionMixin:
             "epoch",
             None,
         )
+        owns_portal_navigation = getattr(
+            self, "portal_authentication_owns_navigation", None
+        )
+        authentication_owns_navigation = bool(
+            callable(owns_portal_navigation) and owns_portal_navigation()
+        )
         transaction = getattr(self, "portal_transaction", None)
+        if (authentication_owns_navigation and transaction is not None
+                and transaction.active and transaction.state == "source_probe"
+                and int(transaction.snapshot().route_id) == 0
+                and not getattr(self, "active_portal_crossing_observed", False)):
+            # SLAM can add a branch after an earlier observation cycle briefly
+            # completed. A reserved edge released before controller dispatch
+            # must yield to that observation; it has no physical crossing to
+            # finish. Keep the durable Portal/WI ledgers intact for resumption.
+            transition = transaction.abort(
+                "unstarted_portal_yields_to_authentication")
+            transaction.finish("portal_authentication_preemption")
+            self.portal_transaction_route_rebind_pending = False
+            self.publish_status(
+                "portal_transaction_aborted",
+                transaction_id=int(transition.transaction_id),
+                route_id=int(transition.route_id),
+                portal_id=transition.portal_id,
+                reason=transition.last_reason,
+                preserved_portal_obligation=True,
+            )
         if (
             transaction is not None
             and transaction.active
@@ -301,6 +343,34 @@ class GlobalFrontierPlanningSelectionMixin:
                 reason="portal_transaction_owned",
             )
             return None, "portal_transaction_wait", True
+        # GP observation/authentication owns navigation until every branch
+        # has returned to its junction. A failed GP route can leave a generic
+        # local egress queued; dispatching it first strands the active branch
+        # and prevents the same authentication target from being retried.
+        if authentication_owns_navigation:
+            pending_egress = getattr(self, "pending_local_egress", None)
+            if pending_egress is not None:
+                self.pending_local_egress = None
+                lease = getattr(self, "local_egress_place_lease", None)
+                if lease is not None:
+                    lease.clear()
+                self.publish_status(
+                    "local_egress_discarded",
+                    source_route_id=int(pending_egress["source_route_id"]),
+                    reason="portal_authentication_owns_navigation",
+                )
+            candidate = self._choose_frontier_for_new_action(
+                snapshot.message,
+                snapshot.route_graph,
+                snapshot.map_context,
+                snapshot.now,
+                snapshot.robot_map,
+                snapshot.robot_yaw_map,
+            )
+            if candidate is not None:
+                return candidate, "gp_portal_authentication", False
+            return None, "gp_portal_authentication_wait", True
+
         durable_probe_checked = False
         candidate, selection_mode, wait_for_validation = (
             self.select_pending_local_egress(snapshot)

@@ -73,8 +73,6 @@ class TebGoalBridgeFrontierStatusMixin:
             == "awaiting_transport_ack"
             or bool(payload.get("force_controller_lease_release", False))
         )
-        if (not terminal_received and not forced_controller_release) or not controller_pending:
-            return False
         try:
             route_id = max(
                 0,
@@ -114,6 +112,12 @@ class TebGoalBridgeFrontierStatusMixin:
             return value if hasattr(value, "get") else None
 
         contract_candidates = []
+        released_ack = getattr(self, "pending_successor_release_ack", None)
+        if isinstance(released_ack, dict):
+            # Transport may finish before the graph starts waiting for its ACK.
+            # Retain the exact released identity for idempotent ACK retries.
+            contract_candidates.append(("released_transport_ack",
+                dict(released_ack, source="global_slam_frontier", priority=0)))
         pending_prepare = getattr(self, "pending_terminal_prepare", None)
         if isinstance(pending_prepare, dict):
             contract_candidates.append(
@@ -178,11 +182,51 @@ class TebGoalBridgeFrontierStatusMixin:
                 expected_contract = dict(candidate)
                 expected_contract_source = source
                 break
-        active_route_id = int(getattr(self, "active_route_id", 0) or 0)
-        latest_route_id = int(getattr(self, "latest_route_id", 0) or 0)
         expected_route_id = contract_int(
             expected_contract.get("route_id")
         ) if expected_contract else 0
+        if not controller_pending:
+            # GlobalFrontier may release a semantic route before its async
+            # controller-dispatch identity has arrived. Bind that request only
+            # when this bridge already owns an exact same-route action
+            # contract. A semantic-only route with no matching dispatch stays
+            # a no-op; never infer ownership from route_id alone.
+            action_source = str(expected_contract.get("source", "") or "").lower()
+            action_generation = contract_int(
+                expected_contract.get("action_generation"),
+                expected_contract.get("generation"),
+            )
+            if (expected_route_id != route_id or action_generation <= 0
+                    or action_source != "global_slam_frontier"):
+                return False
+            released = dict(released)
+            released["route_id"] = route_id
+            for field in (
+                "route_kind", "transaction_id", "lifecycle_transaction_id",
+                "graph_transaction_id", "map_epoch", "origin_epoch",
+                "projection_epoch",
+            ):
+                if released.get(field) in (None, "", 0):
+                    value = expected_contract.get(field)
+                    if value is not None:
+                        released[field] = value
+            if released.get("action_generation") in (None, "", 0):
+                released["action_generation"] = action_generation
+            payload = dict(payload)
+            payload["released_controller_route"] = released
+            payload["controller_pending"] = True
+            payload["release_phase"] = "awaiting_transport_ack"
+            controller_pending = True
+            forced_controller_release = True
+            terminal_received = bool(
+                released.get("terminal_received") or terminal_received
+            )
+
+        if (not terminal_received and not forced_controller_release) or not controller_pending:
+            return False
+
+        active_route_id = int(getattr(self, "active_route_id", 0) or 0)
+        latest_route_id = int(getattr(self, "latest_route_id", 0) or 0)
         pending_release_contract = getattr(
             self, "pending_lease_release_contract", None
         )
@@ -262,9 +306,10 @@ class TebGoalBridgeFrontierStatusMixin:
                     ),
                 )
                 return False
-        if active_route_id > route_id or (
+        ack_replay = expected_contract_source == "released_transport_ack"
+        if not ack_replay and (active_route_id > route_id or (
             latest_route_id > route_id and not pending_release_matches
-        ):
+        )):
             return False
         if active_route_id != route_id and expected_route_id != route_id:
             # The action-health clear path intentionally removes active route
@@ -458,6 +503,14 @@ class TebGoalBridgeFrontierStatusMixin:
                     received_map_epoch=incoming_map,
                 )
                 return False
+        if ack_replay:
+            # Identity checks above remain exact. This lease is already gone:
+            # resend its ACK without cancelling or replacing a newer action.
+            self._publish_frontier_release_ack_locked(
+                route_id, expected_contract,
+                str(expected_contract.get("route_kind", "") or ""),
+                release_phase="cached_transport_release_ack")
+            return True
         semantic_pending = (
             self._persistent_frontier_endpoint_release_pending_locked(
                 payload,
@@ -528,6 +581,18 @@ class TebGoalBridgeFrontierStatusMixin:
             route_id, incoming_generation or expected_generation
         )
         if self._released_action_key_seen_locked(release_key):
+            released_route = dict(expected_contract)
+            released_route.update({
+                "route_id": route_id,
+                "route_kind": str(expected_contract.get("route_kind", "") or ""),
+                "transaction_id": incoming_transaction,
+                "lifecycle_transaction_id": incoming_lifecycle,
+                "action_generation": incoming_generation,
+                "graph_transaction_id": incoming_graph,
+                "map_epoch": incoming_map,
+                "origin_epoch": incoming_origin,
+                "projection_epoch": incoming_projection,
+            })
             self.publish_bridge_status(
                 "controller_lease_release_duplicate_ignored",
                 route_id=route_id,
@@ -542,7 +607,25 @@ class TebGoalBridgeFrontierStatusMixin:
                 dedupe_key=[int(release_key[0]), int(release_key[1])]
                 if release_key is not None else None,
             )
-            return False
+            self.publish_bridge_status(
+                "lease_release_ack",
+                released_route_id=route_id,
+                released_route_kind=str(released_route.get("route_kind", "") or ""),
+                route_id=route_id,
+                transaction_id=incoming_transaction,
+                lifecycle_transaction_id=incoming_lifecycle,
+                action_generation=incoming_generation,
+                graph_transaction_id=incoming_graph,
+                map_epoch=incoming_map,
+                origin_epoch=incoming_origin,
+                projection_epoch=incoming_projection,
+                controller_lease="released",
+                transport_lease="held",
+                semantic_only=True,
+                release_phase="persistent_stream_duplicate_release",
+                released_controller_route=released_route,
+            )
+            return True
         released_route_kind = str(
             released.get("route_kind")
             or payload.get("released_route_kind")

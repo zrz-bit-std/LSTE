@@ -16,6 +16,15 @@ from global_frontier_durable_portal_route import (  # noqa: E402
 
 
 class DurablePortalRouteTest(unittest.TestCase):
+    def test_projected_goal_is_normal_to_measured_section(self):
+        record=dict(id=2,source_place_id=1,physical_gate=(0.,0.),physical_destination=(2.,1.),
+                    physical_bounds=((0.,-1.),(0.,1.)))
+        projection=project_record(record,lambda x,y:(x+3.,y+4.))
+        self.assertEqual(projection.gate_xy,(3.,4.))
+        self.assertAlmostEqual(projection.destination_xy[1],4.)
+        self.assertAlmostEqual(projection.destination_xy[0],3.+5.**.5)
+        self.assertEqual(record['physical_destination'],(2.,1.))
+
     def test_current_physical_projection_wins_over_stale_map_projection(self):
         record = {
             "id": 7,

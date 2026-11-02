@@ -722,12 +722,12 @@ MUX_GOVERNOR_MAX_SPEED: 0.50
 # Select exactly one detector profile. This is the only key needed to change
 # detector model:
 #   groundingdino  - original DINO node; two prompt passes; lower FPS.
-#   wedetect-base  - 640x640 WeDetect Base TensorRT; less VRAM/faster startup.
-#   wedetect-large - 1280x1280 WeDetect Large TensorRT; better small-object
-#                     detail but more VRAM and slower than Base.
-# The launcher automatically chooses the separate node file, checkpoint,
-# XLM-RoBERTa, ONNX, and TensorRT cache. Do not add model paths here.
-DETECTOR: wedetect-large
+#   wedetect-tiny  - 640x640 WeDetect Tiny PyTorch; lowest detector memory.
+#   wedetect-base  - 640x640 WeDetect Base; balanced detail and memory.
+#   wedetect-large - 1280x1280 WeDetect Large; best small-object detail, highest VRAM.
+# Override DETECTOR per task (e.g. DETECTOR=wedetect-tiny). The launcher
+# chooses the matching checkpoint and text encoder; paths stay out of this file.
+DETECTOR: wedetect-base
 # RTX 2070 (8 GiB) local profile: run the official PyTorch deployment path.
 # TensorRT engines from the RTX 3060 host are GPU-specific and are not reused.
 WDETECT_RUNTIME: pytorch

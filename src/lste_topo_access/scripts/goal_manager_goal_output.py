@@ -606,6 +606,17 @@ class GoalManagerGoalOutputMixin:
             "lifecycle_transaction_id": lifecycle_id,
         })
         self.pub_goal_command.publish(String(data=json.dumps(command, sort_keys=True)))
+        if self.goal_source == "global_slam_frontier":
+            from portal_authentication_turn_contract import authentication_turn_contract
+            turn = authentication_turn_contract(
+                getattr(self, "global_frontier_authentication_turn", None),
+                intent.get("route_id", 0), intent.get("graph_transaction_id", 0),
+                intent.get("lifecycle_transaction_id", 0))
+            intent["authentication_turn_required"] = bool(
+                getattr(self, "global_frontier_authentication_turn_required", False)
+                and intent.get("route_kind") == "frontier_turn_connector")
+            if turn is not None:
+                intent["authentication_turn"] = turn
         self.pub_goal_intent.publish(String(data=json.dumps(intent, sort_keys=True)))
         self.pub_goal.publish(goal)
         rospy.loginfo_throttle(2.0, "Publish /lste/final_goal: x=%.2f y=%.2f state=%s",

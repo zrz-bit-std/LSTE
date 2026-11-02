@@ -24,21 +24,38 @@ COLORS = {"completed": "#16836c", "failed": "#bd5144", "entering": "#2674b8",
           "active": "#2674b8", "explored": "#64748b", "authenticated": "#16836c"}
 
 def read_metrics(path):
-    events=[]; poses=[]; latest_tree=None; dedup=[]
-    for line in Path(path).open(encoding="utf-8", errors="replace"):
-        if " data=" not in line: continue
-        event=line.split(" event=",1)[1].split(" data=",1)[0] if " event=" in line else ""
-        try: data=json.loads(line.split(" data=",1)[1])
-        except (ValueError, TypeError): continue
-        if event == "sample" and data.get("pose"):
-            poses.append(data)
-        if event == "global_frontier_event":
-            name=data.get("frontier_event","")
-            events.append((name,data))
-            if name == "gp_branch_tree":
-                latest_tree=data.get("tree") or latest_tree
-                if data.get("dedup_audit"):
-                    dedup.append((data.get("ros_time",0),data["dedup_audit"]))
+    events=[]; poses=[]; latest_tree=None; dedup=[]; latest_state={}
+    with Path(path).open(encoding="utf-8",errors="strict") as stream:
+        for lineno,line in enumerate(stream,1):
+            if not line.strip():continue
+            if " data=" not in line or not line.endswith("\n"):
+                raise ValueError("incomplete metrics record at line %d" % lineno)
+            event=line.split(" event=",1)[1].split(" data=",1)[0] if " event=" in line else ""
+            data=json.loads(line.split(" data=",1)[1])
+            if not isinstance(data,dict):raise ValueError("non-object metrics record")
+            if event == "sample" and data.get("pose"):
+                poses.append({"pose":data["pose"],"ros_time":data.get("ros_time")})
+            if event == "global_frontier_event":
+                name=data.get("frontier_event","")
+                keys=("ros_time","branch_id","node_id","phase","goal_odom","route_id",
+                      "work_item_id","attempt_id","place_id","parent_place_id","portal_id")
+                row={k:data[k] for k in keys if k in data}
+                if name == "work_item_dispatched":
+                    row["graph_route_plan"]=data.get("graph_route_plan")
+                    row["work_items"]=[w for w in data.get("work_items",[])
+                                       if w.get("id")==data.get("work_item_id")]
+                if name in ("semantic_room_exploration_started","semantic_room_closed"):
+                    row["active_semantic_room"]=data.get("active_semantic_room")
+                if name in ("place_dfs_entered","place_dfs_returned","place_dfs_completion_ready"):
+                    row["place_dfs"]=data.get("place_dfs")
+                events.append((name,row))
+                for key in ("place_dfs","portal_hypotheses"):
+                    if data.get(key) is not None:latest_state[key]=data[key]
+                if name == "gp_branch_tree":
+                    latest_tree=data.get("tree") or latest_tree
+                    if data.get("dedup_audit"):
+                        dedup.append((data.get("ros_time",0),data["dedup_audit"]))
+    if events:events[-1][1].update(latest_state)
     return events, poses, latest_tree, dedup
 
 def main():
@@ -47,10 +64,30 @@ def main():
     ap.add_argument("--world", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--model-root", type=Path, action="append")
+    ap.add_argument("--junction-center", nargs=2, type=float,
+                    help="Audit candidate completion only for this junction center")
+    ap.add_argument("--junction-radius", type=float, default=2.0)
     ap.add_argument("--route-zoom", action="store_true", help="Focus on measured motion; use scene PNG for the full floorplan")
     args=ap.parse_args()
     events,poses,tree,dedup=read_metrics(args.metrics_log)
-    result=audit(args.metrics_log)
+    result=audit(args.metrics_log, junction_center=args.junction_center,
+                  junction_radius=args.junction_radius)
+    target_nodes = None
+    if args.junction_center is not None and tree:
+        target_nodes = {
+            int(node["id"]) for node in tree.get("nodes", [])
+            if node.get("junction_confirmed") and node.get("physical_xy")
+            and math.dist(node["physical_xy"], args.junction_center) <= args.junction_radius
+        }
+        target_branches = {int(branch["id"]) for branch in tree.get("branches", [])
+                           if int(branch.get("node_id", -1)) in target_nodes}
+        tree = dict(tree, nodes=[node for node in tree.get("nodes", [])
+                                 if int(node["id"]) in target_nodes],
+                    branches=[branch for branch in tree.get("branches", [])
+                              if int(branch["id"]) in target_branches])
+        events = [(name, data) for name, data in events
+                  if not name.startswith("portal_authentication")
+                  or int(data.get("node_id", -1)) in target_nodes]
     roots=args.model_root or [Path.home()/".gazebo/models", ROOT/"worlds"]
     try: shapes,_,missing=read_scene(args.world,roots)
     except Exception: shapes,missing=[],["world_geometry_parse_failed"]
@@ -151,9 +188,9 @@ def main():
                 milestones.append("%s @ %.1fs"%(evmap[name],data.get("ros_time",0)))
         side.text(.035,y,"  →  ".join(milestones[-5:]),fontsize=7.3,color="#526273",va="top",wrap=True)
         y-=.047
-    side.text(0,y-.01,"Online SLAM / GP dedup audit",fontsize=11,weight="bold",va="top")
+    side.text(0,y-.01,"Online SLAM / GP dedup audit (run maxima)",fontsize=11,weight="bold",va="top")
     y-=.06
-    dedup_latest=dedup[-1][1] if dedup else {}
+    dedup_latest=result.get("online_slam_dedup_audit") or {}
     for label,key in (("Raw GP proposals","raw_gp_proposals"),
                       ("SLAM-refined directions","slam_refined_proposals"),
                       ("Suppressed by mapped free-space","slam_supported_rejections"),
@@ -165,7 +202,7 @@ def main():
               fontsize=7.4,color="#64748b",va="top")
     checks=result["checks"]
     failed=[k.replace("_"," ") for k,v in checks.items() if not v]
-    status="All recorded checks pass" if not failed else "Pending checks: "+", ".join(failed[:3])
+    status="Audited junction checks pass; route shows full recorded run" if not failed else "Pending checks: "+", ".join(failed[:3])
     fig.text(.05,.035,status,fontsize=9,color="#16836c" if not failed else "#9b5c1b")
     fig.text(.96,.035,"Source: recorded world model + odometry + GP/auth events; no frontier points synthesized.",
              fontsize=7.2,color="#64748b",ha="right")

@@ -120,3 +120,129 @@ move_base 永远不会进入恢复流程，因此这是**永久死锁**而不是
 第一轮 wrapper 审计：`launch=1 recording=1 tree=1 lifecycle=1 dfs=1`，
 但 `auth/auth_all/turn_raw/tsp/geometry/trajectory/native` 仍未通过。
 **L 场景目前没有通过审计。**
+
+## 8. 第二轮死锁的定位与修复（`terminal_hold`）
+
+### 8.1 证据
+
+第二轮 `20261030_220218` 的合同消息显示：`s1:planner_command` **最后一次出现在 sim 97.8 s**，
+之后全是 `terminal_hold`，并伴随每 ~9 s 一次的 `endpoint_reached`（共 82 次）、
+`mission_boundary` 154 次、`move_base_failed_terminal` 72 次。
+
+关键量化：快照中的 `teb_global_plan` 在 sim 173 / 365 / 587 / 806 四份里**完全相同**
+（28 个位姿、长度恒 1.454 m），`navfn_plan.length = 0.0`、`endpoint = null`。
+
+### 8.2 因果链
+
+1. Navfn 在全局 costmap 上找不到路径，`makePlan` 失败；
+2. `StreamingNavfnPlanner` 走“保留上一条有效路径”的分支，把**上一条路线**的缓存计划
+   交给了**新的 mission goal**；
+3. move_base 把它交给 `PersistentTebLocalPlanner::setPlan`；计划的终点就是机器人已到达的位置；
+4. `teb_.isGoalReached()` 立刻为真 → 插件上报 `endpoint_reached` 并置 `terminal_hold`；
+5. 图侧认为该路线已完成并下发下一条 → 回到第 1 步。
+
+结果是机器人在 `(0.08, 2.80)` 静止 758 s、累计 215 份失败快照，而“失败”表象是每条路线
+都“成功到达”。
+
+### 8.3 修复
+
+- `StreamingNavfnPlanner::makePlan`：仅在缓存计划的目标与当前请求目标一致
+  （同 frame 且距离 ≤ `goal_epsilon_`）时才保留，否则返回失败，
+  让 move_base/图侧真实地失败这条路线，而不是伪造到达。
+- `PersistentTebLocalPlanner::computeVelocityCommands`：`endpoint_reached` 只在
+  确实上报了终点时发布，否则发布 `planner_no_endpoint`。
+
+### 8.4 冒烟验证（`place_dfs_suite_20261031_165651`，20 分钟）
+
+- 假完成循环消失：失败快照 **215 → 15**，`planner_command` **994 → 1669**，
+  `terminal_hold` **7746 → 359**，`endpoint_reached` **82 → 11**。
+- move_base 恢复行为开始真正执行（快照中出现 `conservative_reset 0/4`），
+  这在第二轮从未发生。
+- **但冒烟门禁未通过**：合同消息在 sim 295.9 s 后完全停止，机器人停在
+  `(-15.17, -1.88)` 直到 sim 913。全局前沿日志显示
+  `no strict_clearance candidate within heading limit 115.0deg`、`active=False`、
+  单周期 `2.07 s`。即导航层不再死锁，**探索层选不出候选而进入 idle**。
+
+### 8.5 结论
+
+第三次停滞属于探索/候选选择层，不属于本次导航修复的代码路径。
+在它解决前跑满 60 分钟的 L 只会得到同样的 idle，因此**暂不启动满时长重跑**。
+重跑工具已就绪（见下）。
+
+## 9. 重跑工具
+
+- `scripts/tests/targeted_navigation/l_stall_gate.py <suite_dir>`：把上述四道门禁
+  （规划命令持续、机器人确实在移动、起步净空连续段有界、失败快照数有界）
+  合并成一条命令，可在运行中随时执行。
+- `scripts/tests/targeted_navigation/run_l_clean.sh`：干净环境启动器。
+  预检会拒绝以下情况：残留 Gazebo/roslaunch/rosbag、套件端口被占用、
+  插件库比源码旧、回归测试未通过。
+
+## 10. 探索层候选饥饿（A）
+
+结论：**不是 `strict_clearance`（0.52 m）刷掉了候选**。
+
+- `required_clearance = 0.52`，实测 `forward_clearance = 1.83 / 2.25 / 2.30 m`；
+- sim 293.76 `route_selected`：`candidate_count=11, feasible_count=11, pareto_front_count=6`；
+- 系统记录到的拒绝原因只有 `no_reachable_observation_viewpoint`(39)、
+  `viewpoint_already_attempted`(30)、`place_lifecycle_admission_failed`(22)，**没有任何 clearance 拒绝**。
+
+真正冻结点：sim 295.77 `work_item_suspended` + `controller_lease_released`；sim 298.17
+`portal_authentication_waiting_source_side_geometry`（node 5，branch 11，
+`source_depth=+0.473`，即机器人在门洞目标侧）→ `withdraw_pending(11)`；
+剩余分支 `[9,10,12]` 停在 `phase=watching`、`all_finished=false`，且永远起不来。
+`watching` 期间调用方每轮都收回普通路线，于是 298.2→913 只余心跳。
+
+修复：`JunctionDoorwayAuthentication.expire_unstartable()` 在
+`/lste_global_frontier/portal_observation_start_timeout`（默认 30 s）内没有任何可启动
+分支时，失败剩余分支并完成任务；调用方在收回路线之前调用它，并把树侧分支标记为
+`authentication_state=failed`。
+
+## 11. 物理停滞（B）：致命格编码不匹配
+
+从封存包在 sim 261 直接比对同一格：
+
+| 来源 | 值 |
+| --- | --- |
+| `/map`（SLAM 占据栅格） | **0（自由）** |
+| `/lste/place_navigation_mask` | -1（未知） |
+| `/move_base/global_costmap/costmap` | **100（致命）** |
+
+Navfn 因此返回空路径（`length=0.0`, `endpoint=null`），move_base 中止目标并进入
+`conservative_reset`，每条路线 4–8 s 就失败一次（25 次
+`controller_stall_no_physical_progress`）。
+
+根因：`global_frontier_planning_costmap.py` 的四套门禁全部按
+`>= 253` 判定致命（costmap_2d 内部编码），而订阅到的
+`/move_base/global_costmap/costmap` 是 **0–100 编码**（100=致命、99=内切、-1=未知）。
+于是致命格 100 远低于阈值，`free = data < 253` 把障碍当成可通行，
+可达性门禁、终点净空门禁、Navfn 启动探针全部失效。
+
+修复：新增 `lethal_threshold()` / `lethal_mask()`，从栅格观测到的最大值推断编码
+（峰值 ≤100 用 100，否则用 253），四个调用点共用。终点 3 格余量未改动。
+
+## 12. 原地打转：转向被身份刷新掐断（C）
+
+`20261031_172738` 在 `(-3.24, 13.98)` 从 sim ≈550 停到 931：207 s 内累计偏航
+9.75 rad、位移 0.11 m，线性速度恒 0。
+
+监督器日志：TEB 在距终点 1.45 m、航向误差 22–35° 时给出近零命令 → 启动
+`stalled route reorientation`（目标 yaw ≈ −89.7°）→ **约 1 s 后以
+`bridge_action_identity_changed completed=False` 释放**，36 次里 27 次如此。
+
+核实两点：
+
+1. 转向启动时上下文是 `goal_role="place_observation"`（owner 2 / src 2），
+   0.1–1 s 后翻成 `goal_role="geometry_frontier"`（owner=None / src=None）；
+2. `mission_id` 全程相同（`portal_semantic_test`），但 `graph_transaction_id`
+   每 1–2 s 自增一次。
+
+结论：不是新派发，而是**同一次派发被交替打上两种角色标签**；而续接谓词
+`_continue_stalled_route_turn_for_handoff_locked` 要求两侧都是
+`place_observation` 且 `owner_place_id>0`，因此
+`stalled_route_turn_handoff_continued` 全程 0 次。
+
+修复：改为按 **mission 身份 + 几何一致性** 判定同一次派发——角色白名单放宽到
+`place_observation / place_observation_work / geometry_frontier`，
+place/source place 仅在两侧都已知时才要求相等；终点 ≤2 m、目标 yaw 在容差内、
+最多 8 次交接、非认证 portal 等原有边界全部保留。

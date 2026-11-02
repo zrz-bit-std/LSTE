@@ -17,6 +17,7 @@ from global_frontier_portal_crossing import portal_crossing_depth
 from global_frontier_portal_crossing import portal_source_side_is_proven
 from global_frontier_portal_belief import PortalHypothesisLedger
 from global_frontier_durable_portal_route import (
+    DurablePortalProjection,
     crossing_goal,
     project_record,
     signed_distance,
@@ -97,12 +98,13 @@ class GlobalFrontierPortalEgressMixin:
         return int(rows[index]), int(cols[index])
 
     def select_durable_portal_crossing(self, snapshot):
-        """Compile an unbound certified Portal into a direct crossing route.
+        """Compile a graph-selected forward Portal into a direct route.
 
-        A Portal with source and destination evidence is a graph action even
-        when the current SLAM snapshot has no frontier cell for that doorway.
-        This path deliberately bypasses frontier candidate construction while
-        retaining the same Navfn/costmap validation and route transaction.
+        Both a newly certified edge and a previously crossed, bound edge can
+        be selected here. The latter is needed when semantic room ordering
+        sends the robot back through a known entry after the observation tour,
+        even if current SLAM no longer exposes a frontier at that doorway.
+        Navfn/costmap checks and the Portal identity remain authoritative.
         """
         if getattr(self, "target_region_claim_active", False):
             return None
@@ -118,9 +120,17 @@ class GlobalFrontierPortalEgressMixin:
         if not isinstance(record, dict):
             return None
         state = str(record.get("state", "")).strip().lower()
-        if record.get("destination_place_id") is not None or state not in (
-            "certified", "selected",
-        ):
+        destination_place_id = record.get("destination_place_id")
+        try:
+            destination_place_id = (
+                None if destination_place_id is None
+                else int(destination_place_id)
+            )
+        except (TypeError, ValueError):
+            return None
+        if state not in ("certified", "selected", "crossed"):
+            return None
+        if destination_place_id is not None and destination_place_id <= 0:
             return None
 
         # Branch-first crossing requires completed destination-view evidence.
@@ -144,7 +154,22 @@ class GlobalFrontierPortalEgressMixin:
                     destination_evidence = True
                     break
             if not destination_evidence:
-                return None
+                auth = record.get("gp_authentication_evidence")
+                events = {
+                    str(event.get("event", ""))
+                    for event in (auth.get("events", ()) if isinstance(auth, dict) else ())
+                    if isinstance(event, dict)
+                }
+                required_events = {
+                    "vehicle_fully_inside", "inside_frontier_observed",
+                    "room_facing_turn_complete", "returned_to_junction_node",
+                }
+                gp_auth_complete = (
+                    record.get("gp_authentication_state") == "completed"
+                    and required_events.issubset(events)
+                )
+                if not gp_auth_complete:
+                    return None
 
         message = snapshot.message
         map_epoch = None
@@ -211,7 +236,7 @@ class GlobalFrontierPortalEgressMixin:
             return None
         resolution = max(1e-6, float(message.info.resolution))
         required_depth = (
-            portal_crossing_depth(getattr(self, "clearance", 0.0))
+            portal_crossing_depth(getattr(self, "clearance", 0.0), record)
             + float(getattr(self, "teb_xy_goal_tolerance", 0.35))
             + 0.5 * resolution
         )
@@ -244,6 +269,33 @@ class GlobalFrontierPortalEgressMixin:
                         break
                 if source_history_proven:
                     break
+        # GP authentication already records the robot at the source node before
+        # crossing the Portal, then proves full entry, inside frontier, turn,
+        # and return. Preserve that source-side observation across a failed
+        # materialization/retry when the current pose is now near the gate.
+        auth = record.get("gp_authentication_evidence")
+        auth_events = {
+            str(event.get("event", ""))
+            for event in (auth.get("events", ()) if isinstance(auth, dict) else ())
+            if isinstance(event, dict)
+        }
+        required_auth_events = {
+            "doorway_entry_started", "vehicle_fully_inside",
+            "inside_frontier_observed", "room_facing_turn_complete",
+            "returned_to_junction_node",
+        }
+        if (
+            not source_history_proven
+            and record.get("gp_authentication_state") == "completed"
+            and required_auth_events.issubset(auth_events)
+            and isinstance(auth, dict)
+            and portal_source_side_is_proven(
+                auth.get("source_xy"),
+                record.get("physical_gate"),
+                record.get("physical_destination"),
+            )
+        ):
+            source_history_proven = True
         self.last_portal_source_side_proven = bool(
             source_signed is not None
             and source_signed < 0.0
@@ -257,6 +309,21 @@ class GlobalFrontierPortalEgressMixin:
                 portal_id, "physical_source_side_unproven",
             )
             return None
+        # A completed semantic room is closed after its WorkItems finish.
+        # Durable graph routing must honor that directional seal just like
+        # snapshot-local Portal candidates do.
+        if destination_place_id is not None:
+            sealed_check = getattr(self, "sealed_portal_reentry", None)
+            if callable(sealed_check) and sealed_check(
+                projection.gate_xy,
+                projection.destination_xy,
+                map_to_physical_xy=project,
+            ) is not None:
+                self._report_durable_portal_crossing_unavailable(
+                    portal_id, "portal_entry_sealed",
+                )
+                return None
+
         goal = crossing_goal(projection, required_depth)
         if goal is None:
             self._report_durable_portal_crossing_unavailable(
@@ -311,7 +378,12 @@ class GlobalFrontierPortalEgressMixin:
             gate=[round(float(value), 3) for value in projection.gate_xy],
             goal=[round(float(x), 3), round(float(y), 3)],
             path_distance=round(path_distance, 3),
-            reason="destination_view_promoted_to_portal",
+            destination_place_id=destination_place_id,
+            reason=(
+                "known_place_reentry"
+                if destination_place_id is not None
+                else "destination_view_promoted_to_portal"
+            ),
         )
         return (
             int(row), int(col), float(x), float(y), path_distance,
@@ -460,7 +532,7 @@ class GlobalFrontierPortalEgressMixin:
             return None
         return result if all(math.isfinite(item) for item in result) else None
 
-    def _durable_egress_endpoint(self, message, route_steps, gate_xy, inside_xy):
+    def _durable_egress_endpoint(self, message, route_steps, gate_xy, inside_xy, minimum_depth=None):
         """Sample a free destination-side cell beyond a remembered gate."""
         vector_x = float(gate_xy[0]) - float(inside_xy[0])
         vector_y = float(gate_xy[1]) - float(inside_xy[1])
@@ -469,7 +541,8 @@ class GlobalFrontierPortalEgressMixin:
             return None
         resolution = max(1e-6, float(message.info.resolution))
         depth = (
-            portal_crossing_depth(getattr(self, "clearance", 0.0))
+            (portal_crossing_depth(getattr(self, "clearance", 0.0))
+             if minimum_depth is None else float(minimum_depth))
             + float(getattr(self, "teb_xy_goal_tolerance", 0.35))
             + 0.5 * resolution
         )
@@ -485,7 +558,20 @@ class GlobalFrontierPortalEgressMixin:
         row, col = cell
         if route_steps[row, col] < 0:
             return None
-        return row, col, self.cell_xy(message, row, col)
+        goal = self.cell_xy(message, row, col)
+        projection = DurablePortalProjection(1, 1, tuple(gate_xy), target)
+        actual_depth = signed_distance(goal, projection)
+        if actual_depth is None or actual_depth + 1e-9 < depth:
+            # Nearest-free snapping can land back in the throat. Search the
+            # reachable grid with the same destination half-plane contract.
+            cell = self._destination_side_route_cell(
+                message, route_steps, projection, target, depth,
+            )
+            if cell is None:
+                return None
+            row, col = cell
+            goal = self.cell_xy(message, row, col)
+        return row, col, goal
 
     def _durable_egress_physical_projection(self, message, robot_map, gate_xy, goal_xy):
         """Capture one physical transform for directional admission/identity."""
@@ -647,6 +733,74 @@ class GlobalFrontierPortalEgressMixin:
             for right in record_gates
         )
 
+    def _bound_graph_portal_exit_from_entry(
+            self, place_id, entry, gate_xy, physical_gate_xy,
+            physical_source_xy, physical_goal_xy):
+        """Resolve a reverse edge by its committed Portal identity and side proof.
+
+        Region geometry can drift under online SLAM. A DFS egress already has
+        an exact crossed Portal and parent Place, so geometric nearest-entry
+        inference must not discard that durable edge. Physical directional
+        proof is still required before returning the identified parent.
+        """
+        preferred = _positive_id(getattr(self, "graph_route_portal_id", None))
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        memory = getattr(self, "region_memory", None)
+        if preferred is None or ledger is None or memory is None:
+            return False, None
+        record = ledger.get(preferred)
+        if not isinstance(record, dict) or not isinstance(entry, dict):
+            return False, None
+        entry_id = next((
+            _positive_id(entry.get(key))
+            for key in ("portal_id", "id", "hypothesis_id")
+            if _positive_id(entry.get(key)) is not None
+        ), None)
+        try:
+            source_id = int(record.get("source_place_id"))
+            destination_id = int(record.get("destination_place_id"))
+            entry_source_id = int(entry.get("source_place_id"))
+            current_id = int(place_id)
+        except (TypeError, ValueError):
+            return False, None
+        if not (
+            entry_id == preferred
+            and entry_source_id == source_id
+            and destination_id == current_id
+            and str(record.get("state", "")).strip().lower() == "crossed"
+        ):
+            return False, None
+        parent = memory.by_id(source_id)
+        if not isinstance(parent, dict):
+            return True, None
+        inside = self._entry_xy(entry, "physical_inside")
+        if inside is None:
+            inside_map = self._entry_xy(entry, "inside")
+            transform = getattr(self, "transform_xy", None)
+            if inside_map is not None and callable(transform):
+                inside = transform("odom", "map", inside_map[0], inside_map[1])
+        gate = self._entry_xy(entry, "physical_gate") or physical_gate_xy
+        source = physical_source_xy
+        destination = physical_goal_xy
+        if inside is None or gate is None or source is None or destination is None:
+            return True, None
+        inward = (inside[0]-gate[0], inside[1]-gate[1])
+        source_vector = (source[0]-gate[0], source[1]-gate[1])
+        destination_vector = (destination[0]-gate[0], destination[1]-gate[1])
+        transaction = getattr(self, "portal_transaction", None)
+        historical_source = bool(
+            transaction is not None
+            and getattr(transaction, "source_evidence_matches", lambda *_args: False)(
+                preferred, current_id, gate, destination,
+            )
+        )
+        if ((inward[0]*source_vector[0]+inward[1]*source_vector[1] <= 0.0
+                and not historical_source)
+                or inward[0]*destination_vector[0]
+                + inward[1]*destination_vector[1] >= 0.0):
+            return True, None
+        return True, (parent, entry)
+
     def select_durable_portal_egress(self, snapshot):
         """Return one remembered reverse egress candidate, if executable."""
         self.last_durable_portal_egress_unavailable = None
@@ -714,7 +868,15 @@ class GlobalFrontierPortalEgressMixin:
                 ),
                 None,
             )
-            if entry_portal_id in excluded_portal_ids:
+            if (
+                entry_portal_id in excluded_portal_ids
+                and entry_portal_id != preferred_portal_id
+            ):
+                # A crossed Portal selected by the graph planner is the
+                # required exit from the current Place. Forward materialization
+                # failures must not suppress its reverse egress; the return
+                # candidate still passes map reachability, gate matching, and
+                # reverse-entry proof below.
                 continue
             if not self._entry_matches_graph_portal(entry):
                 last_unavailable_reason = "portal_entry_identity_mismatch"
@@ -727,6 +889,8 @@ class GlobalFrontierPortalEgressMixin:
                 snapshot.route_graph.route_steps,
                 gate_xy,
                 inside_xy,
+                minimum_depth=portal_crossing_depth(getattr(self, "clearance", 0.0),
+                    getattr(getattr(self, "portal_hypothesis_ledger", None), "get", lambda _id: None)(entry_portal_id)),
             )
             if endpoint is None:
                 last_unavailable_reason = "destination_side_not_reachable"
@@ -741,16 +905,28 @@ class GlobalFrontierPortalEgressMixin:
                     goal_xy,
                 )
             )
-            reverse_exit = self.region_memory.portal_exit_from_entry(
+            identity_matched, reverse_exit = self._bound_graph_portal_exit_from_entry(
+                place_id,
+                entry,
                 gate_xy,
-                robot,
-                goal_xy,
-                physical_gate_xy=physical_gate,
-                physical_source_xy=physical_source,
-                physical_destination_xy=physical_goal,
+                physical_gate,
+                physical_source,
+                physical_goal,
             )
+            if not identity_matched:
+                reverse_exit = self.region_memory.portal_exit_from_entry(
+                    gate_xy,
+                    robot,
+                    goal_xy,
+                    physical_gate_xy=physical_gate,
+                    physical_source_xy=physical_source,
+                    physical_destination_xy=physical_goal,
+                )
             if reverse_exit is None:
-                last_unavailable_reason = "reverse_entry_not_found"
+                last_unavailable_reason = (
+                    "bound_entry_direction_unproven"
+                    if identity_matched else "reverse_entry_not_found"
+                )
                 last_unavailable_fields = {}
                 continue
             destination_region = reverse_exit[0]

@@ -98,6 +98,7 @@
   <exec_depend>pluginlib</exec_depend>
   <exec_depend>roscpp</exec_depend>
   <exec_depend>rospy</exec_depend>
+  <exec_depend>dynamic_reconfigure</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>teb_local_planner</exec_depend>
@@ -114,6 +115,7 @@
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
+    <costmap_2d plugin="${prefix}/place_scope_plugins.xml"/>
     <nav_core plugin="${prefix}/persistent_navigation_plugins.xml"/>
 
   </export>

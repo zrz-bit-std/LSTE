@@ -1,0 +1,17 @@
+{
+  "purpose": "navigation-only low-height collision regression; no Portal/world ground truth consumed by planner",
+  "spawn": [
+    -2,
+    0,
+    0
+  ],
+  "goal": [
+    2,
+    0
+  ],
+  "obstacle_reference_model": "semantic_t_junction/west_lounge_plant_1_single_8",
+  "obstacle_xy": [
+    0,
+    0
+  ]
+}
