@@ -552,6 +552,7 @@ class TebGoalBridgeActionClientMixin:
         self.active_best_distance = None
         self.active_progress_monotonic = now_for(self)
         self.active_motion_reference = None
+        self.active_motion_reference_yaw = None
         self.active_motion_progress_monotonic = now_for(self)
         self.active_navfn_plan_points = []
         self.active_navfn_plan_endpoint = None

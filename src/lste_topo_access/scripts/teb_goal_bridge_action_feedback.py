@@ -53,12 +53,14 @@ class TebGoalBridgeActionFeedbackMixin:
             if not odom_sample_after_dispatch:
                 if self.active_motion_reference is None:
                     self.active_motion_reference = (float(base.x), float(base.y))
+                    self.active_motion_reference_yaw = None
                     self.active_motion_progress_monotonic = now
                 elif math.hypot(
                     base.x - self.active_motion_reference[0],
                     base.y - self.active_motion_reference[1],
                 ) >= self.progress_epsilon:
                     self.active_motion_reference = (float(base.x), float(base.y))
+                    self.active_motion_reference_yaw = None
                     self.active_motion_progress_monotonic = now
             self._update_navfn_path_progress_locked(now)
             if (

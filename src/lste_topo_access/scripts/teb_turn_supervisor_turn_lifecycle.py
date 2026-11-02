@@ -615,9 +615,13 @@ class TebTurnSupervisorTurnLifecycleMixin:
     def _continue_stalled_route_turn_for_handoff_locked(
             self, new_identity, previous_context):
         """Keep one physical turn alive across a same-Place endpoint refresh."""
-        if (getattr(self, "state", None) != STATE_TURNING
-                or str(getattr(self, "turn_phase", "") or "")
-                != "stalled_route_reorientation"):
+        if getattr(self, "state", None) != STATE_TURNING:
+            return False
+        if str(getattr(self, "turn_phase", "") or "") not in (
+            "stalled_route_reorientation",
+            "portal_entry_alignment",
+            "pre_route_alignment",
+        ):
             return False
         count = int(getattr(self, "stalled_route_turn_handoff_count", 0) or 0)
         if count >= 8:
@@ -655,7 +659,7 @@ class TebTurnSupervisorTurnLifecycleMixin:
                 or str(getattr(self, "active_action_source", "") or "")
                 != "global_slam_frontier"
                 or str(getattr(self, "active_action_route_kind", "") or "")
-                != "frontier_endpoint"
+                not in ("frontier_endpoint", "portal_transition")
                 or bool(new.get("portal_crossing_certified", False))):
             return False
         goal = getattr(self, "active_action_goal", None)

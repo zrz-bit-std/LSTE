@@ -131,6 +131,7 @@ def _initialize_action_state(bridge):
     bridge.active_best_distance = None
     bridge.active_progress_monotonic = 0.0
     bridge.active_motion_reference = None
+    bridge.active_motion_reference_yaw = None
     bridge.active_motion_progress_monotonic = 0.0
     bridge.active_navfn_plan_points = []
     bridge.active_navfn_plan_endpoint = None

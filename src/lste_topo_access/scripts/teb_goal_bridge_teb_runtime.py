@@ -1022,6 +1022,24 @@ class TebGoalBridgeTebRuntimeMixin:
                 ) >= self.progress_epsilon:
                     self.active_motion_reference = (x, y)
                     self.active_motion_progress_monotonic = now
+                # An in-place alignment is real progress even though the base
+                # does not translate.  Run 20261102_174505 needed a 103 deg
+                # turn to face the only exit (8 m of free corridor at 167 deg)
+                # and was cancelled by this watchdog every 12 s, because only
+                # XY motion refreshed the clock; every cancel re-dispatched the
+                # route and restarted the alignment, so it never finished.
+                # The turn itself stays bounded by the supervisor's rotation
+                # budget, its no-progress release and the heading-cycle lock.
+                yaw_reference = getattr(
+                    self, "active_motion_reference_yaw", None
+                )
+                if yaw_reference is None:
+                    self.active_motion_reference_yaw = yaw
+                elif abs(self._angle_delta(yaw, yaw_reference)) >= float(
+                    getattr(self, "progress_yaw_epsilon", 0.12) or 0.0
+                ):
+                    self.active_motion_reference_yaw = yaw
+                    self.active_motion_progress_monotonic = now
             if (
                 self.teb_reorientation_started_monotonic <= 0.0
                 or self.teb_reorientation_reference_yaw is None
