@@ -152,6 +152,7 @@ def initialize_turn_supervisor_state(supervisor):
     supervisor.turn_cycle_completions = 0
     supervisor.turn_cycle_blocked_goal_xy = None
     supervisor.turn_cycle_reported_goal_xy = None
+    supervisor.turn_cycle_last_completion_wall = 0.0
     supervisor.stalled_route_turn_handoff_count = 0
     supervisor.turn_capped_releases = 0
     supervisor.turn_count = 0

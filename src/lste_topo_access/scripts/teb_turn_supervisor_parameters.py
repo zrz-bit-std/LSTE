@@ -145,6 +145,9 @@ def configure_turn_supervisor_parameters(supervisor):
     supervisor.turn_cycle_goal_tolerance_m = max(
         0.05, float(gp("~turn_cycle_goal_tolerance_m", 0.25))
     )
+    supervisor.turn_cycle_activation_grace_s = max(
+        0.0, float(gp("~turn_cycle_activation_grace_s", 3.0))
+    )
     supervisor.turn_cycle_block_radius_m = max(
         0.10, float(gp("~turn_cycle_block_radius_m", 0.50))
     )

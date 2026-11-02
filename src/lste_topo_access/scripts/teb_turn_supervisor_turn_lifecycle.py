@@ -472,6 +472,10 @@ class TebTurnSupervisorTurnLifecycleMixin:
         """
         if not completed or goal_xy is None or self.pose is None:
             return
+        if str(getattr(self, "turn_phase", "") or "") == "portal_authentication_turn":
+            # A doorway U-turn is a mission obligation, not an alignment retry.
+            return
+        self.turn_cycle_last_completion_wall = float(now_for(self))
         tolerance = float(
             getattr(self, "turn_cycle_goal_tolerance_m", 0.25) or 0.25
         )
@@ -508,18 +512,27 @@ class TebTurnSupervisorTurnLifecycleMixin:
             getattr(self, "turn_cycle_completions", 0) or 0
         ) + 1
         limit = max(1, int(getattr(self, "turn_cycle_limit", 2) or 2))
-        blocked = getattr(self, "turn_cycle_blocked_goal_xy", None)
-        if self.turn_cycle_completions >= limit and blocked is None:
-            self.turn_cycle_blocked_goal_xy = list(self.turn_cycle_goal_xy)
-            self.publish_status_locked(
-                "reorientation_cycle_detected",
-                reason="repeated_alignment_without_translation",
-                goal_xy=[round(float(value), 3) for value in goal_xy],
-                completions=int(self.turn_cycle_completions),
-                travel_since_anchor_m=round(float(moved), 4),
-                last_phase=str(getattr(self, "turn_phase", "") or ""),
-                blocked=True,
-            )
+        if self.turn_cycle_completions >= limit:
+            self._raise_turn_cycle_locked(moved)
+
+    def _raise_turn_cycle_locked(self, moved):
+        """Publish the cycle once and lock every further turn for this goal."""
+        if getattr(self, "turn_cycle_blocked_goal_xy", None) is not None:
+            return True
+        goal = getattr(self, "turn_cycle_goal_xy", None)
+        if goal is None:
+            return False
+        self.turn_cycle_blocked_goal_xy = list(goal)
+        self.publish_status_locked(
+            "reorientation_cycle_detected",
+            reason="repeated_alignment_without_translation",
+            goal_xy=[round(float(value), 3) for value in goal],
+            completions=int(getattr(self, "turn_cycle_completions", 0) or 0),
+            travel_since_anchor_m=round(float(moved), 4),
+            last_phase=str(getattr(self, "turn_phase", "") or ""),
+            blocked=True,
+        )
+        return True
 
     def _turn_cycle_blocks_action_locked(self):
         """One heading owner per goal: refuse to re-aim at a jittering tangent.
@@ -530,13 +543,41 @@ class TebTurnSupervisorTurnLifecycleMixin:
         """
         if bool(getattr(self, "latest_authentication_turn_required", False)):
             return False
-        blocked = getattr(self, "turn_cycle_blocked_goal_xy", None)
         goal = getattr(self, "active_action_goal", None)
-        if blocked is None or goal is None:
+        if goal is None:
             return False
         goal_xy = self._goal_xy(goal)
         if goal_xy is None:
             return False
+        blocked = getattr(self, "turn_cycle_blocked_goal_xy", None)
+        if blocked is None:
+            # Activation-time detection: if the first completed alignment did
+            # not move the base, the next turn for the same goal is the second
+            # half of a cycle.  Run 20261102_174505's second turn took 11 s to
+            # finish, so waiting for it would miss a 10 s detection budget.
+            completions = int(getattr(self, "turn_cycle_completions", 0) or 0)
+            anchor = getattr(self, "turn_cycle_pose_anchor_xy", None)
+            completed_at = float(
+                getattr(self, "turn_cycle_last_completion_wall", 0.0) or 0.0
+            )
+            pose = getattr(self, "pose", None)
+            if completions >= 1 and anchor is not None and pose is not None:
+                moved = math.hypot(
+                    float(pose.x) - float(anchor[0]),
+                    float(pose.y) - float(anchor[1]),
+                )
+                grace = float(
+                    getattr(self, "turn_cycle_activation_grace_s", 3.0) or 0.0
+                )
+                minimum = float(
+                    getattr(self, "turn_cycle_translation_m", 0.15) or 0.0
+                )
+                if (moved < minimum and completed_at > 0.0
+                        and now_for(self) - completed_at >= grace):
+                    self._raise_turn_cycle_locked(moved)
+                    blocked = getattr(self, "turn_cycle_blocked_goal_xy", None)
+            if blocked is None:
+                return False
         radius = float(getattr(self, "turn_cycle_block_radius_m", 0.50) or 0.0)
         if math.hypot(
             float(goal_xy[0]) - float(blocked[0]),

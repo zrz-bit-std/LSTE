@@ -43,7 +43,11 @@ class CycleFixture(TebTurnSupervisorTurnLifecycleMixin):
         self.turn_cycle_limit = 2
         self.turn_cycle_goal_tolerance_m = 0.25
         self.turn_cycle_block_radius_m = 0.50
+        self.turn_cycle_activation_grace_s = 3.0
+        self.turn_cycle_last_completion_wall = 0.0
         self.active_action_goal = goal
+        self.clock = 100.0
+        self.time_provider = lambda: self.clock
         self.events = []
 
     def publish_status_locked(self, event, **fields):
@@ -92,6 +96,32 @@ class CycleDetectionTest(unittest.TestCase):
         fixture.complete_at(0.0, goal=(10.0, 0.0))
         fixture.complete_at(0.0, goal=(30.0, 0.0))
         self.assertEqual(fixture.turn_cycle_completions, 1)
+        self.assertIsNone(fixture.turn_cycle_blocked_goal_xy)
+
+    def test_one_alignment_plus_a_static_grace_blocks_the_next_turn(self):
+        # The second turn in run 20261102_174505 took 11 s to finish; the gate
+        # must trip from the activation path instead, ~4-6 s after the first.
+        fixture = CycleFixture()
+        fixture.complete_at(0.0)
+        self.assertFalse(fixture._turn_cycle_blocks_action_locked())
+        fixture.clock += 4.0
+        self.assertTrue(fixture._turn_cycle_blocks_action_locked())
+        events = [event for event, _fields in fixture.events]
+        self.assertEqual(events[0], "reorientation_cycle_detected")
+        self.assertIn("reorientation_cycle_blocked", events)
+
+    def test_translation_inside_the_grace_keeps_the_turn_allowed(self):
+        fixture = CycleFixture()
+        fixture.complete_at(0.0)
+        fixture.pose.x = 0.40          # the base actually moved
+        fixture.clock += 4.0
+        self.assertFalse(fixture._turn_cycle_blocks_action_locked())
+
+    def test_an_authentication_turn_does_not_count(self):
+        fixture = CycleFixture()
+        fixture.complete_at(0.0, "portal_authentication_turn")
+        fixture.complete_at(0.0, "portal_authentication_turn")
+        self.assertEqual(fixture.turn_cycle_completions, 0)
         self.assertIsNone(fixture.turn_cycle_blocked_goal_xy)
 
     def test_an_uncompleted_release_does_not_count(self):
