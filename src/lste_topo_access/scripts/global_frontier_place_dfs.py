@@ -32,13 +32,25 @@ class PlaceDfsTraversal:
         return True
 
     def update_projection_recovery(self, place_id, valid, now, pose_xy=None,
-                                   invalid_budget=30., return_budget=60.):
+                                   invalid_budget=30., return_budget=60.,
+                                   route_id=0):
         """Bound invalid-map waits; retreat preserves all unfinished obligations."""
         place_id=int(place_id)
         if len(self.stack)<2 or self.stack[-1]!=place_id:
             return None
         node=self.nodes[place_id]
         if node['state']=='returning':
+            # The budget must measure the *return drive*, not the time spent
+            # waiting for one.  A new route id means the return was just
+            # dispatched, so restart the clock: run 20261102_174505 spent 60 s
+            # in 'returning' while it closed a portal transaction, dispatched
+            # the return at sim 1657.5, and was declared unrecoverable 0.1 s
+            # later.
+            if route_id and int(node.get('return_route_id', 0) or 0) != int(route_id):
+                node['return_route_id']=int(route_id)
+                node['return_progress_at']=float(now)
+                node['return_progress_xy']=(
+                    None if pose_xy is None else list(pose_xy))
             # This physical return obligation survives graph/map transactions.
             since=node.setdefault('return_progress_at',float(now))
             prior=node.get('return_progress_xy')

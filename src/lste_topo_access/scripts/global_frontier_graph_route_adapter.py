@@ -63,7 +63,8 @@ class GlobalFrontierGraphRouteAdapterMixin:
                    and bool(getattr(self, "current_place_scope_valid", False))
                    and getattr(getattr(self, "place_navigation_constraints", None), "last_report", {}).get("robot_inside") is not False)),
             now=time.monotonic(),
-            pose_xy=None if pose is None else (pose.x, pose.y))
+            pose_xy=None if pose is None else (pose.x, pose.y),
+            route_id=int(getattr(self, "active_route_id", 0) or 0))
         if recovery is not None:
             event = ("place_dfs_return_unrecoverable" if recovery == "return_blocked"
                      else "place_scope_recovery_" + ("started" if recovery == "started" else "unrecoverable"))

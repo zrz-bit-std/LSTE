@@ -22,6 +22,28 @@ class PlaceDfsTest(unittest.TestCase):
         self.assertEqual(dfs.nodes[2]['state'],'recovery_blocked')
         self.assertFalse(dfs.ready_to_return(2,projection_complete=True))
 
+    def test_return_budget_restarts_when_the_return_route_is_dispatched(self):
+        # Run 20261102_174505: the node waited in 'returning' for 60 s while it
+        # closed a portal transaction, dispatched the return at sim 1657.5, and
+        # was declared unrecoverable 0.1 s later.  The budget measures the
+        # return drive, not the wait for one.
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
+        dfs.ready_to_return(2,projection_complete=True)
+        self.assertIsNone(dfs.update_projection_recovery(2,True,0.,(4.,0.)))
+        self.assertIsNone(dfs.update_projection_recovery(
+            2,True,70.,(4.,0.),route_id=101))
+        self.assertEqual(dfs.nodes[2]['return_progress_at'],70.0)
+        self.assertEqual(dfs.nodes[2]['return_route_id'],101)
+
+    def test_a_genuine_return_stall_still_blocks_after_dispatch(self):
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
+        dfs.ready_to_return(2,projection_complete=True)
+        dfs.update_projection_recovery(2,True,0.,(4.,0.),route_id=101)
+        self.assertIsNone(dfs.update_projection_recovery(2,True,59.,(4.,0.),route_id=101))
+        self.assertEqual(dfs.update_projection_recovery(
+            2,True,61.,(4.,0.),route_id=101),'return_blocked')
+        self.assertEqual(dfs.nodes[2]['state'],'recovery_blocked')
+
     def test_normal_return_real_translation_refreshes_budget(self):
         dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
         dfs.ready_to_return(2,projection_complete=True)
