@@ -40,12 +40,13 @@ readiness_child_process_failure() {
   local line
   [[ -f "$launcher_log" ]] || return 1
   # A process that the launch file respawns is not a trial-ending failure.
-  # The dino/PyTorch inference sidecar segfaults after long runs (runs
-  # 20261102_032825, 20261102_035431, 20261102_043837, ...); the launch file
-  # restarts it, so its death appears here too.  Every other process death
-  # stays fatal.
+  # The dino/PyTorch inference sidecar segfaulted after long runs, and the TEB
+  # turn supervisor segfaulted once after a normal turn release
+  # (20261102_190613); both are respawned, so their deaths appear here too.
+  # Every other process death stays fatal.
   line="$(grep 'process has died' "$launcher_log" \
           | grep -v 'lste_wedetect_det_node' \
+          | grep -v 'lste_teb_turn_supervisor' \
           | head -1)"
   [[ -n "$line" ]] || return 1
   printf '%s\n' "$line"

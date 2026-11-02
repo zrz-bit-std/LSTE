@@ -44,6 +44,27 @@ class PerceptionRestartTest(unittest.TestCase):
         self.assertNotIn('name="lste_navigation_metrics"', self.source)
 
 
+class TurnSupervisorRestartTest(unittest.TestCase):
+    """One supervisor segfault must not seal a trial."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.launch = (Path(__file__).resolve().parents[3]
+                      / "src/lste_topo_access/launch/teb_navigation.launch"
+                      ).read_text(encoding="utf-8")
+        cls.readiness = (Path(__file__).resolve().parents[3]
+                         / "scripts/tests/targeted_navigation/readiness.sh"
+                         ).read_text(encoding="utf-8")
+
+    def test_the_supervisor_is_respawned_with_faulthandler(self):
+        self.assertIn('type="lste_teb_turn_supervisor.py"', self.launch)
+        self.assertIn('respawn="true" respawn_delay="2"', self.launch)
+        self.assertIn("PYTHONFAULTHANDLER", self.launch)
+
+    def test_the_runner_ignores_a_respawned_supervisor_death(self):
+        self.assertIn("grep -v 'lste_teb_turn_supervisor'", self.readiness)
+
+
 class RecorderReadinessTest(unittest.TestCase):
     """The bag must exist before the first execution endpoint."""
 

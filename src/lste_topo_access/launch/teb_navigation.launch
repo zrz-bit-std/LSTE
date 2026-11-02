@@ -524,7 +524,12 @@
        connector. It never plans a path and passes ordinary TEB commands
        through unchanged. Its limits are read from the TEB parameters above. -->
   <node pkg="lste_topo_access" type="lste_teb_turn_supervisor.py"
-        name="lste_teb_turn_supervisor" output="screen">
+        name="lste_teb_turn_supervisor" output="screen"
+        respawn="true" respawn_delay="2">
+    <!-- The supervisor segfaulted once (exit -11) after a normal turn release
+         in run 20261102_190613 and the runner sealed the trial.  Respawn it,
+         and let faulthandler print a native stack if it happens again. -->
+    <env name="PYTHONFAULTHANDLER" value="1"/>
     <param name="planner_cmd_topic" value="/lste/cmd_vel/teb_planner"/>
     <param name="command_contract_topic" value="/lste/cmd_vel/teb_contract"/>
     <param name="planner_command_contract_topic" value="$(arg persistent_planner_command_contract_topic)"/>
