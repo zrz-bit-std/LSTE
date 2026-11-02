@@ -374,6 +374,9 @@ class TebTurnSupervisorTurnLifecycleMixin:
         previous_key = self.turn_key
         previous_phase = str(getattr(self, "turn_phase", "") or "")
         previous_action_identity = self.turn_action_identity
+        cycle_goal_xy = (
+            None if self.turn_goal_xy is None else list(self.turn_goal_xy)
+        )
         previous_error = None
         if self.pose is not None and self.turn_target_yaw is not None:
             previous_error = normalize_angle(self.turn_target_yaw - self.pose.theta)
@@ -413,6 +416,8 @@ class TebTurnSupervisorTurnLifecycleMixin:
         self.turn_last_odom_sample_wall = 0.0
         self.turn_last_odom_progress_wall = 0.0
         self.turn_odom_sample_count = 0
+        self._note_turn_completion_for_cycle_locked(
+            cycle_goal_xy, bool(completed))
         reseed = getattr(self, "native_teb_reseed", None)
         # A reverse-entry stall can become ready while the same action is
         # already doing its initial alignment. Keep that owned turn intact,
@@ -452,6 +457,109 @@ class TebTurnSupervisorTurnLifecycleMixin:
             reason,
             completed,
         )
+
+    def _note_turn_completion_for_cycle_locked(self, goal_xy, completed):
+        """Detect an alignment that repeats without producing translation.
+
+        Run 20261102_174505 sat at (-14.97, -3.35) from sim 1612 to 1660 while
+        the base alternated between ``portal_entry_alignment`` (-141 deg),
+        ``stalled_route_reorientation`` (-93 deg) and their re-dispatched
+        successors (-139, -93, -129).  Both phases aim at the Navfn initial
+        tangent of *their* plan, and every re-plan after a controller stall
+        produced a slightly different tangent, so the robot chased a heading it
+        could never hold.  Two completed alignments for the same goal without
+        0.15 m of travel is enough to call that a cycle.
+        """
+        if not completed or goal_xy is None or self.pose is None:
+            return
+        tolerance = float(
+            getattr(self, "turn_cycle_goal_tolerance_m", 0.25) or 0.25
+        )
+        previous_goal = getattr(self, "turn_cycle_goal_xy", None)
+        same_goal = bool(
+            previous_goal is not None
+            and math.hypot(
+                float(goal_xy[0]) - float(previous_goal[0]),
+                float(goal_xy[1]) - float(previous_goal[1]),
+            ) <= tolerance
+        )
+        if not same_goal:
+            self.turn_cycle_goal_xy = [float(goal_xy[0]), float(goal_xy[1])]
+            self.turn_cycle_pose_anchor_xy = [float(self.pose.x), float(self.pose.y)]
+            self.turn_cycle_completions = 1
+            return
+        anchor = getattr(self, "turn_cycle_pose_anchor_xy", None)
+        if anchor is None:
+            self.turn_cycle_pose_anchor_xy = [float(self.pose.x), float(self.pose.y)]
+            self.turn_cycle_completions = 1
+            return
+        moved = math.hypot(
+            float(self.pose.x) - float(anchor[0]),
+            float(self.pose.y) - float(anchor[1]),
+        )
+        minimum_travel = float(
+            getattr(self, "turn_cycle_translation_m", 0.15) or 0.0
+        )
+        if moved >= minimum_travel:
+            self.turn_cycle_pose_anchor_xy = [float(self.pose.x), float(self.pose.y)]
+            self.turn_cycle_completions = 1
+            return
+        self.turn_cycle_completions = int(
+            getattr(self, "turn_cycle_completions", 0) or 0
+        ) + 1
+        limit = max(1, int(getattr(self, "turn_cycle_limit", 2) or 2))
+        blocked = getattr(self, "turn_cycle_blocked_goal_xy", None)
+        if self.turn_cycle_completions >= limit and blocked is None:
+            self.turn_cycle_blocked_goal_xy = list(self.turn_cycle_goal_xy)
+            self.publish_status_locked(
+                "reorientation_cycle_detected",
+                reason="repeated_alignment_without_translation",
+                goal_xy=[round(float(value), 3) for value in goal_xy],
+                completions=int(self.turn_cycle_completions),
+                travel_since_anchor_m=round(float(moved), 4),
+                last_phase=str(getattr(self, "turn_phase", "") or ""),
+                blocked=True,
+            )
+
+    def _turn_cycle_blocks_action_locked(self):
+        """One heading owner per goal: refuse to re-aim at a jittering tangent.
+
+        A doorway authentication U-turn is never part of an alignment cycle: it
+        is a mission obligation with its own frozen target, so it stays allowed
+        even when the goal is locked out.
+        """
+        if bool(getattr(self, "latest_authentication_turn_required", False)):
+            return False
+        blocked = getattr(self, "turn_cycle_blocked_goal_xy", None)
+        goal = getattr(self, "active_action_goal", None)
+        if blocked is None or goal is None:
+            return False
+        goal_xy = self._goal_xy(goal)
+        if goal_xy is None:
+            return False
+        radius = float(getattr(self, "turn_cycle_block_radius_m", 0.50) or 0.0)
+        if math.hypot(
+            float(goal_xy[0]) - float(blocked[0]),
+            float(goal_xy[1]) - float(blocked[1]),
+        ) > radius:
+            # A genuinely different target: this is not the same dead end.
+            self.turn_cycle_blocked_goal_xy = None
+            self.turn_cycle_goal_xy = None
+            self.turn_cycle_completions = 0
+            self.turn_cycle_pose_anchor_xy = None
+            return False
+        reported = getattr(self, "turn_cycle_reported_goal_xy", None)
+        if reported is None or math.hypot(
+            float(reported[0]) - float(blocked[0]),
+            float(reported[1]) - float(blocked[1]),
+        ) > 1e-6:
+            self.turn_cycle_reported_goal_xy = list(blocked)
+            self.publish_status_locked(
+                "reorientation_cycle_blocked",
+                reason="heading_cycle_owner_lock",
+                goal_xy=[round(float(value), 3) for value in blocked],
+            )
+        return True
 
     def _turn_clearance_reason_locked(self, now):
         """Return why the adapter must not command an in-place rotation."""
@@ -735,6 +843,9 @@ class TebTurnSupervisorTurnLifecycleMixin:
         return target_yaw, heading_error
 
     def _activate_turn_locked(self):
+        cycle_block = getattr(self, "_turn_cycle_blocks_action_locked", None)
+        if callable(cycle_block) and cycle_block():
+            return False
         if (
             self.mode != self.active_mode
             or self.task_done

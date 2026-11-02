@@ -590,6 +590,11 @@ class TebTurnSupervisorControlMixin:
                 if callable(invalidate_feedback):
                     invalidate_feedback("task_done", clear_planner=True)
                 self._release_turn_locked("task_done", completed=False)
+                self.turn_cycle_goal_xy = None
+                self.turn_cycle_blocked_goal_xy = None
+                self.turn_cycle_reported_goal_xy = None
+                self.turn_cycle_completions = 0
+                self.turn_cycle_pose_anchor_xy = None
             else:
                 self.completed_turn_key = None
                 self._activate_turn_locked()

@@ -137,6 +137,17 @@ def configure_turn_supervisor_parameters(supervisor):
     supervisor.endpoint_alignment_enabled = _as_bool(
         gp("~endpoint_alignment_enabled", False)
     )
+    # A heading that repeats without moving the base is a cycle, not progress.
+    supervisor.turn_cycle_translation_m = max(
+        0.02, float(gp("~turn_cycle_translation_m", 0.15))
+    )
+    supervisor.turn_cycle_limit = max(1, int(gp("~turn_cycle_limit", 2)))
+    supervisor.turn_cycle_goal_tolerance_m = max(
+        0.05, float(gp("~turn_cycle_goal_tolerance_m", 0.25))
+    )
+    supervisor.turn_cycle_block_radius_m = max(
+        0.10, float(gp("~turn_cycle_block_radius_m", 0.50))
+    )
     supervisor.stalled_route_reorientation_enabled = _as_bool(
         gp("~stalled_route_reorientation_enabled", True)
     )

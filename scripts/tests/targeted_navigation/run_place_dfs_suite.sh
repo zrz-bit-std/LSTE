@@ -89,6 +89,25 @@ PY_MANIFEST
   for ATTEMPT in $(seq 1 120); do
     kill -0 "$DRIVER_PID" 2>/dev/null || break
     if rosparam get /run_id >/dev/null 2>&1; then
+      # The bag must cover every execution endpoint.  Some channels (notably
+      # /pro3/wheel_odom and the frontier status) appear a few seconds after
+      # the master: publishing started before them produced bags whose first
+      # 3.5 s has no wheel odometry, and the native replay then fails with
+      # "raw recording does not cover owned execution endpoints" even though
+      # the costmap itself was clean (run 20261102_174505).
+      channel_ready() {
+        rostopic info "$1" 2>/dev/null \
+          | sed -n '/Publishers:/,$p' | grep -q '^ *\*'
+      }
+      for _ready_wait in $(seq 1 120); do
+        ready=1
+        for _topic in /map /tf /rbt_pose /pro3/wheel_odom /pro3/rlscan \
+                      /lste/global_frontier/status; do
+          if ! channel_ready "$_topic"; then ready=0; break; fi
+        done
+        [[ "$ready" == 1 ]] && break
+        sleep 0.5
+      done
       RECORD_TOPICS=(/map /tf /tf_static /rbt_pose /pro3/wheel_odom /pro3/rlscan
         /lste/global_frontier/status /lste/teb_turn_supervisor/status
         /lste/cmd_vel/teb_contract /lste/teb_goal_bridge/status

@@ -44,5 +44,28 @@ class PerceptionRestartTest(unittest.TestCase):
         self.assertNotIn('name="lste_navigation_metrics"', self.source)
 
 
+class RecorderReadinessTest(unittest.TestCase):
+    """The bag must exist before the first execution endpoint."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.script = (Path(__file__).resolve().parents[3]
+                      / "scripts/tests/targeted_navigation/run_place_dfs_suite.sh"
+                      ).read_text(encoding="utf-8")
+
+    def test_the_recorder_waits_for_essential_channels(self):
+        self.assertIn("channel_ready()", self.script)
+        self.assertIn('rostopic info "$1"', self.script)
+        for topic in ("/pro3/wheel_odom", "/rbt_pose",
+                      "/lste/global_frontier/status"):
+            self.assertIn(topic, self.script)
+
+    def test_the_wait_precedes_the_bag(self):
+        self.assertLess(
+            self.script.index("channel_ready()"),
+            self.script.index("rosbag record -O"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -145,6 +145,13 @@ def initialize_turn_supervisor_state(supervisor):
     # it exhausts its rotation budget, the route watchdog must own the failure;
     # re-entering the same turn would create an unbounded spin loop.
     supervisor.stalled_route_reorientation_attempted_identity = None
+    # Alignment-cycle bookkeeping (goal-keyed, not action-identity keyed: a
+    # stalled route mints a fresh identity on every retry).
+    supervisor.turn_cycle_goal_xy = None
+    supervisor.turn_cycle_pose_anchor_xy = None
+    supervisor.turn_cycle_completions = 0
+    supervisor.turn_cycle_blocked_goal_xy = None
+    supervisor.turn_cycle_reported_goal_xy = None
     supervisor.stalled_route_turn_handoff_count = 0
     supervisor.turn_capped_releases = 0
     supervisor.turn_count = 0
