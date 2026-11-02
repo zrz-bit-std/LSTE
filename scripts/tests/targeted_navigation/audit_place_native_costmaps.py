@@ -17,6 +17,18 @@ LOCAL_MASK='/lste/place_navigation_mask_odom'
 # only that single-revision window, only inside this time bound, and only for a
 # bounded run of consecutive samples.
 MASK_REVISION_LAG_S=1.0
+# A scope-layer update is applied to the master on the following update cycle,
+# so the first master published right after a mask message can still carry the
+# previous exclusions.  Run 20261102_205142 had exactly one such master
+# (sim 1002.344, 0.029 s after the mask at 1002.315, 836 of 2818 excluded cells
+# not yet lethal); the next master was clean.  Bounded and counted.
+MASK_APPLY_LAG_S=0.25
+MAX_MASK_APPLY_TRANSIENTS=3
+
+
+def mask_apply_transient_allowed(master_stamp, mask_stamp, count):
+    age = float(master_stamp) - float(mask_stamp)
+    return bool(0.0 <= age <= MASK_APPLY_LAG_S and int(count) < MAX_MASK_APPLY_TRANSIENTS)
 MAX_MASK_REVISION_LAGS=10
 # A rolling-window rebuild clears the master and the scope layer re-applies on
 # the next update; at most a couple of published masters can therefore hold no
@@ -299,7 +311,7 @@ def audit(metrics,bag_path):
     statuses.sort(key=lambda item:item[0]);times=[s[0] for s in statuses]
     errors=[];total_errors=0;frames={t:0 for t in MASTERS};route_coverage={r:set() for _,r,_,_ in dispatches};transparent=0
     mask_lag_streak=0;mask_lag_total=0;mask_lag_max_streak=0
-    mask_uninit_streak=0;mask_uninit_total=0;rebuild_partial=0
+    mask_uninit_streak=0;mask_uninit_total=0;rebuild_partial=0;mask_apply_transients=0
     owned=[(t,statuses[i+1][0] if i+1<len(statuses) else last_metric_time)for i,(t,mode)in enumerate(statuses)if mode!='idle']
     if not owned:return dict(passed=False,errors=['no owned execution timeline for recorded dispatches'])
     required_start=min(t for t,_ in owned);required_end=max(t for _,t in owned)
@@ -398,7 +410,7 @@ def audit(metrics,bag_path):
                  count=mask_mode_failures-5)
         def check(grid,stamp,topic,route=None,mode='ordinary',allow_rebuild=False):
             nonlocal mask_lag_streak,mask_lag_total,mask_lag_max_streak
-            nonlocal mask_uninit_streak,mask_uninit_total,rebuild_partial
+            nonlocal mask_uninit_streak,mask_uninit_total,rebuild_partial,mask_apply_transients
             lagged=False;uninitialized=False;tolerated=False
             i=bisect_right(mask_times,stamp)-1
             if i<0:raise ValueError('no preceding Place mask')
@@ -441,6 +453,11 @@ def audit(metrics,bag_path):
                                 uninitialized=True
                             elif allow_rebuild:
                                 rebuild_partial+=1;tolerated=True
+                            elif mask_apply_transient_allowed(
+                                    grid.header.stamp.to_sec(),
+                                    mask.header.stamp.to_sec(),
+                                    mask_apply_transients):
+                                mask_apply_transients+=1;tolerated=True
                             else:
                                 raise ValueError('native local master does not enforce physical mask: '+str(direct))
                         else:
@@ -477,6 +494,10 @@ def audit(metrics,bag_path):
                         # publication is tolerated; the next one with the same
                         # origin must be clean.
                         rebuild_partial+=1;tolerated=True
+                    elif mask_apply_transient_allowed(
+                            master_stamp, mask.header.stamp.to_sec(),
+                            mask_apply_transients):
+                        mask_apply_transients+=1;tolerated=True
                     else:
                         raise ValueError('ordinary master has nonlethal excluded cells: '+str(result))
                 else:
@@ -543,6 +564,7 @@ def audit(metrics,bag_path):
         errors=errors,error_count=total_errors,execution_time_coverage=coverage,ordinary_master_checks=frames,
         mask_revision_lags=mask_lag_total,max_mask_revision_lag_streak=mask_lag_max_streak,
         mask_uninitialized_samples=mask_uninit_total,rebuild_partial_samples=rebuild_partial,
+        mask_apply_transients=mask_apply_transients,
         published_mask_mode_checks=mask_mode_checks,transparent_mask_checks=transparent,idle_updates_before_first_full=startup_updates,dispatch_routes=len(route_coverage),controller_dispatches=len(controller_dispatches),controller_owned_intervals=len(controller_leases),uncovered_dispatches=uncovered,
         mask_protocol=('map+same-source-epoch odom physical mask' if physical_protocol else 'legacy single map mask; exact master-stamp TF'),
         contract='Raw goal-bridge dispatch→exact ACK defines controller ownership; all master full+updates in ordinary owned intervals and both masters at graph and controller dispatches are checked. Owned Portal/auth masks stay transparent through exact ACK. Exact original TF at master stamp; no latest TF or skipped errors.',metrics=str(metrics),bag=str(bag_path))

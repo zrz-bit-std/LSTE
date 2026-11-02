@@ -25,7 +25,9 @@ SCRIPTS = Path(__file__).resolve().parents[3] / "scripts/tests/targeted_navigati
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from audit_place_native_costmaps import (  # noqa: E402
+from audit_place_native_costmaps import (
+    MAX_MASK_APPLY_TRANSIENTS,
+    mask_apply_transient_allowed,  # noqa: E402
     MAX_MASK_REVISION_LAGS,
     MASK_REVISION_LAG_S,
     exclusion_check,
@@ -137,6 +139,19 @@ class ControllerRouteCoverageTest(unittest.TestCase):
     def test_controller_only_routes_do_not_keyerror(self):
         self.assertIn("route_coverage.setdefault(route,set()).add(topic)", self.source)
         self.assertNotIn("route_coverage[route].add(topic)", self.source)
+
+
+class MaskApplyTransientTest(unittest.TestCase):
+    """The first master after a mask message may still carry old exclusions."""
+
+    def test_a_publication_right_after_the_mask_is_tolerated(self):
+        self.assertTrue(mask_apply_transient_allowed(1002.344, 1002.315, 0))
+
+    def test_the_tolerance_is_bounded_and_counted(self):
+        self.assertFalse(mask_apply_transient_allowed(
+            1002.344, 1002.315, MAX_MASK_APPLY_TRANSIENTS))
+        self.assertFalse(mask_apply_transient_allowed(1004.0, 1002.315, 0))
+        self.assertFalse(mask_apply_transient_allowed(1002.0, 1002.315, 0))
 
 
 if __name__ == "__main__":
