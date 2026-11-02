@@ -72,8 +72,11 @@ class TebGoalBridgeHandoffStallMixin:
             or self.last_dispatched_goal is None
         ):
             return False
+        is_turning = getattr(self, "turn_supervisor_is_turning", None)
+        turning = bool(is_turning()) if callable(is_turning) else (
+            self.turn_supervisor_state == "TURNING")
         if (
-            self.turn_supervisor_state == "TURNING"
+            turning
             and self.active_intent_priority == 0
             and self.latest_intent_priority == 0
         ):

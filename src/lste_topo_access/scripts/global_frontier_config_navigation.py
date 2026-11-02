@@ -157,6 +157,10 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.turn_phase_max_seconds = max(
             0.0, float(gp("~turn_phase_max_seconds", 20.0))
         )
+        # A TURNING status older than this is a dead latch, not an active turn.
+        self.turn_supervisor_status_timeout = max(
+            0.0, float(gp("~turn_supervisor_status_timeout", 3.0))
+        )
         self.unreachable_grace = max(
             0.0, float(gp("~unreachable_grace", 20.0))
         )

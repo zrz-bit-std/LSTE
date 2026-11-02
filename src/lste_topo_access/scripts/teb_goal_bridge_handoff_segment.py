@@ -31,7 +31,9 @@ class TebGoalBridgeHandoffSegmentMixin:
         ):
             return None
         if (
-            self.turn_supervisor_state == "TURNING"
+            (self.turn_supervisor_is_turning()
+             if callable(getattr(self, "turn_supervisor_is_turning", None))
+             else self.turn_supervisor_state == "TURNING")
             and self.active_intent_priority == 0
             and self.latest_intent_priority == 0
         ):

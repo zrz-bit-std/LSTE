@@ -187,6 +187,14 @@ def _configure_action_health(bridge, gp):
     bridge.handoff_min_interval = max(
         bridge.min_update_interval, float(gp("~handoff_min_interval", 4.0))
     )
+    # A turn supervisor that stops heartbeating or stays in TURNING longer than
+    # any plausible rotation must stop holding the next frontier goal.
+    bridge.turn_supervisor_status_timeout = max(
+        0.5, float(gp("~turn_supervisor_status_timeout", 3.0))
+    )
+    bridge.turn_supervisor_turn_max_seconds = max(
+        5.0, float(gp("~turn_supervisor_turn_max_seconds", 20.0))
+    )
     bridge.frontier_observation_completion_radius = max(
         0.0, float(gp("~frontier_observation_completion_radius", 0.90))
     )

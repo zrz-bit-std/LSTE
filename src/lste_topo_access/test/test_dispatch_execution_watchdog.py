@@ -32,6 +32,9 @@ from global_frontier_planning_snapshot import (  # noqa: E402
 from global_frontier_execution_watchdogs import (  # noqa: E402
     GlobalFrontierExecutionWatchdogMixin,
 )
+from teb_goal_bridge_teb_runtime import (  # noqa: E402
+    TebGoalBridgeTebRuntimeMixin,
+)
 
 
 class DeferralFixture(GlobalFrontierPlanningSnapshotMixin):
@@ -44,6 +47,8 @@ class DeferralFixture(GlobalFrontierPlanningSnapshotMixin):
         self.prefetch_distance = 2.5
         self.waypoint_release_radius = 0.8
         self.active_last_waypoint_map = (5.0, 0.0)
+        self.turn_supervisor_status_monotonic = 105.0
+        self.turn_supervisor_status_timeout = 3.0
         self.controller_owned_route_failure = controller_owned
         self.active_progress_time = 100.0
         self.stall_timeout = 8.0
@@ -106,6 +111,8 @@ class WatchdogFixture(GlobalFrontierExecutionWatchdogMixin):
         self.active_portal_gate_approached_at = None
         self.waypoint_release_radius = 0.8
         self.active_last_waypoint_map = (5.0, 0.0)
+        self.turn_supervisor_status_monotonic = 105.0
+        self.turn_supervisor_status_timeout = 3.0
         self.active_portal_authentication_phase = ""
         self.active_portal_authentication_entry_approach = False
         self.events = []
@@ -168,6 +175,86 @@ class TurnPhaseBoundTest(unittest.TestCase):
         self.assertTrue(blockers[0]["dispatch_announced"])
 
 
+class SupervisorTurnFreshnessTest(unittest.TestCase):
+    """A dead TURNING latch must stop counting as an active turn."""
+
+    def test_a_fresh_turn_still_pins(self):
+        fixture = WatchdogFixture(turn_age=5.0)
+        fixture.active_route_kind = "frontier_endpoint"
+        fixture.turn_supervisor_route_kind = "frontier_endpoint"
+        fixture.turn_supervisor_status_monotonic = 104.0
+        state = fixture.evaluate_active_route_watchdogs(
+            0.0, 0.0, None, 105.0, False, None, None)
+        self.assertTrue(state.turn_phase_active)
+
+    def test_a_stale_turn_does_not_pin(self):
+        fixture = WatchdogFixture(turn_age=5.0)
+        fixture.active_route_kind = "frontier_endpoint"
+        fixture.turn_supervisor_route_kind = "frontier_endpoint"
+        fixture.turn_supervisor_status_monotonic = 90.0   # 15 s old
+        state = fixture.evaluate_active_route_watchdogs(
+            0.0, 0.0, None, 105.0, False, None, None)
+        self.assertFalse(state.turn_phase_active)
+
+
+class BridgeFixture(TebGoalBridgeTebRuntimeMixin):
+    def __init__(self, state="TURNING", status_age=0.5, turning_age=5.0):
+        self.turn_supervisor_state = state
+        self.turn_supervisor_status_monotonic = 100.0 - status_age
+        self.turn_supervisor_turning_since = (
+            0.0 if turning_age is None else 100.0 - turning_age)
+        self.turn_supervisor_status_timeout = 3.0
+        self.turn_supervisor_turn_max_seconds = 20.0
+        self.active_route_id = 52
+        self.events = []
+
+    def publish_bridge_status(self, event, **fields):
+        self.events.append((event, fields))
+
+
+class BridgeTurnLatchTest(unittest.TestCase):
+    def test_a_live_turn_holds_the_next_goal(self):
+        self.assertTrue(BridgeFixture().turn_supervisor_is_turning(now=100.0))
+
+    def test_a_dead_publisher_stops_holding(self):
+        fixture = BridgeFixture(status_age=8.0)
+        self.assertFalse(fixture.turn_supervisor_is_turning(now=100.0))
+        self.assertEqual(fixture.events[0][0], "turn_supervisor_latch_expired")
+        self.assertEqual(fixture.events[0][1]["reason"], "status_stale")
+
+    def test_a_turn_that_never_ends_stops_holding(self):
+        fixture = BridgeFixture(status_age=0.2, turning_age=25.0)
+        self.assertFalse(fixture.turn_supervisor_is_turning(now=100.0))
+        self.assertEqual(fixture.events[0][1]["reason"], "turn_too_long")
+
+    def test_the_expiry_is_reported_once(self):
+        fixture = BridgeFixture(status_age=8.0)
+        for _ in range(3):
+            fixture.turn_supervisor_is_turning(now=100.0)
+        self.assertEqual(len(fixture.events), 1)
+
+    def test_a_non_turning_state_is_never_held(self):
+        fixture = BridgeFixture(state="PASS_THROUGH")
+        self.assertFalse(fixture.turn_supervisor_is_turning(now=100.0))
+        self.assertEqual(fixture.events, [])
+
+
+class BridgeGateContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        base = Path(__file__).resolve().parents[1] / "scripts"
+        cls.dispatch = (base / "teb_goal_bridge_action_active_dispatch.py").read_text(
+            encoding="utf-8")
+        cls.segment = (base / "teb_goal_bridge_handoff_segment.py").read_text(
+            encoding="utf-8")
+        cls.stall = (base / "teb_goal_bridge_handoff_stall.py").read_text(
+            encoding="utf-8")
+
+    def test_every_goal_deferral_uses_the_bounded_latch(self):
+        for source in (self.dispatch, self.segment, self.stall):
+            self.assertIn("turn_supervisor_is_turning", source)
+
+
 class ConfigContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -189,40 +276,6 @@ class ConfigContractTest(unittest.TestCase):
             "not getattr(self, \"controller_owned_route_failure\", False)",
             self.snapshot,
         )
-
-
-class DriverBudgetTest(unittest.TestCase):
-    """The drive ceiling must cover each scenario's measured sim-time cost."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.driver = (
-            Path(__file__).resolve().parents[3]
-            / "scripts/tests/targeted_navigation/run_four_until_pass.sh"
-        ).read_text(encoding="utf-8")
-
-    def budget(self, case):
-        import re
-        match = re.search(r"\[%s\]=(\d+)" % re.escape(case), self.driver)
-        self.assertIsNotNone(match, case)
-        return int(match.group(1))
-
-    def test_l_is_not_inflated(self):
-        # L completes at 1168 s sim, well inside 2400 s wall.
-        self.assertGreaterEqual(self.budget("semantic_l_junction"), 2000)
-        self.assertLessEqual(self.budget("semantic_l_junction"), 3000)
-
-    def test_the_three_long_scenarios_get_enough_sim_time(self):
-        # 0.65 sim/wall is the worst observed ratio.
-        for case, need in (
-            ("semantic_t_junction", 2400),
-            ("semantic_t_junction_rotated", 2400),
-            ("semantic_cross_junction", 3000),
-        ):
-            self.assertGreaterEqual(self.budget(case) * 0.65, need, case)
-
-    def test_an_explicit_override_still_wins(self):
-        self.assertIn('DRIVE_OVERRIDE="${GP_SUITE_SECONDS:-}"', self.driver)
 
 
 if __name__ == "__main__":

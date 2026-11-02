@@ -28,8 +28,17 @@ class GlobalFrontierExecutionWatchdogMixin:
         supervisor_route_kind = str(
             getattr(self, "turn_supervisor_route_kind", "")
         ).strip().lower()
+        supervisor_seen = float(
+            getattr(self, "turn_supervisor_status_monotonic", 0.0) or 0.0
+        )
+        supervisor_fresh = (
+            supervisor_seen > 0.0
+            and now - supervisor_seen
+            <= float(getattr(self, "turn_supervisor_status_timeout", 3.0) or 3.0)
+        )
         supervisor_turn_active = (
             supervisor_state == "TURNING"
+            and supervisor_fresh
             and self.active_route_kind in (
                 "frontier_turn_connector",
                 "frontier_endpoint",

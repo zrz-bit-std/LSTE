@@ -237,6 +237,8 @@ def _initialize_mission_state(bridge):
     bridge.active_predecessor_contract = None
     bridge.turn_supervisor_state = "UNKNOWN"
     bridge.turn_supervisor_last_event = "unknown"
+    bridge.turn_supervisor_status_monotonic = 0.0
+    bridge.turn_supervisor_turning_since = 0.0
     bridge.move_base_terminal_pending = False
     bridge.turn_transition_ready = False
 
