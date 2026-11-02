@@ -161,6 +161,14 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.turn_supervisor_status_timeout = max(
             0.0, float(gp("~turn_supervisor_status_timeout", 3.0))
         )
+        # A doorway can mature after its junction's observation period closed;
+        # re-open that junction at most this many times per run.
+        self.late_candidate_reopen_limit = max(
+            0, int(gp("~late_candidate_reopen_limit", 2))
+        )
+        self.late_candidate_stable_grace = max(
+            0.0, float(gp("~late_candidate_stable_grace", 20.0))
+        )
         self.unreachable_grace = max(
             0.0, float(gp("~unreachable_grace", 20.0))
         )

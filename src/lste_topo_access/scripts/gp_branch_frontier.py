@@ -967,6 +967,78 @@ class GPBranchFrontierMixin:
             (pose.x, pose.y), pose.theta, now,
             portal_authentication_retry_budget(getattr(self, "active_timeout", 20.0))))
 
+    def reopen_late_stable_candidates(self, now):
+        """Route back to a junction whose doorway matured after it closed.
+
+        Branch stability is time based (``observations >= 2`` and
+        ``now - first_seen >= stable_seconds``).  Run 20261102_205142 finished
+        with branch 40 on node 11 still ``pending`` although it was stable and
+        open: it matured after that junction's observation period had closed, so
+        no probe existed and the completion gate saw no outstanding obligation.
+        The audit is right to require it -- the doorway was never attempted.
+
+        Re-open such a junction (bounded) by asking the graph planner to resume
+        it; the normal arrival path then starts the observation period again.
+        """
+        tree = getattr(self, "gp_exploration_tree", None)
+        if tree is None:
+            return False
+        limit = int(getattr(self, "late_candidate_reopen_limit", 2) or 0)
+        if limit <= 0:
+            return False
+        reopened = getattr(self, "_late_candidate_reopened", None)
+        if reopened is None:
+            reopened = set()
+            self._late_candidate_reopened = reopened
+        if len(reopened) >= limit:
+            return False
+        task = getattr(self, "junction_portal_authentication", None)
+        observing = 0
+        if task is not None and not task.all_finished():
+            observing = int(getattr(task, "node_id", 0) or 0)
+        grace = float(getattr(self, "late_candidate_stable_grace", 20.0) or 0.0)
+        for branch_id, branch in sorted(tree.branches.items()):
+            if not isinstance(branch, dict):
+                continue
+            if not branch.get("stable") or branch.get("passability") != "open":
+                continue
+            if branch.get("physical_gate") is None:
+                continue
+            if branch.get("connection") == "return":
+                continue
+            if branch.get("state") in ("return", "superseded"):
+                continue
+            if str(branch.get("authentication_state") or "") != "pending":
+                continue
+            try:
+                node_id = int(branch.get("node_id", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            node = tree.nodes.get(node_id)
+            if node is None or not node.get("junction_confirmed"):
+                continue
+            if node_id in reopened or node_id == observing:
+                continue
+            first_seen = float(branch.get("first_seen", now) or now)
+            if now - first_seen < grace:
+                continue
+            reopened.add(node_id)
+            self.pending_graph_resume_place_id = node_id
+            self.publish_status(
+                "late_candidate_junction_reopened",
+                node_id=node_id,
+                branch_id=int(branch_id),
+                stable_seconds=round(float(now) - first_seen, 1),
+                reopen_count=len(reopened),
+            )
+            rospy.logwarn(
+                "Reopening junction %d: doorway branch %d stayed stable and "
+                "pending after its observation period closed",
+                node_id, int(branch_id),
+            )
+            return True
+        return False
+
     def check_portal_authentication_physical_progress(self, now):
         """Check the same physical budget even when no map plan is rebuilt."""
         # A pinned observation period with no active branch must be concluded
@@ -974,6 +1046,8 @@ class GPBranchFrontierMixin:
         # stops owning that node the callback returns early, and the pinned
         # task then holds tree.current_node_id forever (run 20261101_232628
         # stalled 180 s in exactly this state).
+        if self.reopen_late_stable_candidates(now):
+            return True
         task = getattr(self, "junction_portal_authentication", None)
         if (task is not None and task.active_branch_id is None
                 and not task.all_finished()):
