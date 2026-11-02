@@ -13,6 +13,10 @@ set -uo pipefail
 
 WS="${LSTE_WS:-/home/zrz/work/lste_ws}"
 CASES=(semantic_l_junction semantic_t_junction semantic_cross_junction semantic_t_junction_rotated)
+# Run a subset (e.g. LSTE_CASES=semantic_l_junction) without editing the script.
+if [[ -n "${LSTE_CASES:-}" ]]; then
+  read -ra CASES <<<"${LSTE_CASES}"
+fi
 MAX_ATTEMPTS="${LSTE_MAX_ATTEMPTS:-3}"
 # Measured sim-time cost of a full mission (sim/wall ratio 0.65-0.74):
 #   L     2 doorways, completed at 1168 s sim  -> 2400 s wall is ample
@@ -34,6 +38,9 @@ case_drive_seconds() {
   printf '%s' "${DRIVE_BY_CASE[$case]:-3000}"
 }
 STALL_SECONDS="${LSTE_STALL_SECONDS:-180}"
+# 1 = stop a scenario at its first PASS (the default four-scenario loop).
+# 0 = run every attempt even after a PASS and require all of them (stability run).
+STOP_ON_PASS="${LSTE_STOP_ON_PASS:-1}"
 LOG_ROOT="$WS/runtime/diagnostics/20261031_four_scenarios"
 ATTEMPTS_TSV="$LOG_ROOT/attempts.tsv"
 mkdir -p "$LOG_ROOT"
@@ -111,17 +118,29 @@ run_attempt() {
 overall=0
 for case in "${CASES[@]}"; do
   passed=0
+  passes=0
   for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
     if run_attempt "$case" "$attempt"; then
       log "$case PASSED on attempt $attempt"
       passed=1
-      break
+      passes=$((passes + 1))
+      if [[ "$STOP_ON_PASS" == "1" ]]; then
+        break
+      fi
+    else
+      log "$case attempt $attempt failed"
     fi
-    log "$case attempt $attempt failed"
   done
-  if (( ! passed )); then
-    log "$case EXHAUSTED $MAX_ATTEMPTS attempts"
-    overall=1
+  if [[ "$STOP_ON_PASS" == "1" ]]; then
+    if (( ! passed )); then
+      log "$case EXHAUSTED $MAX_ATTEMPTS attempts"
+      overall=1
+    fi
+  else
+    log "$case completed $passes/$MAX_ATTEMPTS attempts"
+    if (( passes < MAX_ATTEMPTS )); then
+      overall=1
+    fi
   fi
 done
 
