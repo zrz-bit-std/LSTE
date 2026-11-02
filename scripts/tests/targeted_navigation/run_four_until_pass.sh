@@ -21,7 +21,7 @@ MAX_ATTEMPTS="${LSTE_MAX_ATTEMPTS:-3}"
 #   Rot   3 doorways, still incomplete at 2062 s sim -> 4500 s wall
 # A single 3000 s ceiling could never let T/Cross/Rot finish; that, not a
 # planning defect, was why every completed run failed auth_all + dfs.
-DRIVE_BY_CASE=(
+declare -A DRIVE_BY_CASE=(
   [semantic_l_junction]=2400
   [semantic_t_junction]=4500
   [semantic_cross_junction]=5400
