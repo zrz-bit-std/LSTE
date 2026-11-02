@@ -33,7 +33,7 @@ class PlaceDfsTraversal:
 
     def update_projection_recovery(self, place_id, valid, now, pose_xy=None,
                                    invalid_budget=30., return_budget=60.,
-                                   route_id=0):
+                                   route_id=0, dispatch_wait_budget=60.):
         """Bound invalid-map waits; retreat preserves all unfinished obligations."""
         place_id=int(place_id)
         if len(self.stack)<2 or self.stack[-1]!=place_id:
@@ -41,16 +41,23 @@ class PlaceDfsTraversal:
         node=self.nodes[place_id]
         if node['state']=='returning':
             # The budget must measure the *return drive*, not the time spent
-            # waiting for one.  A new route id means the return was just
-            # dispatched, so restart the clock: run 20261102_174505 spent 60 s
-            # in 'returning' while it closed a portal transaction, dispatched
-            # the return at sim 1657.5, and was declared unrecoverable 0.1 s
-            # later.
-            if route_id and int(node.get('return_route_id', 0) or 0) != int(route_id):
+            # waiting for one.  Restart it once, when the first return route is
+            # dispatched; an active portal transaction can hold the node in
+            # 'returning' for the whole 60 s window (run 20261102_174505
+            # dispatched at sim 1657.5 and was declared unrecoverable 0.1 s
+            # later).  Later retries must NOT reset it: every retry of a stalled
+            # route mints a new route id, and resetting on each would mask a
+            # genuinely immobile return until the wall clock ran out.
+            if route_id and not int(node.get('return_route_id', 0) or 0):
                 node['return_route_id']=int(route_id)
                 node['return_progress_at']=float(now)
                 node['return_progress_xy']=(
                     None if pose_xy is None else list(pose_xy))
+            # Before the first dispatch the node may legitimately wait for a
+            # portal transaction, so it gets a longer dispatch budget.
+            dispatched=bool(int(node.get('return_route_id', 0) or 0))
+            budget=(float(return_budget) if dispatched
+                    else max(float(return_budget),float(dispatch_wait_budget)))
             # This physical return obligation survives graph/map transactions.
             since=node.setdefault('return_progress_at',float(now))
             prior=node.get('return_progress_xy')
@@ -59,7 +66,7 @@ class PlaceDfsTraversal:
                 node['return_progress_xy']=list(pose_xy)
                 node['return_progress_at']=float(now)
                 since=float(now)
-            if float(now)-since>=float(return_budget):
+            if float(now)-since>=budget:
                 node.update(state='recovery_blocked',
                             failure_reason='dfs_return_no_physical_progress')
                 return 'return_blocked'
