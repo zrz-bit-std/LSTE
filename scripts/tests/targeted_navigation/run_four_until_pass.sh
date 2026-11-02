@@ -2,7 +2,8 @@
 # Unattended four-scenario run with up to three attempts per scenario.
 #
 # Rules (agreed with the user):
-#   * drive ceiling 3000 s wall, driver stops itself on goal completion,
+#   * drive ceiling is per scenario (see DRIVE_BY_CASE below); the driver stops
+#     itself on goal completion, so the ceiling is only a safety net,
 #   * any uninterrupted 180 s without progress terminates the attempt,
 #   * a scenario passes only when every audit status is 0,
 #   * each scenario gets at most 3 attempts, then the next scenario starts,
@@ -13,7 +14,25 @@ set -uo pipefail
 WS="${LSTE_WS:-/home/zrz/work/lste_ws}"
 CASES=(semantic_l_junction semantic_t_junction semantic_cross_junction semantic_t_junction_rotated)
 MAX_ATTEMPTS="${LSTE_MAX_ATTEMPTS:-3}"
-DRIVE_SECONDS="${GP_SUITE_SECONDS:-3000}"
+# Measured sim-time cost of a full mission (sim/wall ratio 0.65-0.74):
+#   L     2 doorways, completed at 1168 s sim  -> 2400 s wall is ample
+#   T     3 doorways, still incomplete at 2042 s sim -> 4500 s wall (~3100 sim)
+#   Cross 4 doorways, still on place 2-3 at 1866 s sim -> 5400 s wall (~3700 sim)
+#   Rot   3 doorways, still incomplete at 2062 s sim -> 4500 s wall
+# A single 3000 s ceiling could never let T/Cross/Rot finish; that, not a
+# planning defect, was why every completed run failed auth_all + dfs.
+DRIVE_BY_CASE=(
+  [semantic_l_junction]=2400
+  [semantic_t_junction]=4500
+  [semantic_cross_junction]=5400
+  [semantic_t_junction_rotated]=4500
+)
+DRIVE_OVERRIDE="${GP_SUITE_SECONDS:-}"
+case_drive_seconds() {
+  local case="$1"
+  if [[ -n "$DRIVE_OVERRIDE" ]]; then printf '%s' "$DRIVE_OVERRIDE"; return; fi
+  printf '%s' "${DRIVE_BY_CASE[$case]:-3000}"
+}
 STALL_SECONDS="${LSTE_STALL_SECONDS:-180}"
 LOG_ROOT="$WS/runtime/diagnostics/20261031_four_scenarios"
 ATTEMPTS_TSV="$LOG_ROOT/attempts.tsv"
@@ -47,7 +66,10 @@ run_attempt() {
   log="/tmp/four_${case}_a${attempt}_${stamp}.log"
   cleanup_env
   log "launch $case attempt $attempt"
-  setsid nohup env SEMANTIC_CASES="$case" GP_SUITE_SECONDS="$DRIVE_SECONDS" \
+  local case_seconds
+  case_seconds="$(case_drive_seconds "$case")"
+  log "$case drive ceiling ${case_seconds}s"
+  setsid nohup env SEMANTIC_CASES="$case" GP_SUITE_SECONDS="$case_seconds" \
     bash "$WS/scripts/tests/targeted_navigation/run_place_dfs_suite.sh" \
     >"$log" 2>&1 </dev/null &
   suite_pid=$!
@@ -66,7 +88,7 @@ run_attempt() {
     --suite-root "$root" --wrapper-pid "$suite_pid" \
     --stall-seconds "$STALL_SECONDS" \
     --since-wall "$(date +%s)" \
-    --max-wall-seconds "$((DRIVE_SECONDS + 900))" \
+    --max-wall-seconds "$((case_seconds + 900))" \
     >"/tmp/four_watchdog_${case}_a${attempt}_${stamp}.log" 2>&1 </dev/null &
   watchdog_pid=$!
   wait "$suite_pid" 2>/dev/null

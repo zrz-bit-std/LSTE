@@ -50,7 +50,35 @@ class GlobalFrontierExecutionWatchdogMixin:
         )
         recovery_pending = self.recovery_pending_route_id == self.active_route_id
         if turn_phase_active:
-            self.active_progress_time = now
+            # An in-place rotation is progress for the translational clock,
+            # but only for as long as a turn can plausibly last.  Without this
+            # bound a single latched TURNING phase pins active_progress_time
+            # forever, which disables every stall watchdog at once.
+            since = getattr(self, "turn_phase_since", None)
+            if since is None:
+                self.turn_phase_since = float(now)
+                since = self.turn_phase_since
+            limit = float(getattr(self, "turn_phase_max_seconds", 20.0) or 0.0)
+            if limit > 0.0 and float(now) - float(since) > limit:
+                turn_phase_active = False
+                key = int(getattr(self, "active_route_id", 0) or 0)
+                if int(getattr(self, "expired_turn_phase_route_id", 0) or 0) != key:
+                    self.expired_turn_phase_route_id = key
+                    publish = getattr(self, "publish_status", None)
+                    if callable(publish):
+                        publish(
+                            "turn_phase_progress_expired",
+                            route_id=key,
+                            turn_phase_age_seconds=round(float(now) - float(since), 3),
+                            limit_seconds=limit,
+                            supervisor_state=str(
+                                getattr(self, "turn_supervisor_state", "")
+                            ),
+                        )
+            else:
+                self.active_progress_time = now
+        else:
+            self.turn_phase_since = None
 
         (
             post_turn_goal_matches,
@@ -130,7 +158,7 @@ class GlobalFrontierExecutionWatchdogMixin:
                 now - float(getattr(self, "active_progress_time", now))
             ),
             controller_terminal_limit=float(
-                getattr(self, "controller_terminal_wait_seconds", 45.0) or 0.0
+                getattr(self, "controller_terminal_wait_seconds", 12.0) or 0.0
             ),
         )
         expired = lease_decision.release
@@ -153,6 +181,29 @@ class GlobalFrontierExecutionWatchdogMixin:
                     active_elapsed=round(float(now - self.active_since), 3),
                     last_progress_signal=str(
                         getattr(self, "active_last_progress_signal", "none")
+                    ),
+                    # These fields are the diagnosis for "dispatched and then
+                    # nothing": which gate was holding the route still.
+                    progress_age_seconds=round(
+                        float(now) - float(getattr(self, "active_progress_time", now)),
+                        3,
+                    ),
+                    turn_phase_active=bool(turn_phase_active),
+                    turn_supervisor_state=str(
+                        getattr(self, "turn_supervisor_state", "")
+                    ),
+                    turn_phase_age_seconds=(
+                        None
+                        if getattr(self, "turn_phase_since", None) is None
+                        else round(
+                            float(now) - float(self.turn_phase_since), 3
+                        )
+                    ),
+                    dispatch_announced=bool(
+                        getattr(self, "active_work_item_dispatch_announced", False)
+                    ),
+                    lease_release_pending=bool(
+                        getattr(self, "pending_controller_lease_release", None)
                     ),
                 )
             rospy.logwarn(

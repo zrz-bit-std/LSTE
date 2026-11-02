@@ -206,7 +206,7 @@ class GlobalFrontierPlanningSnapshotMixin:
 
     def _report_no_frontier_selection(self):
         """Record why this cycle cannot create a new execution action."""
-        if getattr(self, "exploration_method", "") == "gp_branch_tree":
+        if getattr(self, "gp_portal_assistance_enabled", False):
             tree = getattr(self, "gp_exploration_tree", None)
             pending = [] if tree is None else [
                 b["id"] for b in tree.branches.values()
@@ -602,9 +602,12 @@ class GlobalFrontierPlanningSnapshotMixin:
             or self.prefetched_frontier is not None
             or active_distance <= self.prefetch_distance
             or command_distance <= self.waypoint_release_radius
+            # In persistent mode the controller owns the failure terminal,
+            # but that must not disable the stall clock itself: a controller
+            # that never sends a terminal then defers this route forever.  Run
+            # 20261102_054037 dispatched at sim 1362.9 and emitted nothing for
+            # the remaining 180 s of the attempt.
             or (
-                not getattr(self, "controller_owned_route_failure", False)
-                and
                 self.active_progress_time > 0.0
                 and now - self.active_progress_time >= self.stall_timeout
             )

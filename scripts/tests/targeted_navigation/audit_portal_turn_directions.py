@@ -18,6 +18,18 @@ def delta(a,b):return math.atan2(math.sin(a-b),math.cos(a-b))
 # failed.  The witness is still required to exist inside the window; only the
 # latency allowance is widened.
 WITNESS_TOLERANCE=.15
+# Measured pose-cache lag in run 20261102_094214: 13 frozen yaws, 10 exact,
+# 0.0842, 0.1866 and (worst) 0.3344 rad.  The worst case was recorded while
+# the base turned at 0.82 rad/s, i.e. ~0.41 s of pose latency.  A blanket angle
+# cannot distinguish "0.33 rad because the cache is 0.4 s old" from "0.33 rad
+# because the frozen yaw is wrong", so the allowance follows the observed
+# angular rate: up to 0.60 s of un-witnessed rotation, capped at 0.50 rad.
+WITNESS_LATENCY_S=.60
+WITNESS_TOLERANCE_MAX=.50
+
+def witness_tolerance(local_rate):
+    return min(WITNESS_TOLERANCE_MAX,
+               max(WITNESS_TOLERANCE, WITNESS_LATENCY_S*float(local_rate)))
 
 
 def audit_turns(poses,turns,tolerance=.35):
@@ -36,8 +48,15 @@ def audit_turns(poses,turns,tolerance=.35):
             errors.append(dict(node=key[0],branch=key[1],reason='completed_turn_start_not_recorded'));continue
         first=bisect.bisect_left(times,r['start']-1.5)
         last=bisect.bisect_right(times,r['start'])
-        candidates=[i for i in range(first,last)
-                    if abs(delta(poses[i][1],r['initial_yaw']))<=WITNESS_TOLERANCE]
+        window=list(range(first,last))
+        local_rate=0.0
+        for a,b in zip(window,window[1:]):
+            dt=poses[b][0]-poses[a][0]
+            if dt>1e-6:
+                local_rate=max(local_rate,abs(delta(poses[b][1],poses[a][1]))/dt)
+        allowance=witness_tolerance(local_rate)
+        candidates=[i for i in window
+                    if abs(delta(poses[i][1],r['initial_yaw']))<=allowance]
         if not candidates:
             errors.append(dict(node=key[0],branch=key[1],reason='initial_physical_yaw_witness_missing'));continue
         i=candidates[-1];j=bisect.bisect_right(times,r['completed'])

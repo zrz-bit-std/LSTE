@@ -149,7 +149,13 @@ class GlobalFrontierNavigationConfigurationMixin:
         # this long without route progress (10 s lifecycle sync + 20 s release
         # hold fit comfortably inside it, the stall watchdog is 180 s).
         self.controller_terminal_wait_seconds = max(
-            0.0, float(gp("~controller_terminal_wait_seconds", 45.0))
+            0.0, float(gp("~controller_terminal_wait_seconds", 12.0))
+        )
+        # A turn phase may pin the translational progress clock, but only for
+        # a plausible in-place rotation.  The supervisor's own no-progress
+        # release is capped at 12 s.
+        self.turn_phase_max_seconds = max(
+            0.0, float(gp("~turn_phase_max_seconds", 20.0))
         )
         self.unreachable_grace = max(
             0.0, float(gp("~unreachable_grace", 20.0))

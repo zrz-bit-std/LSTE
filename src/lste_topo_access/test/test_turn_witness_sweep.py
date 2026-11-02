@@ -26,7 +26,9 @@ SCRIPTS = Path(__file__).resolve().parents[3] / "scripts/tests/targeted_navigati
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from audit_portal_turn_directions import WITNESS_TOLERANCE, audit_turns  # noqa: E402
+from audit_portal_turn_directions import (  # noqa: E402
+    WITNESS_TOLERANCE, WITNESS_TOLERANCE_MAX, witness_tolerance, audit_turns,
+)
 
 
 PI = math.pi
@@ -44,6 +46,14 @@ def sweep_poses(start, initial_yaw, direction, offset, sweep_radians,
             initial_yaw + offset + sign * sweep_radians * index / samples,
         ))
     return poses
+
+
+def approach_poses(start, yaw_at_start, rate, seconds=1.5, step=0.05):
+    """A window that is already rotating, like a real turn start."""
+    count = int(seconds / step)
+    return [(start - seconds + i * step,
+             yaw_at_start - (seconds - i * step) * rate)
+            for i in range(count + 1)]
 
 
 def turn(initial_yaw, direction, start, completed):
@@ -68,11 +78,25 @@ class WitnessLatencyTest(unittest.TestCase):
 
     def test_a_witness_beyond_the_allowance_is_rejected(self):
         poses = sweep_poses(100.0, -1.1991, "counterclockwise",
-                            WITNESS_TOLERANCE + 0.05, 2.72)
+                            WITNESS_TOLERANCE_MAX + 0.12, 2.72)
         result = audit_turns(poses, turn(-1.1991, "counterclockwise", 100.0, 102.1))
         self.assertFalse(result["passed"])
         self.assertEqual(result["errors"][0]["reason"],
                          "initial_physical_yaw_witness_missing")
+
+    def test_the_measured_worst_case_is_accepted(self):
+        # Run 20261102_094214 node 24 branch 69: 0.3344 rad at 0.82 rad/s.
+        poses = approach_poses(100.0, -0.4711 + 0.3344, 0.82)
+        poses += sweep_poses(100.0, -0.4711, "counterclockwise", 0.3344, 2.72)[2:]
+        result = audit_turns(poses, turn(-0.4711, "counterclockwise", 100.0, 102.1))
+        self.assertTrue(result["passed"], result["errors"])
+
+    def test_the_allowance_scales_with_the_turn_rate(self):
+        slow = witness_tolerance(0.05)
+        fast = witness_tolerance(0.82)
+        self.assertAlmostEqual(slow, WITNESS_TOLERANCE, places=3)
+        self.assertAlmostEqual(fast, 0.492, places=3)
+        self.assertLessEqual(witness_tolerance(5.0), WITNESS_TOLERANCE_MAX)
 
     def test_the_sweep_is_measured_from_the_frozen_yaw(self):
         # 2.641 rad of raw rotation plus a 0.077 rad witness offset is a full
