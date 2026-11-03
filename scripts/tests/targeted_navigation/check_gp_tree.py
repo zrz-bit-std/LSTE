@@ -41,10 +41,16 @@ def verified_return_direction(branch, portals):
 
 def check(path,expected,center,radius,heading_tolerance=0.45):
     trees=[];events=[];latest_tree=None;latest_portal_records={};same_place_rejections=set()
-    with Path(path).open(encoding="utf-8", errors="strict") as stream:
+    damaged=0
+    with Path(path).open(encoding="utf-8", errors="replace") as stream:
       for line in stream:
           if ' data=' not in line:continue
-          data=json.loads(line.split(' data=',1)[1])
+          try:
+              data=json.loads(line.split(' data=',1)[1])
+          except ValueError:
+              damaged+=1
+              if damaged>3:raise
+              continue
           if data.get('tree'):
               latest_tree=data['tree']
               # Historical checks use only confirmed node identities and

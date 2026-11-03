@@ -29,6 +29,35 @@ class MetricsDecodeTest(unittest.TestCase):
         self.assertEqual(events[0][1]["frontier_event"], "keep")
 
 
+    def test_damage_is_bounded_not_unlimited(self):
+        import audit_place_dfs
+        payload = b'{"ros_time":1.0,"frontier_event"\n'
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "metrics.log"
+            body = b"".join(
+                b"event=global_frontier_event data=" + payload for _ in range(4))
+            path.write_bytes(body)
+            with self.assertRaises(ValueError):
+                list(audit_place_dfs.events(path))
+
+
+class PlotReaderTest(unittest.TestCase):
+    def test_a_corrupt_byte_does_not_break_the_plot_reader(self):
+        sys.path.insert(0, str(ROOT / "scripts/tools"))
+        import plot_portal_authentication
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "metrics.log"
+            path.write_bytes(
+                b"2026-11-03T14:16:51 level=INFO event=sample "
+                b'data={"pose":[1.0,2.0,0.0],"ros_time":1.0}\n'
+                b"2026-11-03T14:16:52 level=INFO event=global_frontier_event "
+                b"data={\xef broken\n"
+            )
+            _events, poses, _tree, _dedup = \
+                plot_portal_authentication.read_metrics(path)
+        self.assertEqual(len(poses), 1)
+
+
 class TurnRawTruncationTest(unittest.TestCase):
     def test_one_cut_tail_message_is_counted_not_raised(self):
         status = json.dumps({

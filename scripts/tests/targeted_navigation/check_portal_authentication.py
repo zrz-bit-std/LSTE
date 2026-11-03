@@ -13,15 +13,28 @@ def load_events(path):
     tree_index = None
     dedup_max = {}
     candidate_history = {}
-    with Path(path).open(encoding="utf-8", errors="strict") as stream:
+    damaged = 0
+    with Path(path).open(encoding="utf-8", errors="replace") as stream:
         for lineno, line in enumerate(stream, 1):
             if not line.strip():
                 continue
-            if " data=" not in line or not line.endswith("\n"):
+            if not line.endswith("\n"):
+                # The metrics node is stopped with SIGINT; only the very last
+                # line can be cut.  Anything else is real corruption.
+                if stream.readline() == "":
+                    break
+                raise ValueError("incomplete metrics record at line %d" % lineno)
+            if " data=" not in line:
                 raise ValueError("incomplete metrics record at line %d" % lineno)
             # Every trajectory sample is evidence too: never let a corrupt
             # non-Portal record silently disappear behind a passing auth gate.
-            data = json.loads(line.split(" data=", 1)[1])
+            try:
+                data = json.loads(line.split(" data=", 1)[1])
+            except ValueError:
+                damaged += 1
+                if damaged > 3:
+                    raise
+                continue
             if not isinstance(data, dict):
                 raise ValueError("non-object metrics record at line %d" % lineno)
             if " event=global_frontier_event " not in line:

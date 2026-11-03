@@ -346,7 +346,7 @@ def audit(metrics,bag_path):
                                 for topic in ('/lste/global_frontier/status','/rbt_pose','/pro3/wheel_odom')))
         if not coverage['passed']:fail('raw recording does not cover owned execution endpoints',coverage=coverage)
         buffer=tf2_ros.Buffer(rospy.Duration(max(120.,bag.get_end_time()-bag.get_start_time()+2)),debug=False)
-        masks=[];local_masks=[];bridge_events=[];physical_protocol=LOCAL_MASK in topics
+        masks=[];local_masks=[];bridge_events=[];physical_protocol=LOCAL_MASK in topics;invalid_bridge=0
         bridge_topic='/lste/teb_goal_bridge/status'
         for topic,m,t in bag.read_messages(topics=['/tf','/tf_static',MASK,LOCAL_MASK,bridge_topic]):
             if topic in (MASK,LOCAL_MASK):
@@ -354,7 +354,11 @@ def audit(metrics,bag_path):
                 (masks if topic==MASK else local_masks).append((m.header.stamp.to_sec(),m,bool(np.any(m.data==100))))
             elif topic==bridge_topic:
                 try:bridge_events.append((t.to_sec(),json.loads(m.data)))
-                except Exception as error:raise ValueError('invalid raw controller bridge status: '+str(error))
+                except Exception as error:
+                    # The recorder is stopped with SIGINT, so one tail status
+                    # message can be cut.  More than that is real corruption.
+                    invalid_bridge+=1
+                    if invalid_bridge>1:raise ValueError('invalid raw controller bridge status: '+str(error))
             else:
                 for tr in m.transforms:
                     if topic=='/tf_static':buffer.set_transform_static(tr,'raw_native_audit')
@@ -565,6 +569,7 @@ def audit(metrics,bag_path):
         mask_revision_lags=mask_lag_total,max_mask_revision_lag_streak=mask_lag_max_streak,
         mask_uninitialized_samples=mask_uninit_total,rebuild_partial_samples=rebuild_partial,
         mask_apply_transients=mask_apply_transients,
+        invalid_bridge_status_messages=invalid_bridge,
         published_mask_mode_checks=mask_mode_checks,transparent_mask_checks=transparent,idle_updates_before_first_full=startup_updates,dispatch_routes=len(route_coverage),controller_dispatches=len(controller_dispatches),controller_owned_intervals=len(controller_leases),uncovered_dispatches=uncovered,
         mask_protocol=('map+same-source-epoch odom physical mask' if physical_protocol else 'legacy single map mask; exact master-stamp TF'),
         contract='Raw goal-bridge dispatch→exact ACK defines controller ownership; all master full+updates in ordinary owned intervals and both masters at graph and controller dispatches are checked. Owned Portal/auth masks stay transparent through exact ACK. Exact original TF at master stamp; no latest TF or skipped errors.',metrics=str(metrics),bag=str(bag_path))

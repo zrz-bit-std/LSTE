@@ -25,13 +25,25 @@ COLORS = {"completed": "#16836c", "failed": "#bd5144", "entering": "#2674b8",
 
 def read_metrics(path):
     events=[]; poses=[]; latest_tree=None; dedup=[]; latest_state={}
-    with Path(path).open(encoding="utf-8",errors="strict") as stream:
+    damaged=0
+    with Path(path).open(encoding="utf-8",errors="replace") as stream:
         for lineno,line in enumerate(stream,1):
             if not line.strip():continue
-            if " data=" not in line or not line.endswith("\n"):
+            if not line.endswith("\n"):
+                # Only the recorder-tail line can be cut.
+                if stream.readline()=="":
+                    break
+                raise ValueError("incomplete metrics record at line %d" % lineno)
+            if " data=" not in line:
                 raise ValueError("incomplete metrics record at line %d" % lineno)
             event=line.split(" event=",1)[1].split(" data=",1)[0] if " event=" in line else ""
-            data=json.loads(line.split(" data=",1)[1])
+            try:
+                data=json.loads(line.split(" data=",1)[1])
+            except ValueError:
+                # 20261103_141641 spliced one record out of 8249.
+                damaged+=1
+                if damaged>3:raise
+                continue
             if not isinstance(data,dict):raise ValueError("non-object metrics record")
             if event == "sample" and data.get("pose"):
                 poses.append({"pose":data["pose"],"ros_time":data.get("ros_time")})

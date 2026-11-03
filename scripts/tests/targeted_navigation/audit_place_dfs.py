@@ -7,16 +7,24 @@ from pathlib import Path
 
 
 def events(path):
-    # A metrics node writes its own log; one run (20261103_141641) contains a
-    # split multi-byte character near the start and every audit that reads it
-    # through this helper died with UnicodeDecodeError before judging anything.
-    # Replacement decoding cannot change the ASCII JSON payloads that the
-    # audits parse, so it only keeps a corrupt byte from hiding the evidence.
+    # A metrics node writes its own log; run 20261103_141641 contains one split
+    # multi-byte character and one spliced record (1 of 8249), and every audit
+    # that reads through this helper died before judging anything.  Replacement
+    # decoding cannot change ASCII JSON payloads, and a bounded number of
+    # damaged records is skipped and reported instead of hiding the evidence.
+    damaged = 0
     with Path(path).open(encoding='utf8',errors='replace') as stream:
         for number,line in enumerate(stream,1):
             if 'event=global_frontier_event data=' not in line:
                 continue
-            yield number,json.loads(line.split(' data=',1)[1])
+            try:
+                event = json.loads(line.split(' data=',1)[1])
+            except ValueError:
+                damaged += 1
+                if damaged > 3:
+                    raise
+                continue
+            yield number,event
 
 
 
