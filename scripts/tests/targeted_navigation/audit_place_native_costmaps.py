@@ -242,6 +242,37 @@ def mask_revision_lag_allows(grid,masks,index,master_stamp,
     return exclusion_check(grid,masks[index-1][1])
 
 
+def master_or_previous_revision(grid,masks,index,translation=(0.,0.),angle=0.,
+                                streak=0,lag_seconds=MASK_REVISION_LAG_S,
+                                max_lags=MAX_MASK_REVISION_LAGS):
+    """Evaluate a master against the active revision or its predecessor.
+
+    A dispatch can land between a mask publication and the next costmap update.
+    Run 20261103_124741 route 10 was adopted 12 ms after the mask was published:
+    the last global master was 0.96 s old and the next one arrived 0.5 s later,
+    so the master still enforced the preceding revision (which differs from the
+    new one by 10 newly excluded cells out of 107520; 2 of 85 dispatches).
+
+    The ``nonlethal_cells`` path already tolerates exactly one Place-mask
+    revision behind.  Returning ``(result, lagged)`` keeps the same bounds for
+    the stamp case: at most one revision back, inside ``MASK_REVISION_LAG_S``,
+    within the consecutive-sample budget, and clean against the revision the
+    master actually used.  Anything older, further behind or dirty still raises
+    ``master predates active mask``.
+    """
+    stamp=grid.header.stamp.to_sec();active=masks[index][1]
+    if stamp>=active.header.stamp.to_sec():
+        return exclusion_check(grid,active,translation,angle),False
+    if (index<1 or streak>=max_lags
+            or active.header.stamp.to_sec()-stamp>lag_seconds
+            or masks[index-1][0]>stamp):
+        raise ValueError('master predates active mask')
+    previous=exclusion_check(grid,masks[index-1][1],translation,angle)
+    if previous['nonlethal_cells']:
+        raise ValueError('master predates active mask')
+    return previous,True
+
+
 def exclusion_check(grid,mask,translation=(0.,0.),rotation=0.):
     """Transform actual master cell centers into the original published mask."""
     if grid.header.stamp<mask.header.stamp:raise ValueError('master predates active mask')
@@ -347,6 +378,7 @@ def audit(metrics,bag_path):
         if not coverage['passed']:fail('raw recording does not cover owned execution endpoints',coverage=coverage)
         buffer=tf2_ros.Buffer(rospy.Duration(max(120.,bag.get_end_time()-bag.get_start_time()+2)),debug=False)
         masks=[];local_masks=[];bridge_events=[];physical_protocol=LOCAL_MASK in topics;invalid_bridge=0
+        predates_revision=0
         bridge_topic='/lste/teb_goal_bridge/status'
         for topic,m,t in bag.read_messages(topics=['/tf','/tf_static',MASK,LOCAL_MASK,bridge_topic]):
             if topic in (MASK,LOCAL_MASK):
@@ -415,6 +447,7 @@ def audit(metrics,bag_path):
         def check(grid,stamp,topic,route=None,mode='ordinary',allow_rebuild=False):
             nonlocal mask_lag_streak,mask_lag_total,mask_lag_max_streak
             nonlocal mask_uninit_streak,mask_uninit_total,rebuild_partial,mask_apply_transients
+            nonlocal predates_revision
             lagged=False;uninitialized=False;tolerated=False
             i=bisect_right(mask_times,stamp)-1
             if i<0:raise ValueError('no preceding Place mask')
@@ -445,8 +478,12 @@ def audit(metrics,bag_path):
                 if rendered['nonlethal_cells']:raise ValueError('physical mask admits source-excluded cells')
                 if topic==MASTERS[1]:
                     translation,angle=source_mask_transform(mask,source,buffer)
-                    direct=exclusion_check(grid,local_mask)
-                    if direct['nonlethal_cells']:
+                    direct,direct_lagged=master_or_previous_revision(
+                        grid,local_masks,k,streak=mask_lag_streak)
+                    if direct_lagged:
+                        lagged=True
+                        predates_revision+=1
+                    elif direct['nonlethal_cells']:
                         lag=mask_revision_lag_allows(
                             grid,local_masks,k,grid.header.stamp.to_sec(),
                             streak=mask_lag_streak)
@@ -470,7 +507,11 @@ def audit(metrics,bag_path):
             elif source!=target:
                 tr=buffer.lookup_transform(target,source,grid.header.stamp).transform
                 translation=(tr.translation.x,tr.translation.y);angle=yaw(tr.rotation)
-            result=exclusion_check(grid,mask,translation,angle)
+            result,result_lagged=master_or_previous_revision(
+                grid,masks,i,translation,angle,streak=mask_lag_streak)
+            if result_lagged:
+                lagged=True
+                predates_revision+=1
             if result['nonlethal_cells'] and not lagged and not tolerated:
                 # Same one-revision publication window as the physical check.
                 master_stamp=grid.header.stamp.to_sec()
@@ -570,6 +611,7 @@ def audit(metrics,bag_path):
         mask_uninitialized_samples=mask_uninit_total,rebuild_partial_samples=rebuild_partial,
         mask_apply_transients=mask_apply_transients,
         invalid_bridge_status_messages=invalid_bridge,
+        mask_predates_revision_samples=predates_revision,
         published_mask_mode_checks=mask_mode_checks,transparent_mask_checks=transparent,idle_updates_before_first_full=startup_updates,dispatch_routes=len(route_coverage),controller_dispatches=len(controller_dispatches),controller_owned_intervals=len(controller_leases),uncovered_dispatches=uncovered,
         mask_protocol=('map+same-source-epoch odom physical mask' if physical_protocol else 'legacy single map mask; exact master-stamp TF'),
         contract='Raw goal-bridge dispatch→exact ACK defines controller ownership; all master full+updates in ordinary owned intervals and both masters at graph and controller dispatches are checked. Owned Portal/auth masks stay transparent through exact ACK. Exact original TF at master stamp; no latest TF or skipped errors.',metrics=str(metrics),bag=str(bag_path))
