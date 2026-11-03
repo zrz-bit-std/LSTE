@@ -34,6 +34,14 @@ MAX_MASK_REVISION_LAGS=10
 # the next update; at most a couple of published masters can therefore hold no
 # mask at all.  Bound that, and only right after a revision.
 MAX_MASK_UNINITIALIZED_SAMPLES=2
+# The planner clears the Place scope before the bridge's terminal handoff, so the
+# published mask can go unbounded a few milliseconds before the exact
+# lease-release ACK.  Run 20261103_115704: mask 441.590, terminal_prepare
+# 441.613, controller_lease_released 441.614, lease_release_ack 441.617.
+# Accept only the last MASK_HANDOFF_WINDOW_S of an owned ordinary lease, only
+# with the bridge's own terminal event inside the window, and count it.
+MASK_HANDOFF_WINDOW_S=0.25
+MAX_MASK_MODE_HANDOFFS=3
 
 
 def authorized_dfs_return_local_egress(d):
@@ -189,6 +197,31 @@ def controller_lease_intervals(status_events,mode_for):
                 first['identity_conflict']=True
                 second['identity_conflict']=True
     return starts
+
+
+def mask_handoff_allowed(stamp,mode,bounded,leases,events,count):
+    """A Place mask may drop just before the exact lease-release ACK.
+
+    The planner releases the scope first; the bridge then announces the
+    terminal handoff and only afterwards sends the ACK that closes the lease.
+    Accept only an unbounded mask in the last MASK_HANDOFF_WINDOW_S of an owned
+    ordinary lease, only when the bridge's own terminal event falls inside that
+    window, and count the samples against MAX_MASK_MODE_HANDOFFS.  A mask that
+    drops earlier, without that evidence, or too often is still a failure.
+    """
+    if count>=MAX_MASK_MODE_HANDOFFS or mode!='ordinary' or bounded:
+        return False
+    for lease in leases:
+        end=lease.get('end')
+        if end is None or not (lease['start']<=stamp<=end):
+            continue
+        if not (0.0<=end-stamp<=MASK_HANDOFF_WINDOW_S):
+            continue
+        if any(stamp<=at<=end and data.get('event') in (
+                'terminal_prepare','controller_lease_released')
+               for at,data in events):
+            return True
+    return False
 
 
 def mask_mode_conflict(mode,bounded):
@@ -429,6 +462,7 @@ def audit(metrics,bag_path):
                                 for lease in conflicts})[:10])
         mask_mode_checks=0
         mask_mode_failures=0
+        mask_mode_handoffs=0
         for stamp,mask,bounded in masks+local_masks:
             if bridge_topic in topics:mode=controller_mode_at(stamp,controller_leases)
             else:
@@ -438,6 +472,10 @@ def audit(metrics,bag_path):
             if mode=='idle':continue
             mask_mode_checks+=1
             if mask_mode_conflict(mode,bounded):
+                if mask_handoff_allowed(stamp,mode,bounded,controller_leases,
+                                        bridge_events,mask_mode_handoffs):
+                    mask_mode_handoffs+=1
+                    continue
                 mask_mode_failures+=1
                 if mask_mode_failures<=5:
                     fail('published mask mode disagrees with owned execution',stamp=stamp,mode=mode,bounded=bounded)
@@ -612,6 +650,7 @@ def audit(metrics,bag_path):
         mask_apply_transients=mask_apply_transients,
         invalid_bridge_status_messages=invalid_bridge,
         mask_predates_revision_samples=predates_revision,
+        mask_mode_handoff_transients=mask_mode_handoffs,
         published_mask_mode_checks=mask_mode_checks,transparent_mask_checks=transparent,idle_updates_before_first_full=startup_updates,dispatch_routes=len(route_coverage),controller_dispatches=len(controller_dispatches),controller_owned_intervals=len(controller_leases),uncovered_dispatches=uncovered,
         mask_protocol=('map+same-source-epoch odom physical mask' if physical_protocol else 'legacy single map mask; exact master-stamp TF'),
         contract='Raw goal-bridge dispatch→exact ACK defines controller ownership; all master full+updates in ordinary owned intervals and both masters at graph and controller dispatches are checked. Owned Portal/auth masks stay transparent through exact ACK. Exact original TF at master stamp; no latest TF or skipped errors.',metrics=str(metrics),bag=str(bag_path))

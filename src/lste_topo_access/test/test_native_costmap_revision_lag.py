@@ -75,5 +75,45 @@ class PredatesRevisionTest(unittest.TestCase):
             evaluate(9.9, 0, lag_seconds=10.0)
 
 
+class MaskHandoffTest(unittest.TestCase):
+    stamp = 441.590
+    end = 441.617
+    events = [(441.613, {"event": "terminal_prepare"}),
+              (441.614, {"event": "controller_lease_released"}),
+              (441.617, {"event": "lease_release_ack"})]
+
+    def allowed(self, stamp=None, mode="ordinary", bounded=False,
+                events=None, count=0, end=None):
+        leases = [{"route_id": 36, "action_generation": 67,
+                   "start": 441.211, "end": self.end if end is None else end}]
+        return audit.mask_handoff_allowed(
+            self.stamp if stamp is None else stamp, mode, bounded,
+            leases, self.events if events is None else events, count)
+
+    def test_the_observed_115704_handoff_is_admitted(self):
+        self.assertTrue(self.allowed())
+
+    def test_without_the_bridge_terminal_event_it_fails(self):
+        self.assertFalse(self.allowed(events=[(441.617, {"event": "lease_release_ack"})]))
+
+    def test_a_mask_dropped_earlier_than_the_window_fails(self):
+        self.assertFalse(self.allowed(stamp=441.100))
+
+    def test_a_lease_ending_later_than_the_window_fails(self):
+        self.assertFalse(self.allowed(end=442.100))
+
+    def test_the_handoff_budget_is_bounded(self):
+        self.assertFalse(self.allowed(count=audit.MAX_MASK_MODE_HANDOFFS))
+
+    def test_a_transparent_lease_conflict_is_not_a_handoff(self):
+        self.assertFalse(self.allowed(mode="transparent"))
+
+    def test_a_bounded_mask_conflict_is_not_a_handoff(self):
+        self.assertFalse(self.allowed(bounded=True))
+
+    def test_a_terminal_event_outside_the_window_does_not_count(self):
+        self.assertFalse(self.allowed(events=[(441.700, {"event": "terminal_prepare"})]))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
