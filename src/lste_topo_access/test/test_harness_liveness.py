@@ -101,6 +101,29 @@ class BranchWaitFixture:
             branches={7: {"id": 7, "state": "pending"}})
         self.obj.frontier_exhausted = False
         self.obj.branch_wait_timeout = timeout
+        self.obj.frontier_validation_budget_exhausted = False
+        self.obj.frontier_validation_pending = False
+        self.obj.portal_transaction = None
+        self.obj.graph_completion_state = None
+        self.obj.current_physical_place_id = 1
+        self.obj.place_memory_enabled = True
+        for _name in (
+            "last_place_graph_hop_skips",
+            "last_work_item_failed_viewpoint_skips",
+            "last_portal_probe_viewpoint_rejections",
+            "last_graph_policy_rejections",
+            "last_portal_sources",
+            "last_portal_candidates_seen",
+            "last_portal_hard_rejected",
+            "last_portal_executable_candidates",
+            "last_portal_missing_transition_goals",
+            "last_portal_unbound_reprojection_skips",
+            "last_observed_place_reentry_skips",
+        ):
+            setattr(self.obj, _name, 0)
+        self.obj.last_graph_route_plan = None
+        self.obj.clearance = 1.0
+        self.obj.frontier_clearance = 1.0
         self.obj.pose_odom = SimpleNamespace(x=0.0, y=0.0, theta=0.0)
         self.obj.clock = 100.0
         self.obj.time_provider = lambda: self.obj.clock
@@ -135,6 +158,21 @@ class BranchWaitTimeoutTest(unittest.TestCase):
         fixture.report(131.0)             # only 11 s since the move
         self.assertFalse(fixture.obj.frontier_exhausted)
         fixture.report(152.0)
+        self.assertTrue(fixture.obj.frontier_exhausted)
+
+    def test_a_settled_tree_reaches_the_completion_gate(self):
+        # Run 20261103_124742: the tree was built, every obligation settled,
+        # and then the empty branch list was mistaken for the startup wait.
+        from unittest import mock
+        fixture = BranchWaitFixture()
+        fixture.report(100.0)
+        self.assertEqual(fixture.obj.events[-1][0], "gp_branch_waiting")
+        fixture.obj.gp_exploration_tree = SimpleNamespace(branches={})
+        fixture.obj.events.clear()
+        with mock.patch("rospy.logwarn_throttle"), mock.patch("rospy.logwarn"):
+            fixture.report(101.0)
+        names = [event for event, _payload in fixture.obj.events]
+        self.assertNotIn("gp_branch_waiting", names)
         self.assertTrue(fixture.obj.frontier_exhausted)
 
     def test_no_pending_branches_does_not_expire(self):

@@ -213,7 +213,20 @@ class GlobalFrontierPlanningSnapshotMixin:
                 if b["state"] in ("pending", "retry", "active")
                 or (b["state"] == "entered" and b.get("destination_node_id") is None)
             ]
-            if tree is None or not tree.branches or pending:
+            if tree is not None and tree.branches:
+                # Remember that the tree was actually built.  Run
+                # 20261103_124742 finished every durable obligation, emptied
+                # the branch list and then idled in the "no branch observed
+                # yet" startup wait for 180 s until the watchdog killed a
+                # completed mission.
+                self._gp_branch_observed = True
+            settled_tree = bool(
+                getattr(self, "_gp_branch_observed", False)
+                and not pending
+                and tree is not None
+                and not tree.branches
+            )
+            if (tree is None or not tree.branches or pending) and not settled_tree:
                 # An unstable GP direction or map-admission wait is not
                 # exploration exhaustion. Publishing frontier_exhausted here
                 # cancels the persistent executor and strands its release
