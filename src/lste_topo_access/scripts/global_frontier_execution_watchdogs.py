@@ -203,24 +203,6 @@ class GlobalFrontierExecutionWatchdogMixin:
         )
         expired = lease_decision.release
         if (
-            stalled
-            and goal_xy is not None
-            # A doorway authentication owns its own physical budget; its route
-            # is intentionally slow while the base enters and turns.
-            and not str(getattr(self, "active_portal_authentication_phase", "") or "")
-            and int(getattr(self, "goal_stagnation_count", 0) or 0)
-            >= int(getattr(self, "goal_stagnation_limit", 3) or 0)
-            and float(now) - float(
-                getattr(self, "goal_stagnation_since", now) or now)
-            >= float(getattr(self, "goal_stagnation_seconds", 25.0) or 0.0)
-            and int(getattr(self, "goal_stagnation_abandoned_for", 0) or 0)
-            != int(getattr(self, "active_route_id", 0) or 0)
-        ):
-            self.goal_stagnation_abandoned_for = int(
-                getattr(self, "active_route_id", 0) or 0)
-            self.abandon_stagnant_goal(now, goal_xy)
-            expired = True
-        if (
             bool(getattr(self, "controller_owned_route_failure", False))
             and stalled
             and not recovery_pending
@@ -228,6 +210,8 @@ class GlobalFrontierExecutionWatchdogMixin:
             != int(self.active_route_id)
         ):
             self.last_route_stagnation_reported_route_id = int(self.active_route_id)
+            if self._note_stagnation_budget(now, goal_xy):
+                expired = True
             publish = getattr(self, "publish_status", None)
             if callable(publish):
                 publish(
@@ -289,6 +273,46 @@ class GlobalFrontierExecutionWatchdogMixin:
             portal_edge_expired=portal_edge_expired,
             expired=expired,
         )
+
+    def _note_stagnation_budget(self, now, goal_xy):
+        """Count consecutive stagnation reports for one WorkItem.
+
+        The goal-keyed counter did not fire: re-dispatch keeps ``stalled``
+        false for most cycles (the progress clock restarts every 5-10 s), so
+        three consecutive stalled evaluations never accumulated even though the
+        2026-11-03 sites produced 8-40 stagnation *reports* on one item.  Count
+        the reports instead, and reset on 0.15 m of real progress.
+        """
+        if str(getattr(self, "active_portal_authentication_phase", "") or ""):
+            return False
+        # Key the budget on the robot's own pose, not on the goal or the work
+        # item: run 20261103_110919 produced 18 stagnation reports on 18
+        # *different* frontier endpoints (all frontier_endpoint, no work item)
+        # 0.5-1.5 m apart while the base never left a 0.3 m circle.  A goal- or
+        # item-keyed counter resets on every re-selection and never fires.
+        pose = getattr(self, "pose_odom", None)
+        if pose is None:
+            return False
+        anchor = getattr(self, "stagnation_anchor_xy", None)
+        moved = None
+        if anchor is not None:
+            moved = math.hypot(
+                float(pose.x) - float(anchor[0]),
+                float(pose.y) - float(anchor[1]),
+            )
+        if anchor is None or moved > 0.30:
+            self.stagnation_item_count = 1
+            self.stagnation_anchor_xy = (float(pose.x), float(pose.y))
+            return False
+        self.stagnation_item_count = int(
+            getattr(self, "stagnation_item_count", 0) or 0) + 1
+        limit = max(1, int(getattr(self, "goal_stagnation_limit", 3) or 3))
+        if self.stagnation_item_count < limit:
+            return False
+        self.stagnation_item_count = 0
+        self.stagnation_anchor_xy = None
+        self.abandon_stagnant_goal(now, goal_xy)
+        return True
 
     def abandon_stagnant_goal(self, now, goal_xy):
         """Give up on a goal that cannot produce motion, with evidence.

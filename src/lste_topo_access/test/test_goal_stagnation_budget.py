@@ -69,6 +69,7 @@ class Fixture(GlobalFrontierExecutionWatchdogMixin):
         self.active_portal_authentication_entry_approach = False
         self.active_portal_gate_approached_at = None
         self.active_work_item_id = 42
+        self.pose_odom = SimpleNamespace(x=0.0, y=0.0, theta=0.0)
         self.active_work_item_attempt_id = 7
         self.place_work_items = Ledger()
         self.active_frontier_component = None
@@ -94,9 +95,11 @@ class Fixture(GlobalFrontierExecutionWatchdogMixin):
     def record_failed_frontier_region(self, x, y, now, reason, component=None):
         self.failed_regions.append((x, y, reason))
 
-    def evaluate(self, now, x=0.0, y=0.0, stalled=True):
-        # Simulate the 5-10 s re-dispatch that resets the progress clock: the
-        # route is always 9 s old and has never moved.
+    def evaluate(self, now, x=0.0, y=0.0, stalled=True, new_route=True):
+        # Simulate the 5-10 s re-dispatch: a new route id every time, and the
+        # progress clock restarted 9 s ago with no movement.
+        if new_route:
+            self.active_route_id += 1
         self.active_progress_time = (now - 9.0) if stalled else now
         return self.evaluate_active_route_watchdogs(
             x, y, None, now, False, None, None)
@@ -105,9 +108,9 @@ class Fixture(GlobalFrontierExecutionWatchdogMixin):
 class GoalStagnationBudgetTest(unittest.TestCase):
     def test_the_old_loop_is_reproduced_then_broken(self):
         fixture = Fixture(limit=3)
-        # Three stagnant evaluations with no movement, as dispatched at the
-        # 2026-11-03 sites (8, 40 and 33 events there).
-        for index, now in enumerate((105.0, 140.0, 175.0)):
+        # Three re-dispatched routes that each stagnate on the same WorkItem,
+        # as at the 2026-11-03 sites (8, 40 and 33 stagnation reports).
+        for index, now in enumerate((105.0, 113.0, 121.0)):
             state = fixture.evaluate(now)
             if index < 2:
                 self.assertFalse(
@@ -125,36 +128,50 @@ class GoalStagnationBudgetTest(unittest.TestCase):
         self.assertEqual(fixture.failed_regions[0][2], "goal_stagnation_budget")
         self.assertTrue(state.expired)
 
-    def test_the_abandon_happens_once_per_route(self):
+    def test_the_budget_is_per_work_item(self):
         fixture = Fixture(limit=2)
-        for now in (105.0, 140.0, 175.0, 210.0):
-            fixture.evaluate(now)
-        self.assertEqual(len(fixture.place_work_items.abandoned), 1)
-        self.assertEqual(len(fixture.releases), 1)
+        fixture.evaluate(105.0)
+        fixture.evaluate(113.0)
+        fixture.active_work_item_id = 43
+        fixture.evaluate(121.0)
+        fixture.evaluate(129.0)
+        self.assertEqual(
+            [entry[0] for entry in fixture.place_work_items.abandoned], [42, 43])
+        self.assertEqual(len(fixture.releases), 2)
 
     def test_a_portal_authentication_route_is_never_abandoned(self):
         fixture = Fixture(limit=2)
         fixture.active_portal_authentication_phase = "entering"
-        for now in (105.0, 140.0, 175.0, 210.0):
+        for now in (105.0, 113.0, 121.0, 129.0):
             fixture.evaluate(now)
         self.assertEqual(fixture.place_work_items.abandoned, [])
         self.assertEqual(fixture.releases, [])
 
-    def test_a_new_goal_restarts_the_budget(self):
+    def test_moving_away_restarts_the_budget(self):
         fixture = Fixture(limit=3)
         fixture.evaluate(105.0)
-        fixture.evaluate(140.0)
-        fixture.active_frontier = (0, 0, 40.0, 0.0)      # different obligation
-        fixture.evaluate(175.0)
-        self.assertEqual(fixture.goal_stagnation_count, 1)
+        fixture.evaluate(113.0)
+        fixture.pose_odom.y = 1.0                        # the base actually left
+        fixture.evaluate(121.0)
+        self.assertEqual(fixture.stagnation_item_count, 1)
         self.assertEqual(fixture.place_work_items.abandoned, [])
+
+    def test_changing_goals_at_one_pose_still_spends_the_budget(self):
+        # Run 20261103_110919: 18 reports on 18 different frontier endpoints
+        # while the base stayed inside 0.3 m.
+        fixture = Fixture(limit=3)
+        for index, now in enumerate((105.0, 113.0, 121.0)):
+            fixture.active_frontier = (0, 0, 10.0 + index, 0.0)
+            fixture.evaluate(now)
+        self.assertEqual(
+            [entry[0] for entry in fixture.place_work_items.abandoned], [42])
 
     def test_progress_resets_the_budget(self):
         fixture = Fixture(limit=3)
         fixture.evaluate(105.0)
-        fixture.evaluate(140.0, stalled=False)            # real progress
-        fixture.evaluate(175.0)
-        self.assertEqual(fixture.goal_stagnation_count, 1)
+        fixture.pose_odom.x = 0.40                        # 0.40 m of real travel
+        fixture.evaluate(113.0)
+        self.assertEqual(fixture.stagnation_item_count, 1)
         self.assertEqual(fixture.place_work_items.abandoned, [])
 
     def test_the_controller_wait_is_measured_from_the_first_stagnation(self):
