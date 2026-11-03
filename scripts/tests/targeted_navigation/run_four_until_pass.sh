@@ -96,7 +96,7 @@ run_attempt() {
   fi
   log "root=$root"
   setsid nohup python3 "$WS/scripts/tests/targeted_navigation/l_stall_watchdog.py" \
-    --suite-root "$root" --wrapper-pid "$suite_pid" \
+    --suite-root "$root" --wrapper-pid 0 \
     --stall-seconds "$STALL_SECONDS" \
     --since-wall "$(date +%s)" \
     --max-wall-seconds "$((case_seconds + 900))" \
@@ -109,12 +109,15 @@ run_attempt() {
   pkill -TERM -f "l_stall_watchdog.py --suite-root $root" 2>/dev/null
   bash "$WS/scripts/tests/targeted_navigation/collect_failure_snapshots.sh" \
     "$root" "$LOG_ROOT/snapshots" >/dev/null 2>&1
-  if [[ ! -f "$root/summary.log" ]]; then
+  # The suite writes "launch_failed <status>" after a watchdog kill, but that
+  # line means no audit ran.  Treat it like a missing summary.
+  if [[ ! -f "$root/summary.log" ]] || ! grep -q "launch=" "$root/summary.log"; then
     # The stall watchdog killed this attempt before the suite reached its
     # audit.  The bag and metrics still exist, so score them: a killed run is
     # data, not a missing result (L attempt 1 of 20261102_214754 was a near
     # pass that got recorded as launch_failed).
     log "$case attempt $attempt: killed before the audit; scoring the recording"
+    rm -f "$root/summary.log"
     env SEMANTIC_CASES="$case" LSTE_AUDIT_ONLY_ROOT="$root" \
       bash "$WS/scripts/tests/targeted_navigation/run_place_dfs_suite.sh" \
       >>"$root/audit_only.log" 2>&1
