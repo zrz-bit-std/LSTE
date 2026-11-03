@@ -94,6 +94,7 @@ run_attempt() {
     log "suite root not found for $case attempt $attempt"
     return 1
   fi
+  LAST_ROOT="$root"
   log "root=$root"
   setsid nohup python3 "$WS/scripts/tests/targeted_navigation/l_stall_watchdog.py" \
     --suite-root "$root" --wrapper-pid 0 \
@@ -133,12 +134,62 @@ run_attempt() {
   [[ "$result" == "PASS" ]]
 }
 
+# gzserver occasionally segfaults a few seconds after launch (exit 139 at
+# 2026-11-03 13:22:52, world semantic_t_junction).  That is an environment
+# fault, not a scenario result, so relaunch it without spending an attempt.
+launch_crashed() {
+  local case="$1" root="$2" dir metrics sim
+  dir=$(sed -n 's/^run_directory=//p' "$root/${case}_runner.log" 2>/dev/null | tail -1)
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  metrics=$(ls "$dir"/*navigation_metrics.log 2>/dev/null | head -1)
+  [[ -n "$metrics" ]] || return 0
+  sim=$(python3 - "$metrics" <<'PY_SIM'
+import json, sys
+sim = 0.0
+for line in open(sys.argv[1], errors="replace"):
+    if "event=sample" not in line:
+        continue
+    index = line.find("data=")
+    if index < 0:
+        continue
+    try:
+        data = json.loads(line[index + 5:])
+    except Exception:
+        continue
+    try:
+        sim = max(sim, float(data.get("ros_time", 0) or 0.0))
+    except (TypeError, ValueError):
+        pass
+print(sim)
+PY_SIM
+)
+  python3 -c 'import sys; sys.exit(0 if float(sys.argv[1] or 0) < 120.0 else 1)' "${sim:-0}"
+}
+
 overall=0
 for case in "${CASES[@]}"; do
   passed=0
   passes=0
   for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
-    if run_attempt "$case" "$attempt"; then
+    launch_retries=0
+    while :; do
+      if run_attempt "$case" "$attempt"; then
+        run_status=0
+      else
+        run_status=1
+      fi
+      if (( run_status != 0 && launch_retries < 2 )) \
+          && launch_crashed "$case" "${LAST_ROOT:-}"; then
+        launch_retries=$((launch_retries + 1))
+        log "$case attempt $attempt: launch crashed (sim < 120 s); relaunching ($launch_retries/2)"
+        if [[ "$(tail -1 "$ATTEMPTS_TSV" | cut -f1-2)" == "$case"$'\t'"$attempt" ]]; then
+          sed -i '$d' "$ATTEMPTS_TSV"
+        fi
+        continue
+      fi
+      break
+    done
+    if (( run_status == 0 )); then
       log "$case PASSED on attempt $attempt"
       passed=1
       passes=$((passes + 1))
