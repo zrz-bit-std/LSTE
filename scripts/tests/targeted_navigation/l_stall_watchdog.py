@@ -100,10 +100,35 @@ def write_artifact(suite_root, context, window):
     return path
 
 
+def launch_pids_for_run(lines, run_dir):
+    """Select only the roslaunch that owns this attempt.
+
+    Run 20261103_062322 died 17 s after launch because a leftover watchdog from
+    the previous attempt matched the *new* roslaunch by command-line pattern.
+    Every suite roslaunch carries ``metrics_run_directory:=<logs/stamp>``, so
+    match on that instead of on the program name.
+    """
+    run_dir = str(run_dir).rstrip("/")
+    pids = []
+    for line in lines:
+        if "t_junction_nav.launch" not in line or run_dir not in line:
+            continue
+        try:
+            pids.append(int(line.split(None, 1)[0]))
+        except (IndexError, ValueError):
+            continue
+    return pids
+
+
 def terminate(metrics_path, wrapper_pid, reason):
-    launch = subprocess.run(["pgrep", "-f", "roslaunch.*t_junction_nav.launch"],
+    run_dir = os.path.dirname(os.path.abspath(metrics_path))
+    launch = subprocess.run(["pgrep", "-af", "roslaunch.*t_junction_nav.launch"],
                             capture_output=True, text=True)
-    for pid in launch.stdout.split():
+    pids = launch_pids_for_run(launch.stdout.splitlines(), run_dir)
+    if not pids:
+        print("watchdog: no roslaunch owns %s; leaving others alone" % run_dir,
+              flush=True)
+    for pid in pids:
         try:
             os.kill(int(pid), signal.SIGINT)
         except (OSError, ValueError):

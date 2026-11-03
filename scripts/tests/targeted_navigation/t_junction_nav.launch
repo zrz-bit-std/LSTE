@@ -86,7 +86,12 @@
 
   <!-- Keep this opt-in so the original controller/topology composition stays
        unchanged for runs that do not need telemetry. -->
-  <node if="$(arg start_metrics)" pkg="lste_topo_access" type="lste_navigation_metrics.py" name="lste_navigation_metrics" output="screen">
+  <node if="$(arg start_metrics)" pkg="lste_topo_access" type="lste_navigation_metrics.py" name="lste_navigation_metrics" output="screen"
+        respawn="true" respawn_delay="2">
+    <!-- The metrics writer segfaulted (exit -11) after ~35-40 min in
+         20261103_010504 and 20261103_035307, sealing two attempts.  The log is
+         opened O_APPEND, so a respawn continues the same file. -->
+    <env name="PYTHONFAULTHANDLER" value="1"/>
     <param name="log_dir" type="str" value="$(arg metrics_log_dir)"/>
     <param name="run_directory" type="str" value="$(arg metrics_run_directory)"/>
     <param name="run_timestamp" type="str" value="$(arg metrics_run_timestamp)"/>

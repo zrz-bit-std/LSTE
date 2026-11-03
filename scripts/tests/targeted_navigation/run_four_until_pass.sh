@@ -60,6 +60,10 @@ cleanup_env() {
   sleep 5
   pids=$(pgrep -f "run_place_dfs_suite.sh" || true)
   [[ -z "$pids" ]] || kill -TERM $pids 2>/dev/null
+  # A watchdog that outlives its attempt can match (and kill) the next
+  # roslaunch; it is keyed only by its suite root, so sweep all of them.
+  pids=$(pgrep -f "l_stall_watchdog.py" || true)
+  [[ -z "$pids" ]] || kill -TERM $pids 2>/dev/null
   local holder
   holder=$(ss -ltnp 2>/dev/null | grep 11673 | grep -o "pid=[0-9]*" | head -1 | cut -d= -f2)
   [[ -z "$holder" ]] || kill -TERM "$holder" 2>/dev/null
@@ -102,8 +106,19 @@ run_attempt() {
   local suite_status=$?
   sleep 3
   kill -TERM "$watchdog_pid" 2>/dev/null
+  pkill -TERM -f "l_stall_watchdog.py --suite-root $root" 2>/dev/null
   bash "$WS/scripts/tests/targeted_navigation/collect_failure_snapshots.sh" \
     "$root" "$LOG_ROOT/snapshots" >/dev/null 2>&1
+  if [[ ! -f "$root/summary.log" ]]; then
+    # The stall watchdog killed this attempt before the suite reached its
+    # audit.  The bag and metrics still exist, so score them: a killed run is
+    # data, not a missing result (L attempt 1 of 20261102_214754 was a near
+    # pass that got recorded as launch_failed).
+    log "$case attempt $attempt: killed before the audit; scoring the recording"
+    env SEMANTIC_CASES="$case" LSTE_AUDIT_ONLY_ROOT="$root" \
+      bash "$WS/scripts/tests/targeted_navigation/run_place_dfs_suite.sh" \
+      >>"$root/audit_only.log" 2>&1
+  fi
   local result failing
   result=$(python3 "$WS/scripts/tests/targeted_navigation/scenario_audit_result.py" \
     "$root/summary.log" "$case" 2>/dev/null)

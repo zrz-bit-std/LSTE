@@ -219,6 +219,61 @@ class GlobalFrontierPlanningSnapshotMixin:
                 # cancels the persistent executor and strands its release
                 # handshake before the next branch can dispatch.
                 self.frontier_exhausted = False
+                now = now_for(self)
+                pose = getattr(self, "pose_odom", None)
+                key = tuple(sorted(int(value) for value in pending))
+                if not key:
+                    # No branch has been observed yet: this is the startup
+                    # wait, not an exhausted mission.
+                    self.publish_status(
+                        "gp_branch_waiting", pending_branch_ids=[],
+                        reason="awaiting_sensor_stability_or_safe_map_projection")
+                    return
+                timeout = float(getattr(self, "branch_wait_timeout", 30.0) or 0.0)
+                if (getattr(self, "_branch_wait_key", None) != key
+                        or getattr(self, "_branch_wait_since", 0.0) <= 0.0):
+                    self._branch_wait_key = key
+                    self._branch_wait_since = now
+                    self._branch_wait_anchor = (
+                        None if pose is None else (float(pose.x), float(pose.y))
+                    )
+                else:
+                    anchor = getattr(self, "_branch_wait_anchor", None)
+                    moved = bool(
+                        anchor is not None and pose is not None
+                        and math.hypot(
+                            float(pose.x) - anchor[0],
+                            float(pose.y) - anchor[1],
+                        ) > 0.5
+                    )
+                    if moved:
+                        self._branch_wait_since = now
+                        self._branch_wait_anchor = (float(pose.x), float(pose.y))
+                    elif timeout > 0.0 and now - self._branch_wait_since >= timeout:
+                        # Runs 20261102_214754 and 20261103_001037 reached
+                        # all_durable_graph_obligations_settled and then idled
+                        # forever "awaiting sensor stability": the pending
+                        # branches never got a valid projection, so the runner's
+                        # completion checker (plan complete + DFS stack at the
+                        # root) never ran and the 180 s watchdog killed a
+                        # finished mission.  Bound the wait and declare
+                        # exhaustion with evidence instead of hanging.
+                        self.publish_status(
+                            "gp_branch_wait_expired",
+                            pending_branch_ids=list(key),
+                            waited_seconds=round(float(now) - self._branch_wait_since, 1),
+                            timeout_seconds=timeout,
+                            reason="awaiting_sensor_stability_or_safe_map_projection",
+                        )
+                        rospy.logwarn(
+                            "GP branch wait expired after %.1fs with %d pending "
+                            "branches; declaring exploration exhausted",
+                            float(now) - self._branch_wait_since, len(key),
+                        )
+                        self._branch_wait_since = 0.0
+                        self._branch_wait_key = None
+                        self.frontier_exhausted = True
+                        return
                 self.publish_status(
                     "gp_branch_waiting", pending_branch_ids=pending,
                     reason="awaiting_sensor_stability_or_safe_map_projection")

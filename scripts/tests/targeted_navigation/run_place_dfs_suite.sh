@@ -23,9 +23,15 @@ export T_JUNCTION_EXPLORATION_METHOD=place_portal_workitem
 export T_JUNCTION_STOP_ON_FAILURE=false
 export T_JUNCTION_SEMANTIC_PERCEPTION="${T_JUNCTION_SEMANTIC_PERCEPTION:-true}"
 export T_JUNCTION_TARGET_DONE_POLICY=graph_exploration
-RESULT_ROOT="$WS/runtime/gp_branch_development/place_dfs_suite_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$RESULT_ROOT"
-echo "$RESULT_ROOT"
+if [[ -n "${LSTE_AUDIT_ONLY_ROOT:-}" ]]; then
+  # Audit an attempt that the stall watchdog killed: reuse its suite
+  # root instead of creating a new one.
+  RESULT_ROOT="$LSTE_AUDIT_ONLY_ROOT"
+else
+  RESULT_ROOT="$WS/runtime/gp_branch_development/place_dfs_suite_$(date +%Y%m%d_%H%M%S)"
+  mkdir -p "$RESULT_ROOT"
+  echo "$RESULT_ROOT"
+fi
 SUITE_STATUS=0
 for CASE in ${SEMANTIC_CASES:-semantic_t_junction semantic_l_junction semantic_cross_junction semantic_t_junction_rotated}; do
   export T_JUNCTION_WORLD="$WS/worlds/targeted_navigation/$CASE.world"
@@ -81,73 +87,78 @@ result=dict(executed_suite_script=str(executed),executed_suite_sha256=hashlib.sh
 out.write_text(json.dumps(result,indent=2)+'\n')
 PY_MANIFEST
   RUNNER_LOG="$RESULT_ROOT/${CASE}_runner.log"
-  LSTE_WS="$WS" bash scripts/tests/targeted_navigation/run_t_junction.sh --persistent \
-      --max-seconds "${GP_SUITE_SECONDS:-3600}" --startup-seconds 90 --no-stop-on-failure >"$RUNNER_LOG" 2>&1 &
-  DRIVER_PID=$!
-  BAG_PID=
-  CYCLE_PID=
-  for ATTEMPT in $(seq 1 120); do
-    kill -0 "$DRIVER_PID" 2>/dev/null || break
-    if rosparam get /run_id >/dev/null 2>&1; then
-      # The bag must cover every execution endpoint.  Some channels (notably
-      # /pro3/wheel_odom and the frontier status) appear a few seconds after
-      # the master: publishing started before them produced bags whose first
-      # 3.5 s has no wheel odometry, and the native replay then fails with
-      # "raw recording does not cover owned execution endpoints" even though
-      # the costmap itself was clean (run 20261102_174505).
-      channel_ready() {
-        rostopic info "$1" 2>/dev/null \
-          | sed -n '/Publishers:/,$p' | grep -q '^ *\*'
-      }
-      for _ready_wait in $(seq 1 120); do
-        ready=1
-        for _topic in /map /tf /rbt_pose /pro3/wheel_odom /pro3/rlscan \
-                      /lste/global_frontier/status; do
-          if ! channel_ready "$_topic"; then ready=0; break; fi
-        done
-        [[ "$ready" == 1 ]] && break
-        sleep 0.5
-      done
-      RECORD_TOPICS=(/map /tf /tf_static /rbt_pose /pro3/wheel_odom /pro3/rlscan
-        /lste/global_frontier/status /lste/teb_turn_supervisor/status
-        /lste/cmd_vel/teb_contract /lste/teb_goal_bridge/status
-        /lste/cmd_vel_mux/status
-        /lste/place_navigation_mask /lste/place_navigation_mask_odom
-        /move_base/global_costmap/costmap /move_base/global_costmap/costmap_updates
-        /move_base/local_costmap/costmap /move_base/local_costmap/costmap_updates
-        /move_base/TebLocalPlannerROS/teb_feedback /move_base/TebLocalPlannerROS/local_plan
-        /move_base/TebLocalPlannerROS/parameter_updates
-        /move_base/TebLocalPlannerROS/parameter_descriptions
-        /move_base/NavfnROS/plan /move_base/current_goal
-        /move_base/goal /move_base/status /move_base/result /move_base/recovery_status
-        /lste/cmd_vel/teb_planner /cmd_vel)
-      rosbag record -O "$RESULT_ROOT/${CASE}_slam.bag" "${RECORD_TOPICS[@]}" \
-        >"$RESULT_ROOT/${CASE}_recorder.log" 2>&1 &
-      BAG_PID=$!
-      if [[ "${GP_CAPTURE_PORTAL_CYCLES:-0}" == 1 ]]; then
-        CYCLE_COMMAND=(python3 scripts/tests/targeted_navigation/capture_portal_cycles.py
-          --driver "$DRIVER_PID" --prefix "$CASE" --output-dir "$RESULT_ROOT/raw_cycles")
-        "${CYCLE_COMMAND[@]}" >"$RESULT_ROOT/${CASE}_cycle_observer.log" 2>&1 &
-        CYCLE_PID=$!
-      fi
-      break
-    fi
-    sleep 1
-  done
-  wait "$DRIVER_PID"
-  LAUNCH_STATUS=$?
-  CYCLE_STATUS=0
-  if [[ -n "$CYCLE_PID" ]]; then
-    wait "$CYCLE_PID"
-    CYCLE_STATUS=$?
-    if [[ "$CYCLE_STATUS" != 0 ]]; then SUITE_STATUS=1; fi
-    CYCLE_PID=
-  fi
-  DRIVER_PID=
-  if [[ -n "$BAG_PID" ]]; then
-    kill -INT "$BAG_PID" 2>/dev/null
-    wait "$BAG_PID"
+  if [[ -z "${LSTE_AUDIT_ONLY_ROOT:-}" ]]; then
+    LSTE_WS="$WS" bash scripts/tests/targeted_navigation/run_t_junction.sh --persistent \
+        --max-seconds "${GP_SUITE_SECONDS:-3600}" --startup-seconds 90 --no-stop-on-failure >"$RUNNER_LOG" 2>&1 &
+    DRIVER_PID=$!
     BAG_PID=
+    CYCLE_PID=
+    for ATTEMPT in $(seq 1 120); do
+      kill -0 "$DRIVER_PID" 2>/dev/null || break
+      if rosparam get /run_id >/dev/null 2>&1; then
+        # The bag must cover every execution endpoint.  Some channels (notably
+        # /pro3/wheel_odom and the frontier status) appear a few seconds after
+        # the master: publishing started before them produced bags whose first
+        # 3.5 s has no wheel odometry, and the native replay then fails with
+        # "raw recording does not cover owned execution endpoints" even though
+        # the costmap itself was clean (run 20261102_174505).
+        channel_ready() {
+          rostopic info "$1" 2>/dev/null \
+            | sed -n '/Publishers:/,$p' | grep -q '^ *\*'
+        }
+        for _ready_wait in $(seq 1 120); do
+          ready=1
+          for _topic in /map /tf /rbt_pose /pro3/wheel_odom /pro3/rlscan \
+                        /lste/global_frontier/status; do
+            if ! channel_ready "$_topic"; then ready=0; break; fi
+          done
+          [[ "$ready" == 1 ]] && break
+          sleep 0.5
+        done
+        RECORD_TOPICS=(/map /tf /tf_static /rbt_pose /pro3/wheel_odom /pro3/rlscan
+          /lste/global_frontier/status /lste/teb_turn_supervisor/status
+          /lste/cmd_vel/teb_contract /lste/teb_goal_bridge/status
+          /lste/cmd_vel_mux/status
+          /lste/place_navigation_mask /lste/place_navigation_mask_odom
+          /move_base/global_costmap/costmap /move_base/global_costmap/costmap_updates
+          /move_base/local_costmap/costmap /move_base/local_costmap/costmap_updates
+          /move_base/TebLocalPlannerROS/teb_feedback /move_base/TebLocalPlannerROS/local_plan
+          /move_base/TebLocalPlannerROS/parameter_updates
+          /move_base/TebLocalPlannerROS/parameter_descriptions
+          /move_base/NavfnROS/plan /move_base/current_goal
+          /move_base/goal /move_base/status /move_base/result /move_base/recovery_status
+          /lste/cmd_vel/teb_planner /cmd_vel)
+        rosbag record -O "$RESULT_ROOT/${CASE}_slam.bag" "${RECORD_TOPICS[@]}" \
+          >"$RESULT_ROOT/${CASE}_recorder.log" 2>&1 &
+        BAG_PID=$!
+        if [[ "${GP_CAPTURE_PORTAL_CYCLES:-0}" == 1 ]]; then
+          CYCLE_COMMAND=(python3 scripts/tests/targeted_navigation/capture_portal_cycles.py
+            --driver "$DRIVER_PID" --prefix "$CASE" --output-dir "$RESULT_ROOT/raw_cycles")
+          "${CYCLE_COMMAND[@]}" >"$RESULT_ROOT/${CASE}_cycle_observer.log" 2>&1 &
+          CYCLE_PID=$!
+        fi
+        break
+      fi
+      sleep 1
+    done
+    wait "$DRIVER_PID"
+    LAUNCH_STATUS=$?
+    CYCLE_STATUS=0
+    if [[ -n "$CYCLE_PID" ]]; then
+      wait "$CYCLE_PID"
+      CYCLE_STATUS=$?
+      if [[ "$CYCLE_STATUS" != 0 ]]; then SUITE_STATUS=1; fi
+      CYCLE_PID=
+    fi
+    DRIVER_PID=
+    if [[ -n "$BAG_PID" ]]; then
+      kill -INT "$BAG_PID" 2>/dev/null
+      wait "$BAG_PID"
+      BAG_PID=
+    fi
+  else
+    # Audit-only: the runner log still names the recording directory.
+    LAUNCH_STATUS=0
   fi
   RECORDING_COMMAND=(python3 scripts/tests/targeted_navigation/check_place_dfs_recording.py
     "$RESULT_ROOT/${CASE}_slam.bag" --output "$RESULT_ROOT/${CASE}_recording_evidence.json")

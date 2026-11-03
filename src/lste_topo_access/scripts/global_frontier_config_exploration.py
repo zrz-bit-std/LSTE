@@ -213,3 +213,9 @@ class GlobalFrontierExplorationConfigurationMixin:
         # Throttling that work leaves more CPU headroom for Gazebo, SLAM and
         # move_base without changing the committed goal.
         self.planning_period = max(0.2, float(gp("~planning_period", 1.5)))
+        # A branch that can never obtain a safe projection must not hold the
+        # mission open forever (20261102_214754/20261103_001037 idled until the
+        # stall watchdog killed them after the plan was already complete).
+        self.branch_wait_timeout = max(
+            0.0, float(gp("~branch_wait_timeout", 30.0))
+        )

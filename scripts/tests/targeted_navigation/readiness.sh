@@ -47,6 +47,7 @@ readiness_child_process_failure() {
   line="$(grep 'process has died' "$launcher_log" \
           | grep -v 'lste_wedetect_det_node' \
           | grep -v 'lste_teb_turn_supervisor' \
+          | grep -v 'lste_navigation_metrics' \
           | head -1)"
   [[ -n "$line" ]] || return 1
   printf '%s\n' "$line"
