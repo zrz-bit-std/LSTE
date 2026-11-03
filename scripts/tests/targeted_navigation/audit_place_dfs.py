@@ -7,7 +7,12 @@ from pathlib import Path
 
 
 def events(path):
-    with Path(path).open(encoding='utf8') as stream:
+    # A metrics node writes its own log; one run (20261103_141641) contains a
+    # split multi-byte character near the start and every audit that reads it
+    # through this helper died with UnicodeDecodeError before judging anything.
+    # Replacement decoding cannot change the ASCII JSON payloads that the
+    # audits parse, so it only keeps a corrupt byte from hiding the evidence.
+    with Path(path).open(encoding='utf8',errors='replace') as stream:
         for number,line in enumerate(stream,1):
             if 'event=global_frontier_event data=' not in line:
                 continue

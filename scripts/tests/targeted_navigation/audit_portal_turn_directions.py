@@ -86,12 +86,18 @@ def audit_turns(poses,turns,tolerance=.35):
 
 def read_raw(path):
     import rosbag
-    poses=[];turns={}
+    poses=[];turns={};truncated=0
     with rosbag.Bag(str(path)) as bag:
         for topic,m,t in bag.read_messages(topics=['/rbt_pose','/lste/global_frontier/status']):
             stamp=t.to_sec()
             if topic=='/rbt_pose':poses.append((stamp,float(m.theta)));continue
-            payload=json.loads(m.data,parse_constant=lambda value:(_ for _ in ()).throw(ValueError('nonfinite JSON '+value)))
+            try:
+                payload=json.loads(m.data,parse_constant=lambda value:(_ for _ in ()).throw(ValueError('nonfinite JSON '+value)))
+            except ValueError:
+                # The recorder is stopped with SIGINT, so the very last status
+                # message can be cut mid-JSON.  Count it instead of losing the
+                # whole evidence set; more than one truncation is a real defect.
+                truncated+=1;continue
             for branch in (payload.get('portal_authentication') or {}).get('branches',[]):
                 observed=any(e.get('event')=='inside_frontier_observed' for e in branch.get('events',[]))
                 if not observed:continue
@@ -102,13 +108,15 @@ def read_raw(path):
                 if branch.get('state')=='turning':row.setdefault('start',stamp)
                 if any(e.get('event')=='room_facing_turn_complete' for e in branch.get('events',[])):
                     row.setdefault('completed',stamp)
-    return poses,turns
+    return poses,turns,truncated
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('bag',type=Path);p.add_argument('--output',required=True,type=Path);a=p.parse_args()
     try:
-        poses,turns=read_raw(a.bag);result=audit_turns(poses,turns)
+        poses,turns,truncated=read_raw(a.bag);result=audit_turns(poses,turns)
+        result['truncated_status_messages']=truncated
+        if truncated>1:result.update(passed=False,errors=result['errors']+[dict(reason='truncated_status_evidence',count=truncated)])
         if not poses or not turns:result.update(passed=False,errors=result['errors']+[dict(reason='missing_pose_or_turn_evidence')])
     except Exception as exc:result=dict(passed=False,errors=[dict(reason='raw_read_failed',detail=str(exc))])
     result['auditor_sha256']=SOURCE_SHA256
