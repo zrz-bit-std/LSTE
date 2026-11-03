@@ -160,6 +160,26 @@ class BranchWaitTimeoutTest(unittest.TestCase):
         fixture.report(152.0)
         self.assertTrue(fixture.obj.frontier_exhausted)
 
+    def test_a_complete_plan_does_not_reset_on_branch_churn(self):
+        # Run 20261103_141641: the plan stayed "complete" for 4.6 min while 48
+        # speculative pending ids kept changing, resetting the wait key every
+        # few seconds so the 30 s bound never fired.
+        from unittest import mock
+        fixture = BranchWaitFixture(timeout=30.0)
+        fixture.obj.last_graph_route_plan = SimpleNamespace(
+            status="complete",
+            reason="all_durable_graph_obligations_settled",
+        )
+        for index, now in enumerate((100.0, 115.0, 131.0)):
+            fixture.obj.gp_exploration_tree = SimpleNamespace(branches={
+                index + 1: {"id": index + 1, "state": "pending"},
+                index + 2: {"id": index + 2, "state": "pending"},
+            })
+            with mock.patch("rospy.logwarn"), mock.patch("rospy.logwarn_throttle"):
+                fixture.report(now)
+        self.assertTrue(fixture.obj.frontier_exhausted)
+        self.assertEqual(fixture.obj.events[-1][0], "gp_branch_wait_expired")
+
     def test_a_settled_tree_reaches_the_completion_gate(self):
         # Run 20261103_124742: the tree was built, every obligation settled,
         # and then the empty branch list was mistaken for the startup wait.

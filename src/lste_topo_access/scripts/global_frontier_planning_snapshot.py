@@ -235,6 +235,22 @@ class GlobalFrontierPlanningSnapshotMixin:
                 now = now_for(self)
                 pose = getattr(self, "pose_odom", None)
                 key = tuple(sorted(int(value) for value in pending))
+                wait_ids = list(key)
+                # The GP branch list is a set of speculative directions, not
+                # the obligation ledger.  Run 20261103_141641 settled every
+                # durable obligation at sim 2059 (``all_durable_graph_
+                # obligations_settled``, repeated 959 times) but kept 48
+                # "pending" branch ids that never got a projection; each small
+                # change of that set reset the wait key, so the 30 s bound never
+                # fired and the 180 s watchdog killed a finished mission.
+                # Trust the planner's completion verdict and hold the key fixed
+                # so the existing bounded wait can expire.
+                graph_plan = getattr(self, "last_graph_route_plan", None)
+                if (graph_plan is not None
+                        and str(getattr(graph_plan, "status", "")) == "complete"
+                        and str(getattr(graph_plan, "reason", ""))
+                        == "all_durable_graph_obligations_settled"):
+                    key = ("durable_obligations_settled",)
                 if not key:
                     # No branch has been observed yet: this is the startup
                     # wait, not an exhausted mission.
@@ -273,7 +289,7 @@ class GlobalFrontierPlanningSnapshotMixin:
                         # exhaustion with evidence instead of hanging.
                         self.publish_status(
                             "gp_branch_wait_expired",
-                            pending_branch_ids=list(key),
+                            pending_branch_ids=wait_ids,
                             waited_seconds=round(float(now) - self._branch_wait_since, 1),
                             timeout_seconds=timeout,
                             reason="awaiting_sensor_stability_or_safe_map_projection",
@@ -281,7 +297,7 @@ class GlobalFrontierPlanningSnapshotMixin:
                         rospy.logwarn(
                             "GP branch wait expired after %.1fs with %d pending "
                             "branches; declaring exploration exhausted",
-                            float(now) - self._branch_wait_since, len(key),
+                            float(now) - self._branch_wait_since, len(wait_ids),
                         )
                         self._branch_wait_since = 0.0
                         self._branch_wait_key = None
