@@ -178,7 +178,42 @@ class BranchWaitTimeoutTest(unittest.TestCase):
             with mock.patch("rospy.logwarn"), mock.patch("rospy.logwarn_throttle"):
                 fixture.report(now)
         self.assertTrue(fixture.obj.frontier_exhausted)
-        self.assertEqual(fixture.obj.events[-1][0], "gp_branch_wait_expired")
+        names = [event for event, _payload in fixture.obj.events]
+        self.assertIn("gp_branch_wait_expired", names)
+
+    def test_a_settled_plan_supersedes_unprojectable_branches(self):
+        # T run 20261103_192943: 43 pending branches never got a projection.
+        from unittest import mock
+        fixture = BranchWaitFixture(timeout=30.0)
+        fixture.obj.last_graph_route_plan = SimpleNamespace(
+            status="complete",
+            reason="all_durable_graph_obligations_settled",
+        )
+        fixture.obj.gp_exploration_tree = SimpleNamespace(branches={
+            7: {"id": 7, "state": "pending"},
+            8: {"id": 8, "state": "completed"},
+        })
+        with mock.patch("rospy.logwarn"), mock.patch("rospy.logwarn_throttle"):
+            fixture.report(100.0)
+            fixture.report(131.0)
+        branches = fixture.obj.gp_exploration_tree.branches
+        self.assertEqual(branches[7]["state"], "superseded")
+        self.assertEqual(branches[7]["authentication_failure_reason"],
+                         "no_executable_projection_after_timeout")
+        self.assertEqual(branches[8]["state"], "completed")
+        names = [event for event, _payload in fixture.obj.events]
+        self.assertIn("gp_branch_wait_superseded", names)
+
+    def test_an_incomplete_plan_does_not_supersede_branches(self):
+        from unittest import mock
+        fixture = BranchWaitFixture(timeout=30.0)
+        fixture.obj.last_graph_route_plan = SimpleNamespace(
+            status="ready", reason="durable_obligation_pending")
+        with mock.patch("rospy.logwarn"), mock.patch("rospy.logwarn_throttle"):
+            fixture.report(100.0)
+            fixture.report(131.0)
+        self.assertEqual(
+            fixture.obj.gp_exploration_tree.branches[7]["state"], "pending")
 
     def test_a_settled_tree_reaches_the_completion_gate(self):
         # Run 20261103_124742: the tree was built, every obligation settled,

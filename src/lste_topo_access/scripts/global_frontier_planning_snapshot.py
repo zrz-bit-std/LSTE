@@ -246,10 +246,12 @@ class GlobalFrontierPlanningSnapshotMixin:
                 # Trust the planner's completion verdict and hold the key fixed
                 # so the existing bounded wait can expire.
                 graph_plan = getattr(self, "last_graph_route_plan", None)
-                if (graph_plan is not None
-                        and str(getattr(graph_plan, "status", "")) == "complete"
-                        and str(getattr(graph_plan, "reason", ""))
-                        == "all_durable_graph_obligations_settled"):
+                plan_complete = bool(
+                    graph_plan is not None
+                    and str(getattr(graph_plan, "status", "")) == "complete"
+                    and str(getattr(graph_plan, "reason", ""))
+                    == "all_durable_graph_obligations_settled")
+                if plan_complete:
                     key = ("durable_obligations_settled",)
                 if not key:
                     # No branch has been observed yet: this is the startup
@@ -299,6 +301,35 @@ class GlobalFrontierPlanningSnapshotMixin:
                             "branches; declaring exploration exhausted",
                             float(now) - self._branch_wait_since, len(wait_ids),
                         )
+                        # Every durable obligation is settled but these
+                        # speculative GP directions never received an
+                        # executable projection (T run 20261103_192943:
+                        # 43 pending branches for the last 183 s, 42 of them at
+                        # completed places).  They cannot be dispatched and they
+                        # keep both the planner and the runtime audit gate
+                        # (every_stable_candidate_started) waiting.  Bound the
+                        # wait and record the decision on each branch.
+                        superseded = []
+                        if plan_complete and tree is not None:
+                            for branch_id in wait_ids:
+                                branch = tree.branches.get(int(branch_id))
+                                if (branch is None
+                                        or branch.get("state") != "pending"):
+                                    continue
+                                branch["state"] = "superseded"
+                                branch["authentication_state"] = "superseded"
+                                branch["authentication_failure_reason"] = (
+                                    "no_executable_projection_after_timeout")
+                                superseded.append(int(branch_id))
+                            if superseded:
+                                self.publish_status(
+                                    "gp_branch_wait_superseded",
+                                    branch_ids=superseded,
+                                    waited_seconds=round(
+                                        float(now) - self._branch_wait_since, 1),
+                                    reason=(
+                                        "no_executable_projection_after_timeout"),
+                                )
                         self._branch_wait_since = 0.0
                         self._branch_wait_key = None
                         self.frontier_exhausted = True
