@@ -186,6 +186,83 @@ def bounded_stall_settled_at_source(snapshot):
     except (KeyError,TypeError,ValueError):return False
 
 
+def settled_at_source_without_interior_goal(snapshot):
+    """A probe whose planner found no interior goal never left the source side.
+
+    Run 20261103_115704 branch 43: doorway_entry_started ->
+    doorway_interior_plan_unavailable(feasible_interior_goal_count=0,
+    map_stamp=1357.5) -> doorway_failure_settled_at_source(distance=0.44,
+    signed_depth=-3.89) -> doorway_authentication_failed, with inside_xy null
+    and no vehicle_fully_inside event.  There is nothing to return from, so the
+    physical return that evidenced_rejection_returned() demands cannot exist;
+    the same distance/source proof used for a bounded entering stall is enough.
+    """
+    reason = snapshot.get("failure_reason")
+    if reason != "no_reachable_interior_entry_goal":
+        return False
+    events = snapshot.get("events", [])
+    names = [e.get("event") for e in events]
+    if (snapshot.get("inside_xy") is not None or "vehicle_fully_inside" in names
+            or not ordered(names, ["doorway_interior_plan_unavailable",
+                                   "doorway_failure_settled_at_source",
+                                   "doorway_authentication_failed"])):
+        return False
+    proof = next((e for e in events
+                  if e.get("event") == "doorway_interior_plan_unavailable"), {})
+    settled = next((e for e in events
+                    if e.get("event") == "doorway_failure_settled_at_source"), {})
+    try:
+        source, pose = snapshot["source_xy"], settled["pose_xy"]
+        if len(source) != 2 or len(pose) != 2 or len(settled["source_xy"]) != 2:
+            return False
+        distance = math.dist(source, pose)
+        radius = float(snapshot.get("return_radius", .75))
+        depth = float(settled["signed_depth"])
+        return (snapshot.get("source_side_proven") is True
+                and proof.get("feasible_interior_goal_count") == 0
+                and float(proof["map_stamp"]) > 0
+                and settled.get("reason") == reason
+                and settled.get("phase") == "entering"
+                and all(math.isfinite(v) for v in (distance, radius, depth))
+                and depth < -.05 and 0 < radius <= .75 and distance <= radius
+                and math.dist(source, settled["source_xy"]) < 1e-6
+                and abs(distance - float(settled["distance"])) <= .02)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def same_place_rejection_evidence(reason, spatial, snapshot, success_sequence,
+                                  target_locked, returned_failure,
+                                  lineage_preserved):
+    """A rejected candidate is resolved only with the full cycle and return.
+
+    Two runtime reasons mean "this is not a new place": the destination merges
+    with the source component (known_free_bypass_within_current_place) or lands
+    on the entry side the robot came in through
+    (visited_entry_side_of_current_place).  Both need the same proof: physical
+    entry, interior observation, the room-facing turn, the return to the
+    junction and an intact branch lineage.  Only the label geometry differs.
+    """
+    if not spatial or snapshot.get("source_side_proven") is not True:
+        return False
+    if snapshot.get("return_gate_cleared") is not True:
+        return False
+    if not (success_sequence and target_locked and returned_failure
+            and lineage_preserved):
+        return False
+    try:
+        source = int(spatial.get("source_label", 0))
+        destination = int(spatial.get("destination_label", 0))
+        entry = int(spatial.get("entry_label", 0))
+    except (TypeError, ValueError):
+        return False
+    if reason == "known_free_bypass_within_current_place":
+        return source > 0 and source == destination == entry
+    if reason == "visited_entry_side_of_current_place":
+        return destination > 0 and entry == destination and source != destination
+    return False
+
+
 def evidenced_rejection_returned(snapshot):
     """Planner rejection or phase deadline needs explicit evidence and real return."""
     events=snapshot.get("events", []);names=[e.get("event") for e in events]
@@ -294,16 +371,11 @@ def audit(path, junction_center=None, junction_radius=2.0, all_started_nodes=Fal
             if data.get("branch_id") is not None:
                 evidence_by_id[int(data["branch_id"])] = snap
                 latest_auth_state[int(data["branch_id"])] = snap.get("state")
-        if name == "portal_candidate_rejected" and data.get("reason") == "known_free_bypass_within_current_place":
+        if name == "portal_candidate_rejected" and data.get("reason") in (
+                "known_free_bypass_within_current_place",
+                "visited_entry_side_of_current_place"):
             spatial = data.get("spatial_evidence") or {}
-            try:
-                source_label = int(spatial.get("source_label", 0))
-                destination_label = int(spatial.get("destination_label", 0))
-                entry_label = int(spatial.get("entry_label", 0))
-            except (TypeError, ValueError):
-                continue
-            if (data.get("branch_id") is not None and source_label > 0
-                    and source_label == destination_label == entry_label):
+            if data.get("branch_id") is not None and spatial:
                 same_place_rejections[int(data["branch_id"])] = spatial
     tree_branches = {}
     if latest_tree:
@@ -371,12 +443,10 @@ def audit(path, junction_center=None, junction_radius=2.0, all_started_nodes=Fal
         )
         rejected_same_place_candidate = (
             state == "failed"
-            and failure_reason == "known_free_bypass_within_current_place"
-            and branch_id in same_place_rejections
-            and snap.get("source_side_proven") is True
-            and snap.get("return_gate_cleared") is True
-            and success_sequence and target_locked
-            and returned_failure and lineage_preserved
+            and same_place_rejection_evidence(
+                failure_reason, same_place_rejections.get(branch_id), snap,
+                success_sequence, target_locked, returned_failure,
+                lineage_preserved)
         )
         bounded_navigation_failure = (
             state == "failed" and lineage_preserved
@@ -384,10 +454,14 @@ def audit(path, junction_center=None, junction_radius=2.0, all_started_nodes=Fal
         )
         evidenced_returned_failure = (state == "failed" and lineage_preserved
                                        and evidenced_rejection_returned(snap))
+        interior_plan_settled_at_source = (
+            state == "failed" and lineage_preserved
+            and settled_at_source_without_interior_goal(snap)
+        )
         passed_branch = (
             (state == "completed" and success_sequence and target_locked)
             or rejected_false_candidate or rejected_same_place_candidate or bounded_navigation_failure
-            or evidenced_returned_failure
+            or evidenced_returned_failure or interior_plan_settled_at_source
         )
         branches.append({
             "branch_id": branch_id,
