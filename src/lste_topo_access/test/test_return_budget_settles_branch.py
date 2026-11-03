@@ -123,9 +123,16 @@ class RunnerContractTest(unittest.TestCase):
             self.source,
         )
 
-    def test_other_terminal_obligations_are_still_sealed(self):
-        self.assertIn(
+    def test_the_place_return_is_settled_instead_of_sealing_the_trial(self):
+        # The node now publishes place_dfs_return_settled and keeps the
+        # obligation; sealing the trial discarded every other audit's evidence.
+        self.assertNotIn(
             'STOP_REASON="place_dfs_return_unrecoverable"', self.source
+        )
+
+    def test_scope_recovery_failure_is_still_fatal(self):
+        self.assertIn(
+            'STOP_REASON="place_scope_recovery_failed_trial"', self.source
         )
 
 

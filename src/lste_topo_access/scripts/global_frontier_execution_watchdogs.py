@@ -125,6 +125,31 @@ class GlobalFrontierExecutionWatchdogMixin:
                 and now - self.active_progress_time > self.stall_timeout
             )
         )
+        goal_xy = None
+        active_frontier = getattr(self, "active_frontier", None)
+        if active_frontier is not None and len(active_frontier) >= 4:
+            goal_xy = (float(active_frontier[2]), float(active_frontier[3]))
+        stagnation_since = None
+        if stalled and goal_xy is not None:
+            tracked = getattr(self, "goal_stagnation_xy", None)
+            same = bool(
+                tracked is not None
+                and math.hypot(goal_xy[0] - tracked[0], goal_xy[1] - tracked[1])
+                <= 0.30
+            )
+            if not same:
+                self.goal_stagnation_xy = goal_xy
+                self.goal_stagnation_count = 1
+                self.goal_stagnation_since = float(now)
+            else:
+                self.goal_stagnation_count = int(
+                    getattr(self, "goal_stagnation_count", 0) or 0) + 1
+            stagnation_since = float(
+                getattr(self, "goal_stagnation_since", now) or now)
+        else:
+            self.goal_stagnation_xy = None
+            self.goal_stagnation_count = 0
+            self.goal_stagnation_since = 0.0
         waypoint_distance = self.active_waypoint_distance(robot_map)
         auth_approach_pending = bool(
             getattr(self, "active_portal_authentication_phase", "") == "entering"
@@ -163,14 +188,38 @@ class GlobalFrontierExecutionWatchdogMixin:
             post_turn_stalled=post_turn_stalled,
             portal_edge_expired=portal_edge_expired,
             active_timeout=active_timeout,
+            # Measure from the first stagnation of this goal: every
+            # re-dispatch resets active_progress_time (5-10 s apart in
+            # 20261103_014424..053045), so the 12 s bound never accumulated.
             stalled_for=float(
-                now - float(getattr(self, "active_progress_time", now))
+                now - float(
+                    stagnation_since
+                    if stagnation_since is not None
+                    else getattr(self, "active_progress_time", now))
             ),
             controller_terminal_limit=float(
                 getattr(self, "controller_terminal_wait_seconds", 12.0) or 0.0
             ),
         )
         expired = lease_decision.release
+        if (
+            stalled
+            and goal_xy is not None
+            # A doorway authentication owns its own physical budget; its route
+            # is intentionally slow while the base enters and turns.
+            and not str(getattr(self, "active_portal_authentication_phase", "") or "")
+            and int(getattr(self, "goal_stagnation_count", 0) or 0)
+            >= int(getattr(self, "goal_stagnation_limit", 3) or 0)
+            and float(now) - float(
+                getattr(self, "goal_stagnation_since", now) or now)
+            >= float(getattr(self, "goal_stagnation_seconds", 25.0) or 0.0)
+            and int(getattr(self, "goal_stagnation_abandoned_for", 0) or 0)
+            != int(getattr(self, "active_route_id", 0) or 0)
+        ):
+            self.goal_stagnation_abandoned_for = int(
+                getattr(self, "active_route_id", 0) or 0)
+            self.abandon_stagnant_goal(now, goal_xy)
+            expired = True
         if (
             bool(getattr(self, "controller_owned_route_failure", False))
             and stalled
@@ -183,6 +232,12 @@ class GlobalFrontierExecutionWatchdogMixin:
             if callable(publish):
                 publish(
                     "route_stagnant_observed",
+                    goal_xy=(
+                        None if goal_xy is None
+                        else [round(float(v), 3) for v in goal_xy]
+                    ),
+                    stagnation_count=int(
+                        getattr(self, "goal_stagnation_count", 0) or 0),
                     route_id=int(self.active_route_id),
                     route_kind=str(self.active_route_kind),
                     authority=lease_decision.authority,
@@ -234,6 +289,56 @@ class GlobalFrontierExecutionWatchdogMixin:
             portal_edge_expired=portal_edge_expired,
             expired=expired,
         )
+
+    def abandon_stagnant_goal(self, now, goal_xy):
+        """Give up on a goal that cannot produce motion, with evidence.
+
+        Runs 20261103_014424/_043447/_053045 dispatched the same goal 8-40
+        times; the controller owned the terminal, every re-dispatch reset the
+        progress clock, and retry_viewpoint re-proposed the same unreachable
+        viewpoint.  After goal_stagnation_limit consecutive stagnations the work
+        item is resolved as unreachable and the region is marked failed, so the
+        selector has to pick a different obligation.
+        """
+        item_id = getattr(self, "active_work_item_id", None)
+        attempt_id = getattr(self, "active_work_item_attempt_id", None)
+        ledger = getattr(self, "place_work_items", None)
+        if item_id is not None and ledger is not None:
+            abandon = getattr(ledger, "abandon_unreachable", None)
+            if callable(abandon):
+                abandon(int(item_id), now, "viewpoint_unreachable",
+                        attempt_id=attempt_id)
+        component = getattr(self, "active_frontier_component", None)
+        record = getattr(self, "record_failed_frontier_region", None)
+        if callable(record) and goal_xy is not None:
+            try:
+                record(float(goal_xy[0]), float(goal_xy[1]), now,
+                       "goal_stagnation_budget", component)
+            except TypeError:
+                record(float(goal_xy[0]), float(goal_xy[1]), now,
+                       "goal_stagnation_budget")
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "route_unreachable_abandoned",
+                goal_xy=(None if goal_xy is None
+                         else [round(float(v), 3) for v in goal_xy]),
+                stagnation_count=int(
+                    getattr(self, "goal_stagnation_count", 0) or 0),
+                work_item_id=None if item_id is None else int(item_id),
+                reason="goal_stagnation_budget",
+            )
+        rospy.logwarn(
+            "Abandoning goal %s after %d stagnations; work_item=%s",
+            None if goal_xy is None
+            else [round(float(v), 2) for v in goal_xy],
+            int(getattr(self, "goal_stagnation_count", 0) or 0),
+            item_id,
+        )
+        release = getattr(self, "release_active_frontier", None)
+        if callable(release):
+            release(discard_prefetch=True)
+        return True
 
     def update_post_turn_watchdog(self, x, y, now):
         """Track whether an execution handoff actually launched translation."""

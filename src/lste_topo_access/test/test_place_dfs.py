@@ -341,4 +341,41 @@ class SlamBoundaryRefinementTest(unittest.TestCase):
         mask,_,_,_=partition_place(free,1.,(0,0),(20.,15.),[refined],1)
         self.assertTrue(mask[15,5])
 
+    def test_return_budget_does_not_run_while_far_from_the_gate(self):
+        # Run 20261102_222740 started the 60 s window 12.7 m before the doorway.
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
+        dfs.ready_to_return(2,projection_complete=True)
+        self.assertIsNone(dfs.update_projection_recovery(
+            2,True,70.,(4.,0.),gate_distance=-12.7))
+        self.assertIsNone(dfs.update_projection_recovery(
+            2,True,200.,(4.,0.),gate_distance=-12.7))
+        self.assertNotEqual(dfs.nodes[2]['state'],'recovery_blocked')
+        # Within two metres the normal 60 s budget applies.
+        self.assertIsNone(dfs.update_projection_recovery(
+            2,True,201.,(4.,0.),gate_distance=1.5))
+        self.assertEqual(dfs.update_projection_recovery(
+            2,True,262.,(4.,0.),gate_distance=1.5),'return_blocked')
+
+    def test_the_near_gate_budget_still_allows_59_seconds(self):
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
+        dfs.ready_to_return(2,projection_complete=True)
+        dfs.update_projection_recovery(2,True,0.,(4.,0.),gate_distance=1.0)
+        self.assertIsNone(dfs.update_projection_recovery(
+            2,True,59.,(4.,0.),gate_distance=1.0))
+        self.assertEqual(dfs.update_projection_recovery(
+            2,True,61.,(4.,0.),gate_distance=1.0),'return_blocked')
+
+class ReturnSettlementContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        base=Path(__file__).resolve().parents[1]/'scripts'
+        cls.adapter=(base/'global_frontier_graph_route_adapter.py').read_text(encoding='utf-8')
+
+    def test_the_blocked_return_is_settled_not_frozen(self):
+        self.assertIn('state="return_failed"',self.adapter)
+        self.assertIn('place_dfs_return_settled',self.adapter)
+
+    def test_the_gate_distance_is_passed_to_the_budget(self):
+        self.assertIn('gate_distance=',self.adapter)
+
 if __name__=='__main__':unittest.main()

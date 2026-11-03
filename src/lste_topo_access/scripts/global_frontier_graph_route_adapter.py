@@ -65,7 +65,10 @@ class GlobalFrontierGraphRouteAdapterMixin:
             now=time.monotonic(),
             pose_xy=None if pose is None else (pose.x, pose.y),
             route_id=int(getattr(self, "active_route_id", 0) or 0),
-            dispatch_wait_budget=90.0)
+            dispatch_wait_budget=90.0,
+            gate_distance=abs(float(getattr(
+                getattr(self, "portal_transaction", None),
+                "source_signed_distance", 0.0) or 0.0)))
         if recovery is not None:
             event = ("place_dfs_return_unrecoverable" if recovery == "return_blocked"
                      else "place_scope_recovery_" + ("started" if recovery == "started" else "unrecoverable"))
@@ -77,12 +80,26 @@ class GlobalFrontierGraphRouteAdapterMixin:
                 execution_failed=True, return_obligation_pending=True,
                 reason=reason, place_dfs=dfs.snapshot())
         if recovery in ("blocked", "return_blocked"):
+            # The return target is unreachable.  Keep the obligation explicit
+            # (the tree branch records it and the audit sees it), but do not
+            # freeze the whole executive: settling the branch lets the mission
+            # keep whatever other obligations remain, instead of sealing the
+            # trial as place_dfs_return_unrecoverable.
+            node.update(state="return_failed",
+                        failure_reason="dfs_return_no_physical_progress")
             release = getattr(self, "release_active_frontier", None)
             if callable(release) and getattr(self, "active_route_id", 0):
-                release(discard_prefetch=True, queue_successor=False,
+                release(discard_prefetch=True,
                         await_controller_release_ack=True,
                         preserve_place_departure=True)
-            return True
+            self.publish_status(
+                "place_dfs_return_settled",
+                place_id=int(current_place_id),
+                portal_id=dfs_entry_portal_id,
+                return_obligation_pending=True,
+                reason="dfs_return_no_physical_progress",
+            )
+            return False
         return False
 
     @staticmethod

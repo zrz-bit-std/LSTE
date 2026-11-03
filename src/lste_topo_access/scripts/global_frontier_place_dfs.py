@@ -33,13 +33,25 @@ class PlaceDfsTraversal:
 
     def update_projection_recovery(self, place_id, valid, now, pose_xy=None,
                                    invalid_budget=30., return_budget=60.,
-                                   route_id=0, dispatch_wait_budget=60.):
+                                   route_id=0, dispatch_wait_budget=60.,
+                                   gate_distance=None,
+                                   budget_start_distance=2.0):
         """Bound invalid-map waits; retreat preserves all unfinished obligations."""
         place_id=int(place_id)
         if len(self.stack)<2 or self.stack[-1]!=place_id:
             return None
         node=self.nodes[place_id]
         if node['state']=='returning':
+            # Do not spend the return budget while the base is still far from
+            # the gate.  Run 20261102_222740 started the 60 s window with
+            # source_signed_distance = -12.7 m, i.e. 12.7 m before the doorway,
+            # and ran out of budget before it could even reach the approach.
+            if (gate_distance is not None
+                    and abs(float(gate_distance)) > float(budget_start_distance)):
+                node['return_progress_at']=float(now)
+                node['return_progress_xy']=(
+                    None if pose_xy is None else list(pose_xy))
+                return None
             # The budget must measure the *return drive*, not the time spent
             # waiting for one.  Restart it once, when the first return route is
             # dispatched; an active portal transaction can hold the node in

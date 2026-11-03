@@ -620,6 +620,32 @@ class PlaceWorkItemLedger:
         item["updated_at"] = float(now)
         return item
 
+    def abandon_unreachable(self, item_id, now, reason,
+                            attempt_id=None, resolution="unreachable"):
+        """Close an item whose viewpoint cannot be reached from anywhere.
+
+        ``has_failed_viewpoint`` makes the selector retry a different standoff,
+        but when the whole approach is blocked the planner re-proposes
+        ``retry_viewpoint`` indefinitely: runs 20261103_014424, _043447 and
+        _053045 accumulated 8, 40 and 33 stagnation events on the same goal
+        without ever settling the item.  This is an explicit, recorded
+        resolution -- not a route-failure settle -- so the place can finish and
+        the audit keeps the evidence.
+        """
+        item = self._items.get(item_id)
+        if item is None or item["state"] != WORK_UNRESOLVED:
+            return None
+        active = self._active_attempt(item)
+        if active is not None:
+            if attempt_id is None or int(active["id"]) != int(attempt_id):
+                return None
+            self._finish_active_attempt(item, ATTEMPT_BLOCKED, now, reason)
+        item["state"] = WORK_RESOLVED
+        item["resolution"] = str(resolution)
+        item["last_reason"] = str(reason)
+        item["updated_at"] = float(now)
+        return item
+
     def fail_attempt(self, item_id, now, reason, state=ATTEMPT_FAILED, attempt_id=None):
         """End one bad route while keeping its observation task unresolved."""
         if state not in (ATTEMPT_FAILED, ATTEMPT_BLOCKED):

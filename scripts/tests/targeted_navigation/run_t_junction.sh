@@ -551,11 +551,10 @@ while ((SECONDS < navigation_deadline)); do
     # budget is a failed *branch*: the node records it as failed and advances
     # the observation period.  Sealing the whole trial here threw away every
     # remaining doorway (runs 20261101_191225 and 20261101_210304).
-    if grep -Eq '"frontier_event": *"place_dfs_return_unrecoverable"' "$METRICS_LOG"; then
-      STOP_REASON="place_dfs_return_unrecoverable"
-      log_lifecycle ERROR run_aborted reason="$STOP_REASON"
-      exit 1
-    fi
+    # place_dfs_return_unrecoverable is settled as a failed branch now: the
+    # node records place_dfs_return_settled and keeps return_obligation_pending.
+    # Sealing the whole trial here discarded launch/tree/auth/native evidence
+    # for a single unreachable return (run 20261102_222740).
     if grep -Eq '"frontier_event": *"place_scope_recovery_(returned|unrecoverable)"' "$METRICS_LOG"; then
       STOP_REASON="place_scope_recovery_failed_trial"
       log_lifecycle ERROR run_aborted reason="$STOP_REASON"
