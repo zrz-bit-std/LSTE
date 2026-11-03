@@ -122,5 +122,54 @@ class SamePlaceRejectionEvidenceTest(unittest.TestCase):
             "visited_entry_side_of_current_place", None))
 
 
+class StableUnstartedCandidateTest(unittest.TestCase):
+    def branch(self, **overrides):
+        record = {
+            "stable": True,
+            "passability": "open",
+            "physical_gate": [0.1, 1.0],
+            "connection": None,
+            "state": "pending",
+            "authentication_state": "pending",
+        }
+        record.update(overrides)
+        return record
+
+    def test_an_undecided_stable_candidate_is_counted(self):
+        self.assertTrue(audit.stable_unstarted_candidate(self.branch()))
+
+    def test_a_branch_never_touched_is_still_a_candidate(self):
+        self.assertTrue(audit.stable_unstarted_candidate(
+            self.branch(authentication_state=None)))
+
+    def test_an_analytically_rejected_branch_is_not_a_candidate(self):
+        # 20261103_141641 node 8 branches 26/27/29.
+        self.assertFalse(audit.stable_unstarted_candidate(
+            self.branch(authentication_state="failed",
+                        state="authentication_failed")))
+
+    def test_a_withdrawn_section_is_not_a_candidate(self):
+        self.assertFalse(audit.stable_unstarted_candidate(
+            self.branch(authentication_state="waiting_passable_section")))
+
+    def test_a_completed_branch_is_not_a_candidate(self):
+        self.assertFalse(audit.stable_unstarted_candidate(
+            self.branch(authentication_state="completed")))
+
+    def test_a_blocked_section_is_not_a_candidate(self):
+        self.assertFalse(audit.stable_unstarted_candidate(
+            self.branch(passability="blocked")))
+
+    def test_a_superseded_or_return_branch_is_not_a_candidate(self):
+        self.assertFalse(audit.stable_unstarted_candidate(
+            self.branch(state="superseded")))
+        self.assertFalse(audit.stable_unstarted_candidate(
+            self.branch(connection="return")))
+
+    def test_a_branch_without_a_physical_gate_is_not_a_candidate(self):
+        self.assertFalse(audit.stable_unstarted_candidate(
+            self.branch(physical_gate=None)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

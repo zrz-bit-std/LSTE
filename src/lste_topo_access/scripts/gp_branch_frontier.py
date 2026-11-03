@@ -254,6 +254,38 @@ def select_reachable_interior_goal(points, gate_xy, destination_xy, target_xy, m
     return None if not candidates else min(candidates)[1]
 
 
+# Three withdrawals of an unchanged measured section is a decision, not a
+# retry.  Run 20261103_191849 withdrew branch 11 58 times in one run.
+PASSABLE_SECTION_WITHDRAWAL_LIMIT = 3
+
+
+def withdrawn_candidate_retryable(branch, tolerance=0.05):
+    """A candidate withdrawn for an unpassable section retries only on new geometry.
+
+    Run 20261103_191849 branch 11 flipped passability open/blocked every 2.5 s
+    while its physical_gate stayed within 0.02 m: the observation task re-added
+    it 2 s later, withdrew it again, reset the 30 s watch and kept the route
+    preempted for 180 s until the watchdog killed the run.
+    """
+    previous = branch.get("authentication_withdrawn_gate")
+    current = branch.get("physical_gate")
+    if not previous or not current:
+        return True
+    try:
+        return math.dist([float(v) for v in previous],
+                         [float(v) for v in current]) > float(tolerance)
+    except (TypeError, ValueError):
+        return True
+
+
+def withdrawal_is_terminal(count, limit=3):
+    """Repeated withdrawal of an unchanged section is a decision, not a retry."""
+    try:
+        return int(count) >= max(1, int(limit))
+    except (TypeError, ValueError):
+        return False
+
+
 class GPBranchFrontierMixin:
     def portal_authentication_node_to_pin(self):
         active_auth = getattr(self, 'active_portal_authentication', lambda: None)()
@@ -648,10 +680,33 @@ class GPBranchFrontierMixin:
                 branch = tree.branches.get(branch_id) or {}
                 if (branch.get("passability") == "blocked"
                         and existing.withdraw_pending(branch_id, now=now)):
-                    branch["authentication_state"] = "waiting_passable_section"
-                    self.publish_status("portal_authentication_pending_withdrawn",
-                        node_id=int(node_id), branch_id=int(branch_id),
-                        reason="measured_section_not_passable")
+                    count = int(branch.get("passable_section_withdrawals", 0) or 0) + 1
+                    branch["passable_section_withdrawals"] = count
+                    gate = branch.get("physical_gate")
+                    branch["authentication_withdrawn_gate"] = (
+                        None if not gate else [float(v) for v in gate])
+                    if withdrawal_is_terminal(count, PASSABLE_SECTION_WITHDRAWAL_LIMIT):
+                        # The same measured section keeps flipping because it
+                        # sits on the passability threshold; its gate does not
+                        # move, so there is no new evidence to observe.  Conclude
+                        # the candidate instead of re-adding it forever.
+                        branch["state"] = "authentication_failed"
+                        branch["authentication_state"] = "failed"
+                        branch["authentication_failure_reason"] = (
+                            "measured_section_not_passable")
+                        self.publish_status(
+                            "portal_authentication_pending_withdrawn",
+                            node_id=int(node_id), branch_id=int(branch_id),
+                            reason="measured_section_not_passable",
+                            withdrawals=count, terminal=True)
+                    else:
+                        branch["authentication_state"] = (
+                            "waiting_passable_section")
+                        self.publish_status(
+                            "portal_authentication_pending_withdrawn",
+                            node_id=int(node_id), branch_id=int(branch_id),
+                            reason="measured_section_not_passable",
+                            withdrawals=count)
         if not node.get("junction_confirmed"):
             # GP can see the three-way candidate fan slightly before its
             # angular clusters satisfy the stricter durable-node rule (for
@@ -756,6 +811,9 @@ class GPBranchFrontierMixin:
                 continue
             if (not branch.get("stable")
                     or branch.get("passability") not in ("open", "unknown")):
+                continue
+            if (branch.get("authentication_state") == "waiting_passable_section"
+                    and not withdrawn_candidate_retryable(branch)):
                 continue
             from global_frontier_place_partition import measured_authentication_gate_geometry
             measured_geometry = measured_authentication_gate_geometry(branch)

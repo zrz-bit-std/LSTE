@@ -114,6 +114,26 @@ def observed_candidate_branch_ids(history, junction_center=None,
     return observed
 
 
+def stable_unstarted_candidate(branch):
+    """A candidate is only unfinished while its authentication is undecided.
+
+    Run 20261103_141641 node 8 branches 26/27/29 were rejected analytically
+    (authentication_state=failed, reason measured_section_not_passable after 28
+    withdraw cycles) without a physical start.  They are decisions, not missing
+    work.  Node 24 branches 75/76/77 were never touched at all; those stay
+    candidates and still fail every_stable_candidate_started.
+    """
+    return bool(
+        branch
+        and branch.get("stable")
+        and branch.get("passability") == "open"
+        and branch.get("physical_gate") is not None
+        and branch.get("connection") != "return"
+        and branch.get("state") not in ("return", "superseded")
+        and str(branch.get("authentication_state") or "") in ("", "pending")
+    )
+
+
 def ordered(names, required):
     at = -1
     for item in required:
@@ -510,12 +530,7 @@ def audit(path, junction_center=None, junction_radius=2.0, all_started_nodes=Fal
             for branch_id in node.get("branch_ids", []):
                 branch = next((x for x in latest_tree.get("branches", [])
                                if int(x.get("id", -1)) == int(branch_id)), None)
-                if (branch and branch.get("stable")
-                    and branch.get("passability") == "open"
-                    and branch.get("physical_gate") is not None
-                    and branch.get("connection") != "return"
-                    and branch.get("state") != "return"
-                    and branch.get("state") != "superseded"):
+                if stable_unstarted_candidate(branch):
                     candidate_ids.append(int(branch_id))
     candidate_history = {}
     for name, data in events:
