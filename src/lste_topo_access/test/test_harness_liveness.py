@@ -245,5 +245,18 @@ class BranchWaitConfigTest(unittest.TestCase):
         self.assertIn("branch_wait_timeout", config)
 
 
+class RecoveryGateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.runner = (TESTS / "run_t_junction.sh").read_text(encoding="utf-8")
+
+    def test_a_graceful_recovery_return_does_not_seal_the_trial(self):
+        # Run 20261104_070724 (rotated T attempt 2) aborted at sim 164 on a
+        # successful place_scope_recovery_returned and lost every other doorway.
+        self.assertNotIn(
+            'place_scope_recovery_(returned|unrecoverable)', self.runner)
+        self.assertIn('place_scope_recovery_unrecoverable', self.runner)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

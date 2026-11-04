@@ -555,7 +555,13 @@ while ((SECONDS < navigation_deadline)); do
     # node records place_dfs_return_settled and keeps return_obligation_pending.
     # Sealing the whole trial here discarded launch/tree/auth/native evidence
     # for a single unreachable return (run 20261102_222740).
-    if grep -Eq '"frontier_event": *"place_scope_recovery_(returned|unrecoverable)"' "$METRICS_LOG"; then
+    # place_scope_recovery_returned is a graceful retreat after a failed room
+    # (execution_failed=True, return_obligation_pending=False): the robot is
+    # back at the parent and the rest of the junction is still unexplored.
+    # Aborting the trial here killed rotated-T attempt 2 at sim 164 (run
+    # 20261104_070724) and threw away every remaining doorway.  Only a genuine
+    # unrecoverable recovery may seal the trial.
+    if grep -Eq '"frontier_event": *"place_scope_recovery_unrecoverable"' "$METRICS_LOG"; then
       STOP_REASON="place_scope_recovery_failed_trial"
       log_lifecycle ERROR run_aborted reason="$STOP_REASON"
       exit 1
