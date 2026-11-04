@@ -82,6 +82,15 @@ class MetricsRestartTest(unittest.TestCase):
         self.assertIn('respawn="true"', block)
         self.assertIn("PYTHONFAULTHANDLER", block)
 
+    def test_the_frontier_node_reports_a_segfault_traceback(self):
+        # 20261104_002408 and 20261104_153211 died with exit -11 and no stack.
+        frontier = (
+            ROOT / "src/lste_topo_access/launch/online_slam_frontier.launch"
+        ).read_text(encoding="utf-8")
+        block = frontier.split('name="lste_global_frontier"', 1)[1]
+        block = block.split("</node>", 1)[0]
+        self.assertIn("PYTHONFAULTHANDLER", block)
+
     def test_the_runner_ignores_a_respawned_metrics_death(self):
         self.assertIn("grep -v 'lste_navigation_metrics'", self.readiness)
 

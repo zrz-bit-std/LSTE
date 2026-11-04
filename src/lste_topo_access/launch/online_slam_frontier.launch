@@ -178,6 +178,11 @@
   </node>
 
   <node if="$(arg start_frontier)" pkg="lste_topo_access" type="lste_global_frontier_node.py" name="lste_global_frontier" output="screen" launch-prefix="$(optenv LSTE_FRONTIER_LAUNCH_PREFIX)">
+    <!-- This node segfaulted (exit -11) with no Python traceback in
+         20261104_002408 and 20261104_153211, taking the whole trial down.
+         faulthandler dumps every thread's Python stack on SIGSEGV so the next
+         occurrence names the code path instead of only the exit code. -->
+    <env name="PYTHONFAULTHANDLER" value="1"/>
     <param name="target_done_policy" value="$(arg target_done_policy)"/>
     <param name="map_topic" value="/map"/>
     <param name="costmap_topic" value="$(arg costmap_topic)"/>
