@@ -226,15 +226,25 @@ class DoorwayAuthentication:
                         reason=self.failure_reason or "return_progress_stalled",
                         source_distance=round(math.hypot(
                             pose[0]-self.source_xy[0], pose[1]-self.source_xy[1]), 3))
-            if retry_count >= 3:
+            if getattr(self, "return_recovery_started", None) is None:
+                self.return_recovery_started = float(now)
+            recovery_elapsed = max(
+                0.0, float(now) - float(self.return_recovery_started))
+            if return_recovery_should_block(
+                    retry_count, recovery_elapsed, 3,
+                    float(getattr(self, "return_recovery_min_seconds", 45.0))):
                 self.return_recovery_blocked = True
                 self._event("doorway_failure_return_recovery_blocked",
                             retry_count=retry_count,
+                            recovery_elapsed=round(recovery_elapsed, 1),
                             reason="bounded_source_side_return_retries_exhausted")
-            if retry_count >= 6:
+            if return_recovery_should_block(
+                    retry_count, recovery_elapsed, 6,
+                    float(getattr(self, "return_recovery_final_seconds", 140.0))):
                 self.return_recovery_final_blocked = True
                 self._event("doorway_failure_return_finally_blocked",
                             retry_count=retry_count,
+                            recovery_elapsed=round(recovery_elapsed, 1),
                             reason="source_side_recovery_budget_exhausted")
         return True
 
@@ -520,6 +530,24 @@ class DoorwayAuthentication:
             "return_gate_cleared": self.return_gate_cleared,
             "failure_reason": self.failure_reason, "events": list(self.events),
         }
+
+
+def return_recovery_should_block(retry_count, elapsed, minimum_count, minimum_seconds):
+    """A stalled return needs both a retry count and a real recovery window.
+
+    Run 20261103_210032 (L attempt 1) dispatched source-side returns from
+    sim 1171.8: the local costmap still carried a transient obstacle blob over
+    the source (cost 99 at -18.45,-1.35 while /map was free), so Navfn returned
+    an empty plan and TEB commanded zero.  Six retries ~5 s apart exhausted the
+    budget at ~30 s; the local costmap cleared at ~1220 and the global one at
+    ~1280, so a later attempt would have driven home.  Keep the count bounds
+    for reporting but require the physical window before giving up.
+    """
+    try:
+        return (int(retry_count) >= max(1, int(minimum_count))
+                and float(elapsed) >= max(0.0, float(minimum_seconds)))
+    except (TypeError, ValueError):
+        return False
 
 
 class JunctionDoorwayAuthentication:

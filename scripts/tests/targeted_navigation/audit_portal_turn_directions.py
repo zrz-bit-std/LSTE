@@ -26,13 +26,23 @@ WITNESS_TOLERANCE=.15
 # angular rate: up to 0.60 s of un-witnessed rotation, capped at 0.50 rad.
 WITNESS_LATENCY_S=.60
 WITNESS_TOLERANCE_MAX=.50
+# The frozen yaw is taken when the inside observation is processed, while the
+# ``turning`` status that dates the sweep is published after the node's event
+# queue catches up.  Two runs measured that gap: T 20261104_002409 branch
+# 62/node 23 froze the yaw 2.81 s before its status stamp, Cross 20261104_013426
+# branch 103/node 36 2.54 s.  A 1.5 s lookback therefore reported
+# initial_physical_yaw_witness_missing although the raw poses contained the
+# exact frozen heading.  Look back far enough to cover the observed queue
+# latency; the rate-based allowance below still bounds how far the witness may
+# sit from the frozen yaw.
+WITNESS_WINDOW_S=4.0
 
 def witness_tolerance(local_rate):
     return min(WITNESS_TOLERANCE_MAX,
                max(WITNESS_TOLERANCE, WITNESS_LATENCY_S*float(local_rate)))
 
 
-def audit_turns(poses,turns,tolerance=.35):
+def audit_turns(poses,turns,tolerance=.35,witness_window=WITNESS_WINDOW_S):
     if (any(not math.isfinite(v) for p in poses for v in p)
             or any(b[0] < a[0] for a,b in zip(poses,poses[1:]))):
         return dict(passed=False,completed_turns=0,results=[],errors=[dict(reason='invalid_raw_pose_timeline')])
@@ -46,7 +56,7 @@ def audit_turns(poses,turns,tolerance=.35):
             errors.append(dict(node=key[0],branch=key[1],reason='frozen_turn_contract_changed'));continue
         if 'start' not in r:
             errors.append(dict(node=key[0],branch=key[1],reason='completed_turn_start_not_recorded'));continue
-        first=bisect.bisect_left(times,r['start']-1.5)
+        first=bisect.bisect_left(times,r['start']-float(witness_window))
         last=bisect.bisect_right(times,r['start'])
         window=list(range(first,last))
         local_rate=0.0
