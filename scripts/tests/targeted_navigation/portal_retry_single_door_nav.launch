@@ -103,7 +103,7 @@
     <arg name="persistent_execution" value="$(arg persistent_execution)"/>
     <arg name="base_global_planner" value="$(arg base_global_planner)"/>
     <arg name="base_local_planner" value="$(arg base_local_planner)"/>
-    <arg name="max_linear_speed" value="0.50"/>
+    <arg name="max_linear_speed" value="0.60"/>
     <arg name="controller_mode" value="teb"/>
     <arg name="planner_frequency" value="$(arg planner_frequency)"/>
     <arg name="move_base_respawn" value="$(arg move_base_respawn)"/>

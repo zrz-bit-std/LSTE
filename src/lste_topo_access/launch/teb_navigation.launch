@@ -9,7 +9,7 @@
   <arg name="body_cloud_topic" default="/pro3/os_cloud_node/points"/>
   <arg name="odom_topic" default="/pro3/wheel_odom"/>
   <arg name="global_frame" default="map"/>
-  <arg name="max_linear_speed" default="0.50"/>
+  <arg name="max_linear_speed" default="0.60"/>
   <arg name="teb_xy_goal_tolerance" default="0.50"/>
   <arg name="controller_mode" default="teb"/>
   <arg name="goal_topic" default="/lste/final_goal"/>
@@ -334,9 +334,9 @@
          all negative commands, so this does not enable reverse motion. -->
     <param name="TebLocalPlannerROS/max_vel_x_backwards" value="0.01"/>
     <param name="TebLocalPlannerROS/penalty_epsilon" value="0.0005"/>
-    <param name="TebLocalPlannerROS/max_vel_theta" value="0.65"/>
-    <param name="TebLocalPlannerROS/acc_lim_x" value="0.60"/>
-    <param name="TebLocalPlannerROS/acc_lim_theta" value="0.90"/>
+    <param name="TebLocalPlannerROS/max_vel_theta" value="0.80"/>
+    <param name="TebLocalPlannerROS/acc_lim_x" value="1.10"/>
+    <param name="TebLocalPlannerROS/acc_lim_theta" value="1.30"/>
     <param name="TebLocalPlannerROS/max_vel_y" value="0.0"/>
     <param name="TebLocalPlannerROS/min_turning_radius" value="0.0"/>
     <param name="TebLocalPlannerROS/wheelbase" value="0.0"/>
@@ -546,8 +546,8 @@
     <param name="navigation_hold_topic" value="/lste/navigation_hold"/>
     <param name="status_topic" value="/lste/teb_turn_supervisor/status"/>
     <param name="command_frequency" value="20.0"/>
-    <param name="max_vel_theta" value="0.65"/>
-    <param name="acc_lim_theta" value="0.90"/>
+    <param name="max_vel_theta" value="0.80"/>
+    <param name="acc_lim_theta" value="1.30"/>
     <param name="yaw_goal_tolerance" value="0.35"/>
     <!-- Anti-spin protections: wait until the managed action is stable before
          starting a pre-route turn, cap a single turn's swept rotation so it
