@@ -56,6 +56,14 @@ class KilledAttemptAuditTest(unittest.TestCase):
         cls.suite = (TESTS / "run_place_dfs_suite.sh").read_text(encoding="utf-8")
         cls.driver = (TESTS / "run_four_until_pass.sh").read_text(encoding="utf-8")
 
+    def test_a_random_child_crash_is_relaunched_and_recorded(self):
+        # 20261104_153211: lste_global_frontier died with -11 at sim 1231 and
+        # the whole attempt was recorded as a scenario failure.
+        self.assertIn("child_process_crashed", self.driver)
+        self.assertIn("capture_child_crash", self.driver)
+        self.assertIn("child_crash.txt", self.driver)
+        self.assertIn("relaunching", self.driver)
+
     def test_the_suite_can_audit_an_existing_root(self):
         self.assertIn("LSTE_AUDIT_ONLY_ROOT", self.suite)
         self.assertIn("if [[ -z \"${LSTE_AUDIT_ONLY_ROOT:-}\" ]]; then", self.suite)

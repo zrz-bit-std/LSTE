@@ -166,6 +166,30 @@ PY_SIM
   python3 -c 'import sys; sys.exit(0 if float(sys.argv[1] or 0) < 120.0 else 1)' "${sim:-0}"
 }
 
+# A random child death (lste_global_frontier segfaulted with exit -11 at
+# 20261104_002408 sim 1884 and 20261104_153211 sim 1231) is a host fault, not a
+# scenario result: the launcher log names the dead process and faulthandler
+# prints its stacks.  Keep the evidence in the run root and relaunch.
+child_process_crashed() {
+  local case="$1" root="$2" dir
+  dir=$(sed -n 's/^run_directory=//p' "$root/${case}_runner.log" 2>/dev/null | tail -1)
+  [[ -n "$dir" && -d "$dir" ]] || return 1
+  grep -q "run_stop_requested.*reason=child_process_exit" \
+    "$dir"/*lifecycle*.log 2>/dev/null
+}
+
+capture_child_crash() {
+  local root="$1" launcher
+  launcher=$(ls "$root"/*launcher.log 2>/dev/null | head -1)
+  [[ -n "$launcher" ]] || return 0
+  {
+    echo "== dead processes =="
+    grep -h "process has died" "$launcher" 2>/dev/null | tail -5
+    echo "== faulthandler =="
+    grep -h -A 40 "Fatal Python error" "$launcher" 2>/dev/null | tail -80
+  } >"$root/child_crash.txt" 2>/dev/null || true
+}
+
 overall=0
 for case in "${CASES[@]}"; do
   passed=0
@@ -179,9 +203,11 @@ for case in "${CASES[@]}"; do
         run_status=1
       fi
       if (( run_status != 0 && launch_retries < 2 )) \
-          && launch_crashed "$case" "${LAST_ROOT:-}"; then
+          && { launch_crashed "$case" "${LAST_ROOT:-}" \
+               || child_process_crashed "$case" "${LAST_ROOT:-}"; }; then
         launch_retries=$((launch_retries + 1))
-        log "$case attempt $attempt: launch crashed (sim < 120 s); relaunching ($launch_retries/2)"
+        capture_child_crash "${LAST_ROOT:-}"
+        log "$case attempt $attempt: child process crashed; relaunching ($launch_retries/2)"
         if [[ "$(tail -1 "$ATTEMPTS_TSV" | cut -f1-2)" == "$case"$'\t'"$attempt" ]]; then
           sed -i '$d' "$ATTEMPTS_TSV"
         fi
