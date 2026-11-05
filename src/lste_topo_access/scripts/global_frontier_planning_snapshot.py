@@ -696,6 +696,40 @@ class GlobalFrontierPlanningSnapshotMixin:
         )
         return message, robot_map, robot_yaw_map, now
 
+    def record_current_place_visit(self, robot_map, now):
+        """Append the measured pose to the current Place's visited path.
+
+        Active doorway authentication is excluded: the robot is physically in
+        the candidate room while the source Place is still current, so those
+        poses must not become "prior exploration" of the source Place.
+        """
+        if not getattr(self, "place_memory_enabled", True):
+            return
+        place_id = getattr(self, "current_physical_place_id", None)
+        memory = getattr(self, "region_memory", None)
+        pose = getattr(self, "pose_odom", None)
+        if place_id is None or memory is None or pose is None:
+            return
+        active_auth = getattr(
+            self, "active_portal_authentication", lambda: None,
+        )()
+        if active_auth is not None:
+            phase = str(getattr(active_auth, "phase", "") or "").strip().lower()
+            state = str(getattr(active_auth, "state", "") or "").strip().lower()
+            if phase in ("watching", "authenticating") or state in (
+                "entering", "inside", "turning", "returning",
+            ):
+                return
+        try:
+            memory.record_visited_pose(
+                int(place_id),
+                map_xy=tuple(float(value) for value in robot_map[:2]),
+                odom_xy=(float(pose.x), float(pose.y)),
+                now=now,
+            )
+        except (AttributeError, TypeError, ValueError):
+            pass
+
     def active_route_planning_is_deferred(self, robot_map, now):
         """Avoid rebuilding global grids while a stable route is progressing."""
         if self.active_frontier is None:
@@ -767,6 +801,7 @@ class GlobalFrontierPlanningSnapshotMixin:
             now,
         ):
             return None
+        self.record_current_place_visit(robot_map, now)
         # A visual target is a higher-level mission fact than an individual
         # frontier route. Do not select unrestricted exploration until its
         # current map-derived room identity is available.

@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 import math
 
 from global_frontier_portal_crossing import portal_signed_distance, portal_section_destination
-from global_frontier_place_partition import point_in_place_scope
 
 
 def _xy(value):
@@ -21,14 +20,15 @@ def _angle_delta(target, source):
 
 def destination_returns_into_source_place(
     node, destination_xy, source_place_id, region_memory=None,
-    physical_xy=None,
+    physical_xy=None, before_time=None,
 ):
-    """Return whether a doorway's inside witness is already the source Place.
+    """Return whether a doorway's inside witness is a previously visited Place.
 
-    GP authenticates one doorway per branch, so a branch whose "inside"
-    witness lands back in the room the robot already occupies must not mint a
-    second Place.  Prefer the live Place partition mask; fall back to durable
-    region identity only when no partition exists.
+    The live free-space mask cannot answer this: an open doorway keeps the
+    destination room connected to the source room.  The primary evidence is
+    the robot's own visited path, filtered to poses recorded *before* this
+    branch started.  The durable region identity is retained only as a legacy
+    fallback when no visited history is available at all.
     """
     point = _xy(destination_xy)
     try:
@@ -37,10 +37,20 @@ def destination_returns_into_source_place(
         return False
     if point is None or source_place_id <= 0:
         return False
-    member = point_in_place_scope(node, point)
-    if member is True:
-        return True
-    if member is not True and region_memory is not None:
+    if region_memory is not None:
+        try:
+            if region_memory.has_visited_path(source_place_id, frame="odom"):
+                return bool(region_memory.destination_was_visited(
+                    source_place_id,
+                    point,
+                    before_time=before_time,
+                    radius=0.9,
+                    frame="odom",
+                ))
+        except (AttributeError, TypeError, ValueError):
+            pass
+        # Compatibility for an old Place record with no pose history.  Do not
+        # use the live mask: that is the connectivity fact that over-rejects.
         try:
             _tier, region = region_memory.candidate_tier(
                 point[0], point[1], 0.0,
@@ -648,14 +658,19 @@ class JunctionDoorwayAuthentication:
         if int(branch.node_id) != self.node_id:
             raise ValueError("branch belongs to another node")
         branch_id = int(branch.branch_id)
-        active = self.branches.get(self.active_branch_id)
-        if (branch_id in self.branches
-                or (active is not None and active.state not in ("completed", "failed"))):
+        if branch_id in self.branches:
             return False
         self.branches[branch_id] = branch
         self.signature = tuple(sorted(self.branches))
         self.signature_since = float(now)
-        self.phase = "watching"
+        # A late stable arm must be queued even while another arm is being
+        # authenticated.  The active arm keeps its lease and phase; the new
+        # branch is picked up by start_next after the settle window.  Refusing
+        # the add here made a branch that became measurable one update later
+        # remain attempts=0 and be pruned as place_id=None when the junction
+        # completed (run 20261106_011314, node 2 branch 5).
+        if self.active_branch_id is None:
+            self.phase = "watching"
         return True
 
     def withdraw_pending(self, branch_id, now=0.0):
@@ -932,6 +947,10 @@ class GlobalFrontierPortalAuthenticationMixin:
                                     source_place_id,
                                     region_memory=region_memory,
                                     physical_xy=portal.get("physical_destination"),
+                                    before_time=(
+                                        None if item is None
+                                        else item.get("first_seen")
+                                    ),
                                 ):
                                     # The doorway observed by GP leads back into
                                     # the Place the robot already occupies.  A

@@ -885,7 +885,7 @@ class DestinationSelfLoopTest(unittest.TestCase):
             )
         )
 
-    def test_live_place_mask_identifies_the_source_side(self):
+    def test_live_mask_alone_does_not_suppress_a_new_room(self):
         node = SimpleNamespace(
             current_place_scope_mask=np.ones((20, 20), dtype=bool),
             current_place_scope_message=SimpleNamespace(
@@ -900,8 +900,57 @@ class DestinationSelfLoopTest(unittest.TestCase):
             current_place_scope_id=1,
             current_physical_place_id=1,
         )
-        self.assertTrue(
+        # Connectivity through an open doorway is not exploration evidence.
+        self.assertFalse(
             destination_returns_into_source_place(node, (4.0, 0.5), 1)
+        )
+
+    def test_visited_path_separates_return_from_new_room(self):
+        memory, source = self._memory()
+        for now, xy in (
+            (1.0, (3.4, 0.0)),
+            (2.0, (4.0, 0.1)),
+            (3.0, (5.0, 0.2)),
+        ):
+            memory.record_visited_pose(
+                source["id"], odom_xy=xy, now=now,
+            )
+        node = SimpleNamespace(
+            current_place_scope_mask=np.ones((20, 20), dtype=bool),
+            current_place_scope_message=SimpleNamespace(
+                info=SimpleNamespace(
+                    resolution=1.0,
+                    origin=SimpleNamespace(
+                        position=SimpleNamespace(x=0.0, y=0.0),
+                    ),
+                ),
+            ),
+            current_place_scope_valid=True,
+            current_place_scope_id=1,
+            current_physical_place_id=1,
+        )
+        # The west return is on the prior path even though the live mask also
+        # contains it through the open doorway.
+        self.assertTrue(
+            destination_returns_into_source_place(
+                node, (3.85, -0.635), source["id"],
+                region_memory=memory, before_time=10.0,
+            )
+        )
+        # The upper room is connected by an open door but was not visited
+        # before this branch started.
+        self.assertFalse(
+            destination_returns_into_source_place(
+                node, (6.472, 3.374), source["id"],
+                region_memory=memory, before_time=10.0,
+            )
+        )
+        # The current branch's own entry path must not count as history.
+        self.assertFalse(
+            destination_returns_into_source_place(
+                node, (3.85, -0.635), source["id"],
+                region_memory=memory, before_time=0.5,
+            )
         )
 
 

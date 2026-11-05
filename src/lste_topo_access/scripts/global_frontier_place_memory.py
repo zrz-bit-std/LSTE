@@ -11,6 +11,7 @@ import collections
 from global_frontier_place_memory_association import FrontierRegionAssociationMixin
 from global_frontier_place_memory_lifecycle import FrontierRegionLifecycleMixin
 from global_frontier_place_memory_queries import FrontierRegionQueryMixin
+from global_frontier_place_memory_visit import FrontierRegionVisitMixin
 from global_frontier_place_states import (
     PLACE_DORMANT,
     PLACE_OPEN,
@@ -23,6 +24,7 @@ class FrontierRegionMemory(
     FrontierRegionAssociationMixin,
     FrontierRegionQueryMixin,
     FrontierRegionLifecycleMixin,
+    FrontierRegionVisitMixin,
 ):
     """Store durable observation-place state for one exploration invocation."""
 

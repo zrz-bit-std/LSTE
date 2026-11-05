@@ -113,15 +113,20 @@ class PortalAuthenticationTest(unittest.TestCase):
         self.assertEqual(states[source_item_id], "resolved")
         self.assertEqual(states[entry_id], "unresolved")
 
-    def test_late_branch_does_not_mutate_active_observation_transaction(self):
+    def test_late_branch_is_queued_without_mutating_active_transaction(self):
         task = JunctionDoorwayAuthentication(7, settle_seconds=0.0)
         first = DoorwayAuthentication(70, 7, (0.0, 0.0), (1.0, 0.0))
         late = DoorwayAuthentication(71, 7, (0.0, 1.0), (1.0, 1.0))
         task.add(first, now=1.0)
         self.assertIs(task.start_next((0.0, 0.0), now=1.0), first)
-        self.assertFalse(task.add(late, now=2.0))
-        self.assertEqual(set(task.branches), {70})
+        # The active arm keeps its lease and phase, but the late stable arm is
+        # queued instead of being silently dropped.
+        self.assertTrue(task.add(late, now=2.0))
+        self.assertEqual(set(task.branches), {70, 71})
         self.assertEqual(task.phase, "authenticating")
+        self.assertEqual(task.active_branch_id, 70)
+        first.state = "completed"
+        self.assertIs(task.finish_active((0.0, 0.0), now=3.0), late)
 
     def test_completed_gap_is_rejected_when_source_node_is_on_destination_side(self):
         valid = DoorwayAuthentication(20, 2, (0.0, 0.0), (1.0, 0.0))
