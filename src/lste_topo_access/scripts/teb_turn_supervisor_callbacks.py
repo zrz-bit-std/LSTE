@@ -467,6 +467,9 @@ class TebTurnSupervisorCallbacksMixin:
         self.planner_command_graph_transaction_id = int(
             identity["graph_transaction_id"]
         )
+        self.planner_command_route_ownership = str(
+            identity.get("route_ownership", "graph")
+        )
         self.planner_command_action_generation = int(
             identity["action_generation"]
         )
@@ -1160,6 +1163,13 @@ class TebTurnSupervisorCallbacksMixin:
                 )
             except (TypeError, ValueError):
                 self.active_action_graph_transaction_id = 0
+            self.active_action_route_ownership = str(
+                payload.get(
+                    "active_route_ownership",
+                    payload.get("route_ownership", "graph"),
+                )
+                or "graph"
+            )
             self.active_action_target_track_id = str(
                 payload.get("active_target_track_id", "")
             ).strip()
@@ -1397,6 +1407,9 @@ class TebTurnSupervisorCallbacksMixin:
             )
             self.planner_command_graph_transaction_id = int(
                 getattr(self, "active_action_graph_transaction_id", 0) or 0
+            )
+            self.planner_command_route_ownership = str(
+                getattr(self, "active_action_route_ownership", "graph")
             )
             self.planner_command_action_generation = int(
                 getattr(self, "active_action_generation", 0) or 0

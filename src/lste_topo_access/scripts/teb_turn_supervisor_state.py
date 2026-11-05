@@ -39,6 +39,7 @@ def initialize_turn_supervisor_state(supervisor):
     supervisor.active_action_origin_epoch = None
     supervisor.active_action_projection_epoch = None
     supervisor.active_action_graph_transaction_id = 0
+    supervisor.active_action_route_ownership = "graph"
     supervisor.active_action_generation = 0
     supervisor.active_action_identity = None
     supervisor.active_action = False
@@ -53,6 +54,7 @@ def initialize_turn_supervisor_state(supervisor):
     supervisor.planner_command_origin_epoch = None
     supervisor.planner_command_projection_epoch = None
     supervisor.planner_command_graph_transaction_id = 0
+    supervisor.planner_command_route_ownership = "graph"
     supervisor.planner_command_action_generation = 0
     supervisor.planner_command_action_identity = None
     supervisor.planner_contract_valid = False

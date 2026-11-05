@@ -144,7 +144,9 @@ class TebTurnSupervisorControlMixin:
             getattr(self, "planner_command_graph_transaction_id", 0) or 0
         )
         if (
-            active_graph_transaction_id > 0
+            str(getattr(self, "active_action_route_ownership", "graph"))
+            != "observation"
+            and active_graph_transaction_id > 0
             and planner_graph_transaction_id != active_graph_transaction_id
         ):
             return "planner_graph_transaction_mismatch"
@@ -280,6 +282,12 @@ class TebTurnSupervisorControlMixin:
             ),
             "active_action_graph_transaction_id": int(
                 getattr(self, "active_action_graph_transaction_id", 0) or 0
+            ),
+            "route_ownership": str(
+                getattr(self, "active_action_route_ownership", "graph")
+            ),
+            "planner_route_ownership": str(
+                getattr(self, "planner_command_route_ownership", "graph")
             ),
             "route_id": int(getattr(self, "active_action_route_id", 0) or 0),
             "planner_route_id": int(

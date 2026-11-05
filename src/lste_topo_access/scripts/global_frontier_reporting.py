@@ -74,6 +74,9 @@ class GlobalFrontierReportingMixin:
         context["graph_transaction_id"] = int(
             graph_transaction_id or 0
         )
+        context["route_ownership"] = str(
+            getattr(self, "active_route_ownership", "graph")
+        )
         if not getattr(self, "place_memory_enabled", True):
             return context
 
@@ -126,6 +129,9 @@ class GlobalFrontierReportingMixin:
                 "owner_place_id": active_place_id or current_place_id,
                 "source_place_id": source_place_id,
                 "work_item_id": work_item_id,
+                "attempt_id": self._optional_place_id(
+                    getattr(self, "active_work_item_attempt_id", None)
+                ),
             })
             return context
 
@@ -1019,6 +1025,15 @@ class GlobalFrontierReportingMixin:
             # Use the identity snapshot captured above. Reading the mutable
             # graph transaction again here can pair transaction N with the
             # nested context from transaction N-1 during a replan callback.
+            "route_ownership": str(
+                getattr(self, "active_route_ownership", "graph")
+            ),
+            "work_item_id": self._optional_place_id(
+                getattr(self, "active_work_item_id", None)
+            ),
+            "attempt_id": self._optional_place_id(
+                getattr(self, "active_work_item_attempt_id", None)
+            ),
             "goal_context": goal_context,
             "portal_transaction": self.portal_transaction_report(),
             "map_epoch": int(route_map_epoch),

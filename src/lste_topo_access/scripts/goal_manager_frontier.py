@@ -65,6 +65,15 @@ class GoalManagerFrontierMixin:
         graph_transaction_id = int(
             getattr(self, "global_frontier_graph_transaction_id", 0) or 0
         )
+        context["route_ownership"] = str(
+            getattr(self, "canonical_route_ownership", "graph")
+        )
+        work_item_id = int(getattr(self, "canonical_work_item_id", 0) or 0)
+        attempt_id = int(getattr(self, "canonical_attempt_id", 0) or 0)
+        if work_item_id > 0:
+            context["work_item_id"] = work_item_id
+        if attempt_id > 0:
+            context["attempt_id"] = attempt_id
         return self.normalize_frontier_goal_context(
             context,
             graph_transaction_id=(

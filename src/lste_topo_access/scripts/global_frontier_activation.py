@@ -9,6 +9,8 @@ import math
 
 import rospy
 
+from utils.route_ownership import GRAPH, OBSERVATION
+
 from lifecycle_manager import State
 from global_frontier_models import SelectedFrontier
 from global_frontier_topology import copy_component_evidence
@@ -323,6 +325,21 @@ class GlobalFrontierActivationMixin:
         self.active_last_waypoint_map = None
         self.active_route_kind = selection.route_kind
         self.active_mission_route_kind = selection.route_kind
+        # Two ownership domains share the controller wire protocol.  A route
+        # owned by the durable graph (portal probe/crossing or a durable
+        # work-item action) must present a positive graph transaction.  A
+        # geometry/place observation work item owns no graph transaction and
+        # carries its work-item attempt identity instead.
+        self.active_route_ownership = (
+            GRAPH
+            if (
+                str(getattr(selection, "authentication_phase", "") or "")
+                or str(getattr(selection, "graph_action", "") or "").strip().lower()
+                in ("probe_portal", "cross_portal", "portal_crossing")
+                or graph_transaction is not None
+            )
+            else OBSERVATION
+        )
         self.active_portal_authentication_phase = str(
             getattr(selection, "authentication_phase", "") or ""
         )
@@ -364,6 +381,9 @@ class GlobalFrontierActivationMixin:
             "projection_epoch": route_projection_epoch,
             "route_kind": str(self.active_route_kind or ""),
             "mission_route_kind": str(self.active_mission_route_kind or ""),
+            "route_ownership": str(
+                getattr(self, "active_route_ownership", GRAPH)
+            ),
             "source": "global_slam_frontier",
             "priority": 0,
         }

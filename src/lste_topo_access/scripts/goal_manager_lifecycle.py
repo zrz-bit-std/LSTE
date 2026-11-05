@@ -8,6 +8,11 @@ import rospy
 from std_msgs.msg import Bool
 
 from experiment_reset_contract import decode_reset_request, publish_reset_ack
+from utils.route_ownership import (
+    GRAPH,
+    OBSERVATION,
+    classify_route_ownership,
+)
 from lifecycle_manager import EventType, LifecycleManager, State
 from goal_manager_frontier import GoalManagerFrontierMixin
 from goal_manager_goal_output import GoalManagerGoalOutputMixin
@@ -127,6 +132,25 @@ class GoalManagerLifecycleMixin:
                 return 0
             return value if value > 0 else 0
 
+        # Two ownership domains share the wire protocol.  Graph-owned routes
+        # (portal probe/crossing, durable work-item actions) must present the
+        # durable graph transaction.  Observation routes (a GP work item or a
+        # plain frontier endpoint) own no graph transaction; their owner token
+        # is the route/lifecycle identity plus the work-item attempt.
+        ownership = classify_route_ownership(payload)
+        context = payload.get("goal_context")
+        if not isinstance(context, dict):
+            context = {}
+
+        def context_positive(name):
+            try:
+                value = int(context.get(name, 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+            return value if value > 0 else 0
+
+        work_item_id = positive("work_item_id") or context_positive("work_item_id")
+        attempt_id = positive("attempt_id") or context_positive("attempt_id")
         identity = {
             "lifecycle_transaction_id": positive("lifecycle_transaction_id"),
             "route_id": positive("route_id"),
@@ -134,10 +158,24 @@ class GoalManagerLifecycleMixin:
             "map_epoch": positive("map_epoch"),
             "origin_epoch": positive("origin_epoch"),
             "projection_epoch": positive("projection_epoch"),
+            "route_ownership": ownership,
+            "work_item_id": work_item_id,
+            "attempt_id": attempt_id,
         }
-        for name, value in identity.items():
-            if value <= 0:
+        required = [
+            "lifecycle_transaction_id",
+            "route_id",
+            "map_epoch",
+            "origin_epoch",
+            "projection_epoch",
+        ]
+        if ownership == GRAPH:
+            required.append("graph_transaction_id")
+        for name in required:
+            if identity[name] <= 0:
                 return identity, "missing_%s" % name
+        if ownership == OBSERVATION and work_item_id > 0 and attempt_id <= 0:
+            return identity, "missing_observation_attempt_id"
         return identity, ""
 
     def _canonical_route_stale_reason(self, identity):
@@ -147,13 +185,18 @@ class GoalManagerLifecycleMixin:
         lifecycle = self.lifecycle_manager
         if identity["lifecycle_transaction_id"] < lifecycle.transaction_high_water_mark():
             return "lifecycle_transaction_id_below_high_water"
-        high_water = (
+        high_water = [
             ("route_id", "canonical_route_high_water"),
-            ("graph_transaction_id", "canonical_graph_high_water"),
             ("map_epoch", "canonical_map_epoch_high_water"),
             ("origin_epoch", "canonical_origin_epoch_high_water"),
             ("projection_epoch", "canonical_projection_epoch_high_water"),
-        )
+        ]
+        # Observation routes never advance or compare against the graph
+        # high-water mark: their graph id is a legal zero sentinel.
+        if identity.get("route_ownership", GRAPH) != OBSERVATION:
+            high_water.append(
+                ("graph_transaction_id", "canonical_graph_high_water")
+            )
         for field, attribute in high_water:
             if identity[field] < int(getattr(self, attribute, 0) or 0):
                 return "%s_below_high_water" % field
@@ -354,13 +397,23 @@ class GoalManagerLifecycleMixin:
                 int(getattr(self, "canonical_route_high_water", 0) or 0),
                 identity["route_id"],
             )
-            self.canonical_graph_high_water = max(
-                int(getattr(self, "canonical_graph_high_water", 0) or 0),
-                identity["graph_transaction_id"],
-            )
+            if identity.get("route_ownership", GRAPH) != OBSERVATION:
+                self.canonical_graph_high_water = max(
+                    int(getattr(self, "canonical_graph_high_water", 0) or 0),
+                    identity["graph_transaction_id"],
+                )
             self.canonical_map_epoch_high_water = max(
                 int(getattr(self, "canonical_map_epoch_high_water", 0) or 0),
                 identity["map_epoch"],
+            )
+            self.canonical_route_ownership = identity.get(
+                "route_ownership", GRAPH
+            )
+            self.canonical_work_item_id = int(
+                identity.get("work_item_id", 0) or 0
+            )
+            self.canonical_attempt_id = int(
+                identity.get("attempt_id", 0) or 0
             )
         handlers = {
             EventType.STATE_UPDATED: GoalManagerInputCallbacksMixin.apply_state,

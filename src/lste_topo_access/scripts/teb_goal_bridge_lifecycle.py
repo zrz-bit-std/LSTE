@@ -117,6 +117,17 @@ class TebGoalBridgeLifecycleMixin:
             )
         except (TypeError, ValueError):
             return None, "invalid_canonical_identity"
+        # Local import keeps AST-extracted unit fixtures working without
+        # re-declaring the ownership helpers in their namespace.
+        from utils.route_ownership import (
+            GRAPH,
+            OBSERVATION,
+            classify_route_ownership,
+            observation_identity,
+        )
+
+        ownership = classify_route_ownership(value)
+        work_item_id, attempt_id = observation_identity(value)
         identity = {
             "lifecycle_transaction_id": lifecycle_id,
             "route_id": route_id,
@@ -128,6 +139,9 @@ class TebGoalBridgeLifecycleMixin:
             "priority": priority,
             "source": str(value.get("source", "") or "").strip().lower(),
             "event": str(value.get("event", "") or "").strip().lower(),
+            "route_ownership": ownership,
+            "work_item_id": work_item_id,
+            "attempt_id": attempt_id,
         }
         if lifecycle_id <= 0:
             return identity, "missing_lifecycle_transaction_id"
@@ -165,11 +179,18 @@ class TebGoalBridgeLifecycleMixin:
         if route_id <= 0 and not target_terminal_boundary:
             return identity, "missing_route_identity"
         if (
-            graph_id <= 0
+            ownership != OBSERVATION
+            and graph_id <= 0
             and not direct_target_mission
             and not target_terminal_boundary
         ):
             return identity, "missing_route_identity"
+        if (
+            ownership == OBSERVATION
+            and work_item_id > 0
+            and attempt_id <= 0
+        ):
+            return identity, "missing_observation_attempt_id"
         return identity, ""
 
     def _canonical_instruction_stale_reason(self, identity):

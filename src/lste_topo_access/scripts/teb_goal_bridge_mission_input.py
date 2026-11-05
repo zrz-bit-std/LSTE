@@ -12,6 +12,14 @@ import rospy
 from geometry_msgs.msg import PoseStamped
 
 from goal_context import normalize_goal_context
+from utils.route_ownership import (
+    GRAPH,
+    OBSERVATION,
+    classify_route_ownership,
+    graph_route_admission_error,
+    observation_identity,
+    observation_identity_error,
+)
 
 
 class TebGoalBridgeMissionInputMixin:
@@ -45,6 +53,13 @@ class TebGoalBridgeMissionInputMixin:
 
     def on_goal_command(self, message):
         """Accept one atomic GoalManager pose-plus-intent transaction."""
+        # Local import keeps AST-extracted unit fixtures working without
+        # re-declaring the ownership helpers in their namespace.
+        from utils.route_ownership import (
+            classify_route_ownership,
+            graph_route_admission_error,
+            observation_identity,
+        )
         try:
             payload = json.loads(message.data)
         except (TypeError, ValueError, json.JSONDecodeError):
@@ -232,6 +247,8 @@ class TebGoalBridgeMissionInputMixin:
             )
         except (TypeError, ValueError):
             return
+        route_ownership = classify_route_ownership(payload)
+        work_item_id, attempt_id = observation_identity(payload)
         frame = str(payload.get("frame_id", self.global_frame)).strip().lstrip("/")
         if not frame:
             frame = self.global_frame
@@ -260,15 +277,22 @@ class TebGoalBridgeMissionInputMixin:
                 normalized_source == "global_slam_frontier"
                 and route_id > 0
             )
-            if graph_route and graph_transaction_id <= 0:
-                self.publish_bridge_status(
-                    "mission_goal_ignored",
-                    reason="missing_graph_transaction_id",
-                    route_id=route_id,
-                    map_epoch=map_epoch,
-                    transaction_id=transaction_id,
+            if graph_route:
+                admission_error = graph_route_admission_error(
+                    payload, route_id=route_id, source=normalized_source,
                 )
-                return
+                if admission_error:
+                    self.publish_bridge_status(
+                        "mission_goal_ignored",
+                        reason=admission_error,
+                        route_id=route_id,
+                        map_epoch=map_epoch,
+                        transaction_id=transaction_id,
+                        work_item_id=work_item_id,
+                        attempt_id=attempt_id,
+                        route_ownership=route_ownership,
+                    )
+                    return
             raw_goal_context = payload.get("goal_context")
             normalized_goal_context = normalize_goal_context(raw_goal_context)
             context_graph_transaction_id = int(
@@ -552,6 +576,9 @@ class TebGoalBridgeMissionInputMixin:
                 projection_epoch or map_epoch or None
             )
             self.latest_graph_transaction_id = graph_transaction_id
+            self.latest_route_ownership = route_ownership
+            self.latest_work_item_id = work_item_id
+            self.latest_attempt_id = attempt_id
             self.latest_graph_action = str(
                 payload.get("graph_action", "") or ""
             ).strip().lower()

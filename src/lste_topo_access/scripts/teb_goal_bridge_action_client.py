@@ -63,6 +63,11 @@ class TebGoalBridgeActionClientMixin:
             "graph_transaction_id": int(
                 getattr(self, "latest_graph_transaction_id", 0) or 0
             ),
+            "route_ownership": str(
+                getattr(self, "latest_route_ownership", "graph")
+            ),
+            "work_item_id": getattr(self, "latest_work_item_id", None),
+            "attempt_id": getattr(self, "latest_attempt_id", None),
             "epoch": self._effective_action_epoch_locked(),
             "map_epoch": map_epoch,
             "origin_epoch": getattr(self, "latest_origin_epoch", None),
@@ -580,6 +585,11 @@ class TebGoalBridgeActionClientMixin:
             "graph_transaction_id": int(
                 getattr(self, "latest_graph_transaction_id", 0) or 0
             ),
+            "route_ownership": str(
+                getattr(self, "latest_route_ownership", "graph")
+            ),
+            "work_item_id": getattr(self, "latest_work_item_id", None),
+            "attempt_id": getattr(self, "latest_attempt_id", None),
             "epoch": self._effective_action_epoch_locked(),
             "map_epoch": self.active_route_map_epoch,
             "origin_epoch": self.active_origin_epoch,
@@ -732,6 +742,11 @@ class TebGoalBridgeActionClientMixin:
             "graph_transaction_id": int(
                 getattr(self, "active_graph_transaction_id", 0) or 0
             ),
+            "route_ownership": str(
+                getattr(self, "latest_route_ownership", "graph")
+            ),
+            "work_item_id": getattr(self, "latest_work_item_id", None),
+            "attempt_id": getattr(self, "latest_attempt_id", None),
             "mission_route_kind": self.active_mission_route_kind,
             "source_goal": [
                 round(source_goal.pose.position.x, 3),

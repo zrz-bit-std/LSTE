@@ -10,6 +10,8 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 from teb_local_planner.msg import FeedbackMsg
 
+from utils.route_ownership import normalize_ownership
+
 
 class CmdVelMuxNode:
     def __init__(self):
@@ -625,6 +627,10 @@ class CmdVelMuxNode:
             active_graph_transaction_id = int(
                 payload.get("active_action_graph_transaction_id", 0) or 0
             )
+            route_ownership = (
+                normalize_ownership(payload.get("route_ownership")) or "graph"
+            )
+            graph_owned = route_ownership != "observation"
             route_id = int(payload.get("route_id", 0) or 0)
             planner_route_id = int(payload.get("planner_route_id", 0) or 0)
             active_route_id = int(
@@ -673,6 +679,7 @@ class CmdVelMuxNode:
             "active_action_transaction_id": active_transaction_id,
             "graph_transaction_id": graph_transaction_id,
             "planner_graph_transaction_id": planner_graph_transaction_id,
+            "route_ownership": route_ownership,
             "active_action_graph_transaction_id": active_graph_transaction_id,
             "route_id": route_id,
             "planner_route_id": planner_route_id,
@@ -728,7 +735,8 @@ class CmdVelMuxNode:
             elif nonzero and active_transaction_id not in (0, transaction_id):
                 reason = "active_transaction_mismatch"
             elif (
-                nonzero
+                graph_owned
+                and nonzero
                 and route_id > 0
                 and graph_transaction_id <= 0
                 and (
@@ -737,10 +745,15 @@ class CmdVelMuxNode:
                 )
             ):
                 reason = "missing_graph_transaction_id"
-            elif nonzero and graph_transaction_id != planner_graph_transaction_id:
+            elif (
+                graph_owned
+                and nonzero
+                and graph_transaction_id != planner_graph_transaction_id
+            ):
                 reason = "graph_transaction_mismatch"
             elif (
-                nonzero
+                graph_owned
+                and nonzero
                 and active_graph_transaction_id > 0
                 and graph_transaction_id != active_graph_transaction_id
             ):

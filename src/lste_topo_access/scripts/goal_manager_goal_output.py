@@ -56,12 +56,11 @@ class GoalManagerGoalOutputMixin:
             )
             return False
         if source == "global_slam_frontier":
-            fields = (
+            ownership = str(
+                getattr(self, "canonical_route_ownership", "graph")
+            )
+            fields = [
                 ("route_id", getattr(self, "global_frontier_route_id", 0)),
-                (
-                    "graph_transaction_id",
-                    getattr(self, "global_frontier_graph_transaction_id", 0),
-                ),
                 ("map_epoch", self._canonical_map_epoch()),
                 (
                     "origin_epoch",
@@ -71,7 +70,21 @@ class GoalManagerGoalOutputMixin:
                     "projection_epoch",
                     getattr(self, "global_frontier_projection_epoch", 0),
                 ),
-            )
+            ]
+            # Graph-owned routes (portal probe/crossing, durable work-item
+            # actions) must still present their durable transaction.  An
+            # observation route owns no graph transaction; a zero sentinel is
+            # legal and its work-item attempt is the owner token instead.
+            if ownership != "observation":
+                fields.insert(
+                    1,
+                    (
+                        "graph_transaction_id",
+                        getattr(
+                            self, "global_frontier_graph_transaction_id", 0
+                        ),
+                    ),
+                )
             for name, value in fields:
                 try:
                     valid = int(value or 0) > 0
@@ -84,6 +97,20 @@ class GoalManagerGoalOutputMixin:
                         source=source,
                     )
                     return False
+            if ownership == "observation":
+                work_item_id = int(
+                    getattr(self, "canonical_work_item_id", 0) or 0
+                )
+                attempt_id = int(
+                    getattr(self, "canonical_attempt_id", 0) or 0
+                )
+                if work_item_id > 0 and attempt_id <= 0:
+                    self.publish_goal_arbitration(
+                        "canonical_identity_rejected",
+                        reason="missing_observation_attempt_id",
+                        source=source,
+                    )
+                    return False
         elif self._canonical_map_epoch() <= 0:
             # Target routes are a higher-priority semantic owner, but still
             # execute against the last map snapshot issued by Global Frontier.
@@ -93,17 +120,30 @@ class GoalManagerGoalOutputMixin:
                 source=str(source or "unknown"),
             )
             return False
-        elif (
-            int(getattr(self, "global_frontier_route_id", 0) or 0) <= 0
-            or int(getattr(self, "global_frontier_graph_transaction_id", 0) or 0)
-            <= 0
-        ):
-            self.publish_goal_arbitration(
-                "canonical_identity_rejected",
-                reason="missing_inherited_route_identity",
-                source=str(source or "unknown"),
+        else:
+            # Target routes inherit the active frontier route identity.  An
+            # observation route has no graph transaction, so requiring one
+            # here would drop every target approach detected from a GP work
+            # item.  Keep the inherited route id strict and only require the
+            # graph id for graph-owned routes.
+            ownership = str(
+                getattr(self, "canonical_route_ownership", "graph")
             )
-            return False
+            inherited_route_id = int(
+                getattr(self, "global_frontier_route_id", 0) or 0
+            )
+            inherited_graph_id = int(
+                getattr(self, "global_frontier_graph_transaction_id", 0) or 0
+            )
+            if inherited_route_id <= 0 or (
+                ownership != "observation" and inherited_graph_id <= 0
+            ):
+                self.publish_goal_arbitration(
+                    "canonical_identity_rejected",
+                    reason="missing_inherited_route_identity",
+                    source=str(source or "unknown"),
+                )
+                return False
         return True
 
     @staticmethod
@@ -514,6 +554,15 @@ class GoalManagerGoalOutputMixin:
             intent["graph_transaction_id"] = int(
                 getattr(self, "global_frontier_graph_transaction_id", 0) or 0
             )
+            intent["route_ownership"] = str(
+                getattr(self, "canonical_route_ownership", "graph")
+            )
+            work_item_id = int(getattr(self, "canonical_work_item_id", 0) or 0)
+            attempt_id = int(getattr(self, "canonical_attempt_id", 0) or 0)
+            if work_item_id > 0:
+                intent["work_item_id"] = work_item_id
+            if attempt_id > 0:
+                intent["attempt_id"] = attempt_id
         if self.goal_source.startswith("target_"):
             intent["target_epoch"] = int(self.target_observation_epoch)
             intent["route_kind"] = "direct_goal"
@@ -533,6 +582,19 @@ class GoalManagerGoalOutputMixin:
             intent["graph_transaction_id"] = int(
                 getattr(self, "global_frontier_graph_transaction_id", 0) or 0
             )
+            intent["route_ownership"] = str(
+                getattr(self, "canonical_route_ownership", "graph")
+            )
+            target_work_item_id = int(
+                getattr(self, "canonical_work_item_id", 0) or 0
+            )
+            target_attempt_id = int(
+                getattr(self, "canonical_attempt_id", 0) or 0
+            )
+            if target_work_item_id > 0:
+                intent["work_item_id"] = target_work_item_id
+            if target_attempt_id > 0:
+                intent["attempt_id"] = target_attempt_id
             intent["map_epoch"] = (
                 self._canonical_map_epoch()
                 if getattr(self, "global_frontier_enabled", False)
