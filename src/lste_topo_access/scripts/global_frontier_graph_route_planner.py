@@ -34,6 +34,13 @@ ACTION_PROBE_PORTAL = "probe_portal"
 ACTION_CROSS_PORTAL = "cross_portal"
 ACTION_HOLD = "hold"
 
+# A top-ranked semantic Portal entry can be blocked while its destination is
+# outside the current map projection.  Hold it only for a bounded number of
+# planner ticks, then let lower-ranked entries / generic work run; retry the
+# top entry after a short epoch cooldown.
+SEMANTIC_ENTRY_PROJECTION_MAX_MISSES = 5
+SEMANTIC_ENTRY_PROJECTION_COOLDOWN_EPOCHS = 10
+
 _COVERED_STATES = {"dormant", "ready_to_exit", "suspended", "transit"}
 _PORTAL_TRANSIT_STATES = {"crossed"}
 _UNBOUND_PORTAL_STATES = {"certified", "selected"}
@@ -527,6 +534,12 @@ class GraphRoutePlanner:
     first edge and replans after the corresponding physical crossing.
     """
 
+    def __init__(self):
+        # Keyed by (current_place_id, portal_id).  A missing projection is a
+        # transient map condition, not a permanent semantic barrier.
+        self._semantic_entry_projection_misses = {}
+        self._semantic_entry_projection_deferred_until = {}
+
     def plan(
         self,
         current_place_id,
@@ -929,6 +942,39 @@ class GraphRoutePlanner:
                 return record
             return None
 
+        def _durable_entry_portal(entry_item):
+            """Return the exact Portal record owned by this entry WorkItem.
+
+            An observation-authenticated Portal already has a destination
+            Place, so it is no longer in ``unbound_by_place`` and its state is
+            still ``certified`` (not ``crossed``).  The entry WorkItem is the
+            explicit obligation to traverse that bound edge, so the identity
+            query must accept it; otherwise the door is silently filtered out
+            of the graph and the robot waits forever before the gate.
+            """
+            portal_id = _positive_id(entry_item.get("portal_id"))
+            if portal_id is None:
+                return None
+            legal_states = _UNBOUND_PORTAL_STATES | _PORTAL_TRANSIT_STATES
+            for record in portal_records:
+                if _positive_id(record.get("id")) != portal_id:
+                    continue
+                if _positive_id(record.get("source_place_id")) != current:
+                    continue
+                if bool(record.get("exploration_suppressed", False)):
+                    continue
+                if str(record.get("state", "")).strip().lower() not in legal_states:
+                    continue
+                gate = record.get("physical_gate") or record.get("map_gate")
+                destination = (
+                    record.get("physical_destination")
+                    or record.get("map_destination")
+                )
+                if gate is None or destination is None:
+                    continue
+                return record
+            return None
+
         if room_work_item_only:
             # Explore only the SLAM WorkItems assigned to the selected GP
             # entrance arm. Sibling-arm WorkItems remain unresolved durable
@@ -966,6 +1012,23 @@ class GraphRoutePlanner:
             if entries:
                 record = _portal_for_ranked_entry(entries[0])
                 if record is None:
+                    # The room visit may already own a pre-created destination
+                    # Place, in which case the certified edge is bound rather
+                    # than unbound.  Resolve that exact identity before
+                    # declaring the child doorway unprojectable.
+                    record = _durable_entry_portal(entries[0])
+                if record is None:
+                    entry_item = entries[0]
+                    try:
+                        gate_x = float(entry_item.get("x"))
+                        gate_y = float(entry_item.get("y"))
+                    except (TypeError, ValueError):
+                        gate_x = gate_y = None
+                    if gate_x is not None and gate_y is not None:
+                        return self._local(
+                            current, entry_item,
+                            "semantic_portal_entry_gate_approach",
+                        )
                     return GraphRoutePlan(PLAN_BLOCKED, ACTION_HOLD,
                         current_place_id=current, obligation_kind="portal_entry",
                         obligation_id=int(entries[0]["id"]),
@@ -1165,10 +1228,58 @@ class GraphRoutePlanner:
                 portal = _portal_for_ranked_entry(entry_item)
                 if portal is None:
                     if portal_id in deferred_portal_ids:
-                        # Skip only a Portal with explicit controller-failure
-                        # backoff. An unprojected top-ranked Portal still blocks
-                        # lower semantic entries until its geometry is visible.
                         continue
+                    durable_portal = _durable_entry_portal(entry_item)
+                    if durable_portal is not None:
+                        durable_id = _positive_id(durable_portal.get("id"))
+                        return self._cross(
+                            current,
+                            (None, (durable_id,), "portal_edge", durable_id),
+                            "semantic_priority_portal_entry_work_item:%d"
+                            % int(entry_item["id"]),
+                        )
+                    # The entry WorkItem already carries the doorway gate goal
+                    # (not the unprojected destination).  Dispatch it as a
+                    # local observation before giving up on the crossing.
+                    try:
+                        entry_goal_x = float(entry_item.get("x"))
+                        entry_goal_y = float(entry_item.get("y"))
+                    except (TypeError, ValueError):
+                        entry_goal_x = entry_goal_y = None
+                    if entry_goal_x is not None and entry_goal_y is not None:
+                        return self._local(
+                            current, entry_item,
+                            "semantic_portal_entry_gate_approach",
+                        )
+                    key = (current, portal_id)
+                    if map_epoch is not None:
+                        try:
+                            epoch = int(map_epoch)
+                        except (TypeError, ValueError):
+                            epoch = None
+                        if epoch is not None:
+                            deferred_until = (
+                                self._semantic_entry_projection_deferred_until.get(
+                                    key, -1
+                                )
+                            )
+                            if epoch < deferred_until:
+                                # This exact top-ranked Portal already spent its
+                                # bounded projection window; let lower-ranked
+                                # entries or generic work run until the cooldown
+                                # expires.
+                                continue
+                            misses = (
+                                self._semantic_entry_projection_misses.get(key, 0)
+                                + 1
+                            )
+                            self._semantic_entry_projection_misses[key] = misses
+                            if misses >= SEMANTIC_ENTRY_PROJECTION_MAX_MISSES:
+                                self._semantic_entry_projection_deferred_until[
+                                    key
+                                ] = epoch + SEMANTIC_ENTRY_PROJECTION_COOLDOWN_EPOCHS
+                                self._semantic_entry_projection_misses[key] = 0
+                                continue
                     return GraphRoutePlan(
                         PLAN_BLOCKED, ACTION_HOLD,
                         current_place_id=current,
@@ -1177,6 +1288,12 @@ class GraphRoutePlanner:
                         first_portal_id=portal_id,
                         reason="semantic_priority_portal_entry_projection_pending",
                     )
+                self._semantic_entry_projection_misses.pop(
+                    (current, portal_id), None
+                )
+                self._semantic_entry_projection_deferred_until.pop(
+                    (current, portal_id), None
+                )
                 return self._cross(
                     current,
                     (None, (portal_id,), "portal_edge", portal_id),
@@ -1185,12 +1302,17 @@ class GraphRoutePlanner:
                 )
 
 
-        # After all ranked semantic Portal entries have been serviced, put
-        # the exact WorkItem suspended for the junction observation back at
-        # the front of the source Place queue.  Otherwise branch-first may
-        # immediately cross another newly discovered Portal and leave the
-        # pre-existing exploration obligation suspended indefinitely.
-        if resume_work_item is not None:
+        # The frozen source WorkItem is deliberately NOT resumed after a
+        # semantic Portal observation.  Continuation belongs to the ranked
+        # Portal-entry WorkItem of the highest-semantic child Place; only when
+        # no such entry exists may the old source obligation be resumed.
+        semantic_entry_pending = any(
+            _positive_id(item.get("place_id")) == current
+            and str(item.get("state", "")).strip().lower() == "unresolved"
+            and _positive_id(item.get("portal_id")) is not None
+            for item in portal_entry_items
+        )
+        if resume_work_item is not None and not semantic_entry_pending:
             resume_owner = None
             resume_record = None
             for place_id, items in unresolved_work.items():

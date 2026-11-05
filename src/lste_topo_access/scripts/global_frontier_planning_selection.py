@@ -11,6 +11,31 @@ from global_frontier_graph_route_gate import (
 )
 
 
+
+
+def portal_gate_approach_candidate(candidate):
+    """Turn a source-phase Portal probe tuple into a plain gate approach.
+
+    The highest-semantic Portal entry can be unprojectable because its
+    destination is outside the current map.  The source-phase probe already
+    carries a reachable viewpoint on the robot's side of the same doorway.
+    Reuse that viewpoint as an observation-owned frontier endpoint so TEB can
+    drive toward the doorway, expand the map, and let the next plan select the
+    real Portal entry/crossing.
+    """
+    if not isinstance(candidate, (tuple, list)) or len(candidate) < 16:
+        return None
+    approach = list(candidate)
+    while len(approach) < 23:
+        approach.append(None)
+    approach[10] = "frontier_endpoint"
+    approach[15] = None          # not a portal probe lease
+    approach[17] = "portal_gate_approach"
+    approach[18] = "durable_probe_source_approach"
+    approach[20] = False
+    approach[22] = None          # no portal authentication phase
+    return tuple(approach)
+
 class GlobalFrontierPlanningSelectionMixin:
 
     def _current_graph_snapshot_prepare_kwargs(self, snapshot_epoch):
@@ -253,37 +278,98 @@ class GlobalFrontierPlanningSelectionMixin:
                 "epoch",
                 None,
             )
+            cooldowns = getattr(self, "durable_probe_cooldown_until", None)
+            if (
+                isinstance(cooldowns, dict)
+                and snapshot_epoch is not None
+                and int(snapshot_epoch) < int(cooldowns.get(probe_id, -1))
+            ):
+                # This probe already failed to materialize in this map epoch.
+                # Let the ordinary WI / geometry / turn selector run instead
+                # of returning the same unbounded wait every tick.
+                return None, None, False
             graph_plan = graph_prepare(
                 map_epoch=snapshot_epoch,
                 visible_work_item_ids=(),
                 visible_probe_ids=(probe_id,),
                 visible_portal_ids=(),
             )
-            if (
-                graph_plan is None
-                or getattr(graph_plan, "status", None) != PLAN_READY
-                or not callable(commit)
-                or not commit(
+            if graph_plan is None:
+                approach = portal_gate_approach_candidate(candidate)
+                if approach is not None:
+                    self.publish_status(
+                        "portal_gate_approach_selected",
+                        probe_id=int(probe_id),
+                        goal=[
+                            round(float(approach[2]), 3),
+                            round(float(approach[3]), 3),
+                        ],
+                        gate=(
+                            None
+                            if len(approach) <= 11 or approach[11] is None
+                            else [
+                                round(float(approach[11][0]), 3),
+                                round(float(approach[11][1]), 3),
+                            ]
+                        ),
+                        reason="durable_probe_source_approach",
+                    )
+                    return approach, "portal_gate_approach", False
+            committed = bool(
+                graph_plan is not None
+                and getattr(graph_plan, "status", None) == PLAN_READY
+                and callable(commit)
+                and commit(
                     graph_plan,
                     candidate,
                     source="durable_portal_probe_fallback",
                 )
-            ):
+            )
+            if committed:
+                failures = getattr(self, "durable_probe_failures", None)
+                if isinstance(failures, dict):
+                    failures.pop(probe_id, None)
+                return candidate, "durable_portal_probe", False
+            failures = getattr(self, "durable_probe_failures", None)
+            if not isinstance(failures, dict):
+                failures = {}
+            misses = int(failures.get(probe_id, 0) or 0) + 1
+            failures[probe_id] = misses
+            self.durable_probe_failures = failures
+            reason = (
+                "durable_probe_fallback_unmaterializable"
+                if graph_plan is None
+                else "durable_probe_fallback_plan_not_committed"
+            )
+            if misses >= 2 and snapshot_epoch is not None:
+                cooldowns = getattr(self, "durable_probe_cooldown_until", None)
+                if not isinstance(cooldowns, dict):
+                    cooldowns = {}
+                cooldowns[probe_id] = int(snapshot_epoch) + 10
+                self.durable_probe_cooldown_until = cooldowns
+                failures[probe_id] = 0
                 self.publish_status(
-                    "graph_route_materialization_wait",
-                    action=(
-                        None if graph_plan is None else graph_plan.action
-                    ),
-                    obligation_kind=(
-                        None
-                        if graph_plan is None else graph_plan.obligation_kind
-                    ),
-                    obligation_id=(
-                        None if graph_plan is None else graph_plan.obligation_id
-                    ),
-                    reason="durable_probe_fallback_plan_not_committed",
+                    "durable_probe_fallback_deferred",
+                    probe_id=int(probe_id),
+                    reason=reason,
+                    map_epoch=int(snapshot_epoch),
+                    cooldown_epochs=10,
                 )
-                return None, "graph_route_materialization_wait", True
+                return None, reason, False
+            self.publish_status(
+                "graph_route_materialization_wait",
+                action=(
+                    None if graph_plan is None else graph_plan.action
+                ),
+                obligation_kind=(
+                    None if graph_plan is None else graph_plan.obligation_kind
+                ),
+                obligation_id=(
+                    None if graph_plan is None else graph_plan.obligation_id
+                ),
+                reason=reason,
+            )
+            return None, "graph_route_materialization_wait", True
         self.graph_route_probe_id = None
         return candidate, "durable_portal_probe", False
 
@@ -644,6 +730,23 @@ class GlobalFrontierPlanningSelectionMixin:
                 durable_probe_checked = True
                 if candidate is not None or wait_for_validation:
                     return candidate, selection_mode, wait_for_validation
+            elif (
+                graph_plan is not None
+                and getattr(graph_plan, "status", None) == "blocked"
+                and str(getattr(graph_plan, "reason", "") or "")
+                == "semantic_priority_portal_entry_projection_pending"
+            ):
+                # The highest-semantic Portal entry is not yet in the map
+                # projection.  Do not hold the whole selector: let the
+                # geometry/turn path run so the robot can look toward the
+                # gate, expand the projection, and retry the entry later.
+                self.publish_status(
+                    "semantic_portal_entry_projection_geometry_fallback",
+                    first_portal_id=graph_plan.first_portal_id,
+                    obligation_id=graph_plan.obligation_id,
+                    reason=graph_plan.reason,
+                )
+                # fall through to terminal-prefetch / geometry / turn
             else:
                 # A complete plan, or a blocked plan caused by an unrelated
                 # invariant, remains a hard barrier for this selector pass.

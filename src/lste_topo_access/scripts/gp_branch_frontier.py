@@ -5,6 +5,7 @@ import rospy
 from gp_branch_discovery import PolarGaussianProcess, entrance_geometry, angle_delta, map_ranges, junction_anchor, has_local_fork, has_confirmed_three_way_fan
 from gp_exploration_tree import ExplorationTree
 from gp_observation_tree import JunctionObservationTree
+from global_frontier_semantic_belief import semantic_room_score
 from global_frontier_portal_authentication import DoorwayAuthentication
 from global_frontier_execution_resolution import portal_authentication_retry_budget
 from global_frontier_place_partition import branch_opening_width, branch_gate_xy
@@ -298,6 +299,12 @@ class GPBranchFrontierMixin:
             return int(task.node_id)
         return None
 
+    def _gp_room_semantic_score(self, labels):
+        """Score one observed room with the current task's S_env vocabulary."""
+        belief = getattr(self, "semantic_place_belief", None)
+        intent = None if belief is None else belief.intent
+        return semantic_room_score(intent, labels)
+
     def tree_observations_for_authentication(self, tree, observations):
         task = getattr(self, "junction_portal_authentication", None)
         if (task is not None and task.active_branch_id is not None
@@ -317,7 +324,9 @@ class GPBranchFrontierMixin:
             return
         if not hasattr(self,'gp_exploration_tree'):
             self.gp_exploration_tree=ExplorationTree()
-            self.gp_observation_tree=JunctionObservationTree()
+            self.gp_observation_tree=JunctionObservationTree(
+                semantic_scorer=self._gp_room_semantic_score,
+            )
             self.gp_direction_model=PolarGaussianProcess()
         tree=self.gp_exploration_tree
         active_auth = getattr(self, 'active_portal_authentication', lambda: None)()

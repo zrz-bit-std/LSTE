@@ -295,6 +295,14 @@ class GoalManagerGoalArbitrationMixin:
         # GoalManager transaction for the same route and race the predecessor
         # lease-release ACK.  Only a strictly newer route may clear this
         # boundary.
+        turn_only = any(
+            str(getattr(self, name, "") or "").strip().lower()
+            == "frontier_turn_connector"
+            for name in (
+                "global_frontier_route_kind",
+                "global_frontier_mission_route_kind",
+            )
+        )
         if (
             self.teb_terminal_goal is not None
             and self.last_goal_source == "global_slam_frontier"
@@ -302,6 +310,7 @@ class GoalManagerGoalArbitrationMixin:
             and int(getattr(self, "last_published_frontier_route_id", 0) or 0) > 0
             and int(getattr(self, "global_frontier_route_id", 0) or 0)
             <= int(getattr(self, "last_published_frontier_route_id", 0) or 0)
+            and not turn_only
         ):
             rospy.loginfo_throttle(
                 2.0,

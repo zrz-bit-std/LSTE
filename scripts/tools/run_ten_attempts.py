@@ -222,6 +222,31 @@ def run_attempt(campaign, number, args, config):
                         str(metrics), "--world", str(args.world),
                         "--output-dir", str(directory / "visualization")],
                        stdout=stream, stderr=subprocess.STDOUT, timeout=300, check=False)
+        # Second per-run figure: measured route with WI dispatch indices,
+        # physically committed Place tree, and actual DFS transactions.
+        subprocess.run([sys.executable, str(WS / "scripts/tools/plot_place_dfs.py"),
+                        str(metrics), "--world", str(args.world),
+                        "--output", str(directory / "visualization"
+                                        / (run + "_place_dfs.png"))],
+                       stdout=stream, stderr=subprocess.STDOUT, timeout=300, check=False)
+        # The per-run visualization contract is exactly two PNGs.  Keep the
+        # summary in sync so downstream tooling can discover both without
+        # re-deriving filenames.
+        summary_path = directory / "visualization" / "visualization_summary.json"
+        place_figure = directory / "visualization" / (run + "_place_dfs.png")
+        if summary_path.exists() and place_figure.exists():
+            try:
+                report = json.loads(summary_path.read_text())
+                figures = [
+                    str(value) for value in report.get("figures", ())
+                    if str(value).lower().endswith(".png")
+                ]
+                if str(place_figure) not in figures:
+                    figures.append(str(place_figure))
+                report["figures"] = figures
+                summary_path.write_text(json.dumps(report, indent=2) + "\n")
+            except (OSError, ValueError, TypeError):
+                pass
 
     audit_path = directory / (run + "_audit.json")
     audit = subprocess.run([sys.executable, str(WS / "scripts/tools/audit_search_attempt.py"),

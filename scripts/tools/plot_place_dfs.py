@@ -65,10 +65,60 @@ def main():
         if d['xy'] is None:continue
         route.scatter(*d['xy'],marker='s',s=28,c=colors.get(d['place'],'#333333'),zorder=5)
         route.annotate(str(d['index']),d['xy'],xytext=(3,3),textcoords='offset points',fontsize=7)
+    # The Place tree alone loses where each committed Place is on the route.
+    # Label it at the durable Portal destination used for the crossing (the
+    # root Place uses the first measured pose).  Only physically entered
+    # Places in the DFS snapshot are labeled; pre-created but unvisited
+    # destinations stay off the route panel.
+    roots={p for p,n in nodes.items() if n.get('parent_id') is None}
+    place_xy={}
+    for p in nodes:
+        if p in roots and len(poses):
+            place_xy[p]=(float(poses[0][0]),float(poses[0][1]))
+            continue
+        edge=portals.get(nodes[p].get('portal_id'))
+        if not isinstance(edge,dict):continue
+        xy=edge.get('physical_destination') or edge.get('map_destination')
+        if xy is None:continue
+        place_xy[p]=(float(xy[0]),float(xy[1]))
+    # Semantic destinations created by GP doorway observation but not yet
+    # committed by a DFS crossing.  They exist in Place memory and own a
+    # destination witness, so omitting them makes an observed room look
+    # unexplored.  Draw them dashed and neutral, never as committed Places.
+    observed_xy={}
+    for portal in portals.values():
+        destination=portal.get('destination_place_id')
+        try:destination=int(destination)
+        except (TypeError,ValueError):continue
+        if destination in nodes or destination in roots:continue
+        xy=portal.get('physical_destination') or portal.get('map_destination')
+        if xy is None:continue
+        observed_xy[destination]=(float(xy[0]),float(xy[1]))
+    for index,p in enumerate(sorted(observed_xy)):
+        xy=observed_xy[p]
+        near=min((float(np.hypot(xy[0]-cx,xy[1]-cy)) for cx,cy in place_xy.values()),
+                 default=99.0)
+        route.scatter(*xy,s=280,facecolors='none',edgecolors='#7c8798',
+                      linewidths=1.3,linestyles='--',zorder=6,
+                      label='Observed destination (not committed yet)' if index==0 else None)
+        route.annotate('P%d obs'%p,xy,xytext=(-44,-16) if near<0.8 else (8,-13),
+                       textcoords='offset points',fontsize=8.5,style='italic',
+                       color='#5b6675',zorder=7,
+                       bbox=dict(boxstyle='round,pad=.16',facecolor='white',
+                                 edgecolor='none',alpha=.85))
+    for index,p in enumerate(sorted(place_xy)):
+        xy=place_xy[p]
+        route.scatter(*xy,s=300,facecolors='none',edgecolors=colors.get(p,'#333333'),
+                      linewidths=2.0,zorder=8,label='Committed Place' if index==0 else None)
+        route.annotate('P%d'%p,xy,xytext=(8,7),textcoords='offset points',fontsize=10,
+                       weight='bold',color=colors.get(p,'#333333'),zorder=9,
+                       bbox=dict(boxstyle='round,pad=.2',facecolor='white',
+                                 edgecolor='none',alpha=.88))
     route.set_aspect('equal',adjustable='box')
-    route.set(xlim=(poses[:,0].min()-2,poses[:,0].max()+2),ylim=(poses[:,1].min()-2,poses[:,1].max()+2),
-              xlabel='Odometry x (m)',ylabel='Odometry y (m)',title='Measured route and WI dispatch indices')
-    route.grid(alpha=.15);route.legend(fontsize=8)
+    route.set(xlim=(poses[:,0].min()-3,poses[:,0].max()+3),ylim=(poses[:,1].min()-3,poses[:,1].max()+3),
+              xlabel='Odometry x (m)',ylabel='Odometry y (m)',
+              title='Measured route, committed Places and WI dispatch indices')
+    route.grid(alpha=.15);route.legend(fontsize=8,loc="upper right")
     # Tree edges represent physical Portal commits, never GP candidates alone.
     positions={};leaf=[0]
     def position(place,depth=0):

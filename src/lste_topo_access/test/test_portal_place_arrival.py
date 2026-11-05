@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import numpy as np
 from types import SimpleNamespace
 import unittest
 
@@ -20,10 +21,18 @@ if not hasattr(rospy, "logwarn"):
     rospy.logwarn = lambda *_args, **_kwargs: None
 
 from global_frontier_place_memory import FrontierRegionMemory
+from global_frontier_work_items import WORK_RESOLVED, PlaceWorkItemLedger
 from global_frontier_models import PendingPortalArrival
 from global_frontier_portal_transaction import PortalTransaction
 from global_frontier_portal_belief import PortalHypothesisLedger
 from global_frontier_portal_lifecycle import GlobalFrontierPortalLifecycleMixin
+from global_frontier_portal_arrival_commit import (
+    GlobalFrontierPortalArrivalCommitMixin,
+)
+from global_frontier_portal_authentication import (
+    destination_returns_into_source_place,
+)
+from global_frontier_work_items import PlaceWorkItemLedger
 
 
 class PortalExplorer(GlobalFrontierPortalLifecycleMixin):
@@ -788,3 +797,181 @@ class PortalPlaceArrivalTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SemanticEntryPlaceCommitTest(unittest.TestCase):
+    def test_crossing_into_the_destination_resolves_the_semantic_entry(self):
+        explorer = PortalExplorer()
+        source, _tier = explorer.region_memory.enter(
+            5.0, 4.0, now=1.0, component=explorer.active_frontier_component,
+        )
+        explorer.region_memory.endpoint_observed(
+            5.0, 4.0, now=2.0,
+            component=explorer.active_frontier_component,
+            region_id=source["id"],
+        )
+        explorer.place_departure.region_id = source["id"]
+        explorer.portal_hypothesis_ledger = PortalHypothesisLedger()
+        edge, _created = explorer.portal_hypothesis_ledger.certify(
+            source["id"],
+            explorer.active_portal_gate_odom_xy,
+            explorer.active_portal_destination_odom_xy,
+            now=2.0,
+        )
+        explorer.last_portal_hypothesis_id = edge["id"]
+        transaction = PortalTransaction()
+        transaction.start(
+            explorer.active_route_id,
+            portal_id=edge["id"],
+            source_place_id=source["id"],
+            gate_xy=explorer.active_portal_gate_odom_xy,
+            destination_xy=explorer.active_portal_destination_odom_xy,
+            source_side_proven=True,
+        )
+        transaction.crossing_verified(explorer.active_route_id)
+        explorer.portal_transaction = transaction
+        explorer.place_work_items = PlaceWorkItemLedger(0.5, 0.5)
+        entry = explorer.place_work_items.ensure_portal_entry(
+            edge["id"], source["id"], (7.2, 4.0), 1, 0.95, 2.0,
+        )
+        explorer.place_work_items.dispatch_existing(
+            entry, 2.5, viewpoint_xy=(7.2, 4.0),
+        )
+        self.assertEqual(
+            explorer.place_work_items._items[entry]["state"], "unresolved",
+        )
+
+        entered = explorer.record_portal_place_arrival(
+            (10, 20, 8.0, 4.0), now=3.0,
+        )
+
+        self.assertIsNotNone(entered)
+        item = explorer.place_work_items._items[entry]
+        self.assertEqual(item["state"], WORK_RESOLVED)
+        self.assertIsNone(explorer.place_work_items.active_attempt_id(entry))
+        self.assertEqual(
+            item["last_reason"], "portal_destination_place_committed",
+        )
+        resolved = [
+            event for event, fields in explorer.events
+            if event == "portal_entry_work_item_resolved"
+        ]
+        self.assertTrue(resolved)
+
+
+class DestinationSelfLoopTest(unittest.TestCase):
+    def _memory(self):
+        memory = FrontierRegionMemory(
+            radius=3.0,
+            information_delta=8,
+            stagnation_timeout=12,
+            failure_limit=2,
+            limit=16,
+        )
+        source, _tier = memory.enter(3.4, 0.0, now=1.0)
+        return memory, source
+
+    def test_destination_back_inside_the_source_place_is_a_self_loop(self):
+        memory, source = self._memory()
+        node = SimpleNamespace()  # no live Place partition: identity fallback
+        self.assertTrue(
+            destination_returns_into_source_place(
+                node, (4.082, -0.646), source["id"], region_memory=memory,
+            )
+        )
+        self.assertFalse(
+            destination_returns_into_source_place(
+                node, (9.523, -0.097), source["id"], region_memory=memory,
+            )
+        )
+
+    def test_live_place_mask_identifies_the_source_side(self):
+        node = SimpleNamespace(
+            current_place_scope_mask=np.ones((20, 20), dtype=bool),
+            current_place_scope_message=SimpleNamespace(
+                info=SimpleNamespace(
+                    resolution=1.0,
+                    origin=SimpleNamespace(
+                        position=SimpleNamespace(x=0.0, y=0.0),
+                    ),
+                ),
+            ),
+            current_place_scope_valid=True,
+            current_place_scope_id=1,
+            current_physical_place_id=1,
+        )
+        self.assertTrue(
+            destination_returns_into_source_place(node, (4.0, 0.5), 1)
+        )
+
+
+class PromotionHost(GlobalFrontierPortalArrivalCommitMixin):
+    def __init__(self):
+        self.region_memory = FrontierRegionMemory(
+            radius=3.0,
+            information_delta=8,
+            stagnation_timeout=12,
+            failure_limit=2,
+            limit=16,
+        )
+        self.portal_hypothesis_ledger = PortalHypothesisLedger()
+        self.place_work_items = PlaceWorkItemLedger(0.5, 0.5)
+        self.events = []
+        self.place_dfs = SimpleNamespace(
+            nodes={
+                1: {"place_id": 1, "state": "exploring"},
+                2: {"place_id": 2, "state": "exploring"},
+                3: {"place_id": 3, "state": "exploring"},
+            },
+            stack=[1],
+        )
+
+    def publish_status(self, event, **fields):
+        self.events.append((event, fields))
+
+
+class NextSemanticPortalPromotionTest(unittest.TestCase):
+    def _host(self):
+        host = PromotionHost()
+        source, _tier = host.region_memory.enter(3.4, 0.0, now=1.0)
+        east, _tier = host.region_memory.enter(9.5, -0.1, now=1.0)
+        upper, _tier = host.region_memory.enter(6.75, 4.0, now=1.0)
+        loop, _created = host.portal_hypothesis_ledger.certify(
+            source["id"], (5.44, -0.22), (4.08, -0.65), now=2.0,
+        )
+        loop["destination_place_id"] = upper["id"]
+        loop["semantic_priority"] = 2
+        loop["semantic_score"] = -0.69
+        loop["exploration_suppressed"] = True
+        east_edge, _created = host.portal_hypothesis_ledger.certify(
+            source["id"], (8.12, -0.11), (9.52, -0.10), now=2.0,
+        )
+        east_edge["destination_place_id"] = east["id"]
+        east_edge["semantic_priority"] = 3
+        east_edge["semantic_score"] = -0.69
+        return host, source, east, upper, loop, east_edge
+
+    def test_next_deferred_portal_becomes_an_entry_work_item(self):
+        host, source, east, upper, loop, east_edge = self._host()
+
+        entry = host._promote_next_semantic_portal(source["id"], now=5.0)
+
+        self.assertIsNotNone(entry)
+        item = host.place_work_items._items[entry]
+        self.assertEqual(item["kind"], "portal_entry")
+        self.assertEqual(item["portal_id"], east_edge["id"])
+        self.assertEqual(item["place_id"], source["id"])
+        self.assertEqual((item["x"], item["y"]), (8.12, -0.11))
+        self.assertIsNone(
+            host._promote_next_semantic_portal(source["id"], now=6.0)
+        )
+        self.assertEqual(
+            host.events[-1][0], "portal_entry_work_item_promoted",
+        )
+
+    def test_completed_destination_is_not_promoted(self):
+        host, source, east, upper, loop, east_edge = self._host()
+        host.place_dfs.nodes[east["id"]]["state"] = "completed"
+        self.assertIsNone(
+            host._promote_next_semantic_portal(source["id"], now=5.0)
+        )

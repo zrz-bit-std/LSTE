@@ -13,6 +13,7 @@ keeps detector confidence and map resolution out of the exploration policy.
 """
 
 import json
+import math
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -102,6 +103,11 @@ class SemanticTaskIntent:
     target_terms: frozenset
     context_terms: frozenset
     negative_terms: frozenset
+    # Object-level environment evidence used for S_env-style room ranking.
+    # ``context_terms`` intentionally also contains free-text location/layout
+    # priors for Place policy; those tokens would dilute an object coverage
+    # ratio, so room ranking keeps its own compact term set.
+    room_terms: frozenset = frozenset()
 
     @property
     def active(self):
@@ -155,12 +161,31 @@ def task_intent_from_message(task, task_version=""):
     # A negative clue must not accidentally become a positive context signal
     # when a task repeats the same noun in a different field.
     context_terms.difference_update(negative_terms)
+    # S_env (src/lste_core/scripts/scoring/calc_s_env.py) scores a frame from
+    # object-level environment coverage minus negative clues.  For room
+    # ranking the environment prior is the task's related structures plus its
+    # target-context neighbours (e.g. chair + monitor for an office desk
+    # search).  Target-adjacent key objects stay out of this denominator so a
+    # high-confidence negative clue cannot hide a genuine environment room.
+    room_values = []
+    room_values.extend(list(getattr(task, "env_related_structures", []) or []))
+    room_values.extend(
+        value
+        for value in (
+            getattr(task, "ctx_left", ""),
+            getattr(task, "ctx_right", ""),
+        )
+        if value
+    )
+    room_terms = set(_terms(room_values))
+    room_terms.difference_update(negative_terms)
     return SemanticTaskIntent(
         task_id=task_id,
         task_version=str(task_version or ""),
         target_terms=frozenset(target_terms),
         context_terms=frozenset(context_terms),
         negative_terms=negative_terms,
+        room_terms=frozenset(room_terms),
     )
 
 
@@ -196,6 +221,55 @@ def semantic_place_action(
     ):
         return "context_place"
     return "expand_unobserved_portal"
+
+
+def _logistic01(value, midpoint, steepness):
+    """Mirror the S_env compression used by calc_s_env.py."""
+    if value <= 0:
+        return 0.0
+    if value >= 1:
+        return 1.0
+    try:
+        return 1.0 / (1.0 + math.exp(-steepness * (value - midpoint)))
+    except OverflowError:
+        return 0.0 if value < midpoint else 1.0
+
+
+def semantic_room_score(intent, labels):
+    """Return the task-conditioned S_env room score for detected labels.
+
+    The GP observation tree used to rank rooms by mean detector confidence,
+    which makes a high-confidence ``fire hydrant`` outrank a room that
+    actually matches the task environment.  This applies the same qualitative
+    logic as ``calc_s_env``: unique object-level environment terms are
+    positive coverage, task negative clues are penalised, and the result is
+    clamped to [-1, 1].  ``None`` means the task supplies no usable evidence,
+    so the caller keeps its legacy detector-confidence fallback.
+    """
+    if intent is None or not intent.room_terms or not labels:
+        return None
+    positive = set(intent.room_terms)
+    negative = set(intent.negative_terms)
+    positive_hits = set()
+    negative_hits = set()
+    for label in labels:
+        tokens = set(semantic_tokens(label))
+        positive_hits.update(tokens & positive)
+        negative_hits.update(tokens & negative)
+    positive_ratio = (
+        len(positive_hits) / len(positive) if positive else 0.0
+    )
+    negative_ratio = (
+        len(negative_hits) / len(negative) if negative else 0.0
+    )
+    # Parameters mirror calc_s_env defaults: lambda_neg=0.7,
+    # positive (midpoint=0.4, steepness=10), negative (midpoint=0.15,
+    # steepness=12).  Keeping them aligned avoids a second semantic policy.
+    score = (
+        _logistic01(positive_ratio, 0.4, 10.0)
+        - 0.7 * _logistic01(negative_ratio, 0.15, 12.0)
+    )
+    return max(-1.0, min(1.0, score))
 
 
 class SemanticPlaceBelief:

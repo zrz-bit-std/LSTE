@@ -339,6 +339,34 @@ class GlobalFrontierPortalEgressMixin:
             required_depth,
         )
         if cell is None or route_steps[cell] < 0:
+            # The destination side is outside the current map projection.  The
+            # doorway itself is on the source side and is reachable, so drive
+            # to the gate first; the next map update can re-plan the crossing.
+            gate_cell = self.nearest_reachable_cell(
+                message, route_steps,
+                projection.gate_xy[0], projection.gate_xy[1],
+            )
+            if gate_cell is not None and route_steps[gate_cell] >= 0:
+                grow, gcol = gate_cell
+                gx, gy = self.cell_xy(message, grow, gcol)
+                gate_distance = float(route_steps[grow, gcol]) * resolution
+                self.publish_status(
+                    "portal_gate_approach_selected",
+                    portal_id=int(portal_id),
+                    gate=[round(float(value), 3) for value in projection.gate_xy],
+                    goal=[round(float(gx), 3), round(float(gy), 3)],
+                    path_distance=round(gate_distance, 3),
+                    reason="destination_side_not_reachable",
+                )
+                return (
+                    int(grow), int(gcol), float(gx), float(gy), gate_distance,
+                    0.0, 0.0, -gate_distance, None, 1, "frontier_endpoint",
+                    projection.gate_xy,
+                    record.get("semantic_entry_work_item_id"),
+                    None, 0, None, False,
+                    "portal_gate_approach", "durable_portal_gate_approach",
+                    portal_id, preobserved,
+                )
             self._report_durable_portal_crossing_unavailable(
                 portal_id, "destination_side_not_reachable",
             )
@@ -500,6 +528,32 @@ class GlobalFrontierPortalEgressMixin:
         publish = getattr(self, "publish_status", None)
         if callable(publish):
             publish("durable_portal_egress_unavailable", **report)
+
+    def _egress_is_dfs_parent_return(self, destination_region):
+        """Return whether the graph plan is the current DFS stack return.
+
+        A completed child Place and its parent are both covered, so the
+        generic covered-to-covered guard treats the return edge as a
+        back-track with no durable progress and suppresses it forever.  The
+        DFS return is structural progress: it is the only way the stack can
+        resume the parent's remaining obligations.  Scope the exception to
+        the exact planner reason and target Place, never to arbitrary
+        covered-to-covered motion.
+        """
+        plan = getattr(self, "last_graph_route_plan", None)
+        if plan is None:
+            return False
+        reason = str(getattr(plan, "reason", "") or "")
+        if not reason.startswith(
+            "dfs_place_and_children_complete_return_to_parent"
+        ):
+            return False
+        try:
+            target = int(getattr(plan, "target_place_id", -1))
+            destination = int(destination_region.get("id", -2))
+        except (AttributeError, TypeError, ValueError):
+            return False
+        return target > 0 and target == destination
 
     def _covered_portal_transit_is_allowed(self, source_region, destination_region):
         """Permit covered transit only when the durable graph has progress."""
@@ -930,8 +984,11 @@ class GlobalFrontierPortalEgressMixin:
                 last_unavailable_fields = {}
                 continue
             destination_region = reverse_exit[0]
-            if not self._covered_portal_transit_is_allowed(
-                region, destination_region,
+            if not (
+                self._egress_is_dfs_parent_return(destination_region)
+                or self._covered_portal_transit_is_allowed(
+                    region, destination_region,
+                )
             ):
                 self.last_portal_covered_cycle_skips = int(
                     getattr(self, "last_portal_covered_cycle_skips", 0)

@@ -157,6 +157,12 @@ def render_attempt(result, world):
             output.write('\nNative plotting process exited %d; one bounded retry follows.\n' % code)
             output.flush()
             time.sleep(2)
+        subprocess.run([sys.executable, '-X', 'faulthandler',
+                        str(WS/'scripts/tools/plot_place_dfs.py'),
+                        result['source_log'], '--world', str(world),
+                        '--output', str(directory/'visualization'
+                                        /(result['run']+'_place_dfs.png'))],
+                       stdout=output, stderr=subprocess.STDOUT, timeout=180)
     save(directory/'attempt_result.json', result)
 
 

@@ -7,6 +7,11 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from gp_observation_tree import JunctionObservationTree
+from global_frontier_semantic_belief import (
+    semantic_room_score,
+    task_intent_from_message,
+)
+from types import SimpleNamespace
 from global_frontier_portal_authentication import (
     DoorwayAuthentication,
     GlobalFrontierPortalAuthenticationMixin,
@@ -373,3 +378,46 @@ class NegativeSemanticPortalLifecycleTest(unittest.TestCase):
         self.assertNotEqual(states[room_item_id]["state"], "resolved")
         self.assertNotIn("room_work_item_ids_dismissed", runtime.gp_exploration_tree.branches[branch_id])
         self.assertGreater(work_items.unresolved_count(2), 0)
+
+
+class TaskSemanticRoomRankingTest(unittest.TestCase):
+    def test_environment_room_outranks_high_confidence_fire_hydrant(self):
+        task = SimpleNamespace(
+            task_id="yellow_cup",
+            target_name="yellow cup",
+            target_attributes=["yellow", "ceramic"],
+            env_related_structures=["office desk", "monitor", "chair"],
+            env_type_prior=["office workspace"],
+            obj_key_objects=["computer monitor", "other mugs"],
+            obj_negative_clues=[
+                "door", "fire hydrant", "fire extinguisher",
+            ],
+            ctx_left="monitor",
+            ctx_right="monitor",
+            raw_json="",
+        )
+        intent = task_intent_from_message(task, "version-a")
+        tree = JunctionObservationTree(
+            semantic_scorer=lambda labels: semantic_room_score(intent, labels),
+        )
+        for branch_id, detections in (
+            (10, [{"label": "fire hydrant", "score": 0.96}]),
+            (11, [{"label": "fire hydrant", "score": 0.91}]),
+            (12, [{"label": "chair", "score": 0.78},
+                  {"label": "monitor", "score": 0.78}]),
+        ):
+            tree.begin(2, branch_id, 0.0)
+            tree.observe(2, branch_id, detections, 1.0)
+            tree.finish_room(2, branch_id, valid=True, place_id=branch_id)
+
+        ranked = tree.finish_junction(2)
+
+        self.assertEqual([room["branch_id"] for room in ranked], [12, 10, 11])
+        self.assertEqual(ranked[0]["semantic_score_source"], "task_environment")
+        self.assertGreater(ranked[0]["semantic_score"], 0.0)
+        self.assertLess(ranked[1]["semantic_score"], 0.0)
+        self.assertLess(ranked[2]["semantic_score"], 0.0)
+        # A negative score lowers priority; it does not invalidate a room
+        # that was physically observed and successfully authenticated.
+        self.assertTrue(all(room["state"] == "observed" for room in ranked))
+        self.assertTrue(all(not room["exploration_suppressed"] for room in ranked))

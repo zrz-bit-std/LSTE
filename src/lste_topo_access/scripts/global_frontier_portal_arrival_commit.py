@@ -198,6 +198,135 @@ class GlobalFrontierPortalArrivalCommitMixin:
         if room_stack:
             room_stack.pop()
         self.active_semantic_room = room_stack[-1] if room_stack else None
+        try:
+            parent_place_id = int(destination_place_id)
+        except (TypeError, ValueError):
+            parent_place_id = 0
+        if parent_place_id > 0:
+            self._promote_next_semantic_portal(parent_place_id, now)
+
+    def _promote_next_semantic_portal(self, parent_place_id, now):
+        """Reactivate the next deferred semantic doorway after a room closes.
+
+        Only the top-ranked Portal owns an entry WorkItem during observation.
+        When that child Place completes and the robot returns, the lower-ranked
+        certified destinations have no WorkItem left, so the planner holds on
+        ``unobserved_place_has_no_certified_graph_path``.  Promote the next
+        durable semantic edge for the parent Place so DFS can continue.
+        """
+        try:
+            parent_place_id = int(parent_place_id)
+        except (TypeError, ValueError):
+            return None
+        if parent_place_id <= 0:
+            return None
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        items = getattr(self, "place_work_items", None)
+        memory = getattr(self, "region_memory", None)
+        if ledger is None or items is None or memory is None:
+            return None
+        try:
+            records = ledger.snapshot()
+            work_items = items.snapshot()
+        except (AttributeError, TypeError):
+            return None
+        existing = set()
+        for item in work_items:
+            if (
+                str(item.get("kind", "")) == "portal_entry"
+                and str(item.get("state", "")).strip().lower() == "unresolved"
+            ):
+                try:
+                    existing.add(int(item.get("portal_id")))
+                except (TypeError, ValueError):
+                    pass
+        dfs = getattr(self, "place_dfs", None)
+        nodes = getattr(dfs, "nodes", {}) if dfs is not None else {}
+        stack = set(getattr(dfs, "stack", []) or []) if dfs is not None else set()
+        completed = {
+            int(place_id)
+            for place_id, node in nodes.items()
+            if str(node.get("state", "")).strip().lower() == "completed"
+        }
+        candidates = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            try:
+                source = int(record.get("source_place_id"))
+                portal_id = int(record.get("id"))
+                destination = int(record.get("destination_place_id"))
+            except (TypeError, ValueError):
+                continue
+            if source != parent_place_id or destination <= 0:
+                continue
+            if destination == parent_place_id or destination in completed:
+                continue
+            if destination in stack and destination != parent_place_id:
+                # Returning through an ancestor is reverse egress, not a new
+                # semantic entry.
+                continue
+            if bool(record.get("exploration_suppressed", False)):
+                continue
+            if str(record.get("state", "")).strip().lower() not in (
+                "certified", "selected", "crossed",
+            ):
+                continue
+            if portal_id in existing:
+                continue
+            if memory.by_id(destination) is None:
+                continue
+            gate = record.get("physical_gate") or record.get("map_gate")
+            if not isinstance(gate, (list, tuple)) or len(gate) < 2:
+                continue
+            try:
+                priority = int(record.get("semantic_priority") or 10 ** 9)
+            except (TypeError, ValueError):
+                priority = 10 ** 9
+            candidates.append((priority, portal_id, destination, record))
+        if not candidates:
+            return None
+        priority, portal_id, destination, record = min(
+            candidates, key=lambda candidate: (candidate[0], candidate[1]),
+        )
+        prune = getattr(items, "prune_frontier_observations", None)
+        if callable(prune):
+            prune(
+                parent_place_id, now,
+                reason="next_semantic_portal_promoted",
+            )
+        ensure = getattr(items, "ensure_portal_entry", None)
+        if not callable(ensure):
+            return None
+        gate = record.get("physical_gate") or record.get("map_gate")
+        entry_id = ensure(
+            portal_id,
+            parent_place_id,
+            (float(gate[0]), float(gate[1])),
+            priority,
+            record.get("semantic_score"),
+            now,
+        )
+        if entry_id is None:
+            return None
+        live = None
+        get_record = getattr(ledger, "get", None)
+        if callable(get_record):
+            live = get_record(portal_id)
+        if isinstance(live, dict):
+            live["semantic_entry_work_item_id"] = int(entry_id)
+        self.publish_status(
+            "portal_entry_work_item_promoted",
+            portal_id=int(portal_id),
+            work_item_id=int(entry_id),
+            place_id=int(parent_place_id),
+            destination_place_id=int(destination),
+            priority=int(priority),
+            semantic_score=record.get("semantic_score"),
+            gate=[round(float(gate[0]), 3), round(float(gate[1]), 3)],
+            reason="next_semantic_portal_after_room_completion",
+        )
+        return int(entry_id)
 
     def _resume_semantic_room_arrival(self, active_room, place_id, portal_id):
         if active_room is None or int(active_room.get("place_id", -1)) != int(place_id):
@@ -706,6 +835,40 @@ class GlobalFrontierPortalArrivalCommitMixin:
                         now,
                         event_id="portal:%d:route:%d"
                         % (int(crossed["id"]), int(arrival.route_id)),
+                    )
+        # Crossing into the destination Place fulfils the semantic doorway
+        # entry obligation.  This is the only event allowed to close it:
+        # reaching the gate or observing its source-side approach does not.
+        destination_owner = (
+            None if crossed is None else crossed.get("destination_place_id")
+        )
+        if destination_owner is None and isinstance(hypothesis, dict):
+            destination_owner = hypothesis.get("destination_place_id")
+        try:
+            entry_fulfilled = (
+                portal_id > 0
+                and destination_owner is not None
+                and int(destination_owner) == int(region["id"])
+            )
+        except (TypeError, ValueError):
+            entry_fulfilled = False
+        if entry_fulfilled:
+            item_ledger = getattr(self, "place_work_items", None)
+            resolve_entry = getattr(item_ledger, "resolve_portal_entry", None)
+            if callable(resolve_entry):
+                resolved_entry = resolve_entry(
+                    portal_id, now,
+                    reason="portal_destination_place_committed",
+                )
+                if resolved_entry is not None:
+                    self.publish_status(
+                        "portal_entry_work_item_resolved",
+                        portal_id=int(portal_id),
+                        work_item_id=int(resolved_entry["id"]),
+                        place_id=int(resolved_entry.get("place_id", -1)),
+                        destination_place_id=int(region["id"]),
+                        route_id=int(arrival.route_id),
+                        reason="portal_destination_place_committed",
                     )
         # Destination-place commit is the atomic boundary of a Portal
         # transaction.  Do not leave the source departure lease pending until

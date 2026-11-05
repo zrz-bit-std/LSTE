@@ -20,6 +20,16 @@ sys.modules.setdefault(
         logwarn_throttle=lambda *_args, **_kwargs: None,
     ),
 )
+# Another test module may have installed a narrower rospy stub first.  Make the
+# shared shim complete instead of depending on import order.
+for _rospy_name in ("logwarn", "logwarn_throttle", "logerr", "loginfo",
+                    "loginfo_throttle", "get_param", "get_param_names", "has_param"):
+    if not hasattr(sys.modules["rospy"], _rospy_name):
+        setattr(
+            sys.modules["rospy"],
+            _rospy_name,
+            lambda *_args, **_kwargs: None,
+        )
 
 from global_frontier_portal_belief import PortalHypothesisLedger
 from global_frontier_portal_egress import GlobalFrontierPortalEgressMixin
@@ -507,6 +517,40 @@ class PortalEgressTest(unittest.TestCase):
             explorer.events[-1][1]["reason"],
             "covered_to_covered_without_graph_progress",
         )
+
+    def test_covered_to_covered_dfs_parent_return_is_allowed(self):
+        explorer = CoveredTransitEgressExplorer(with_progress=False)
+        explorer.last_graph_route_plan = SimpleNamespace(
+            reason="dfs_place_and_children_complete_return_to_parent",
+            target_place_id=1,
+        )
+
+        candidate = explorer.select_durable_portal_egress(snapshot())
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate[10], "portal_transition")
+        self.assertEqual(explorer.last_portal_covered_cycle_skips, 0)
+        self.assertEqual(explorer.events[-1][0], "durable_portal_egress_selected")
+
+    def test_covered_egress_ignores_a_non_parent_dfs_target(self):
+        explorer = CoveredTransitEgressExplorer(with_progress=False)
+        explorer.last_graph_route_plan = SimpleNamespace(
+            reason="dfs_place_and_children_complete_return_to_parent",
+            target_place_id=3,
+        )
+
+        self.assertIsNone(explorer.select_durable_portal_egress(snapshot()))
+        self.assertEqual(explorer.last_portal_covered_cycle_skips, 1)
+
+    def test_covered_egress_ignores_other_graph_reasons(self):
+        explorer = CoveredTransitEgressExplorer(with_progress=False)
+        explorer.last_graph_route_plan = SimpleNamespace(
+            reason="dfs_certified_child_before_parent_work",
+            target_place_id=1,
+        )
+
+        self.assertIsNone(explorer.select_durable_portal_egress(snapshot()))
+        self.assertEqual(explorer.last_portal_covered_cycle_skips, 1)
 
     def test_covered_to_covered_egress_can_reach_unobserved_branch(self):
         explorer = CoveredTransitEgressExplorer(with_progress=True)

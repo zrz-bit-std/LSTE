@@ -294,7 +294,11 @@ def main():
     parser.add_argument('--world', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--model-root', type=Path, action='append')
+    parser.add_argument('--formats', default='png',
+                        help='Comma-separated figure formats (default: png)')
     args = parser.parse_args()
+    formats = [value.strip().lower() for value in str(args.formats).split(',')
+               if value.strip() in ('png', 'pdf', 'svg')] or ['png']
     roots = args.model_root or [Path.home()/'.gazebo/models']
     shapes, target, missing = read_scene(args.world, roots)
     records = read_records(args.log)
@@ -446,7 +450,7 @@ def main():
         fig.text(.06,.012,'Time origin: first recorded pose sample; run_start ROS clock was not ready (0 before saved-world clock loaded).',fontsize=7,color='#64748b')
     output = args.output_dir;output.mkdir(parents=True,exist_ok=True)
     stem = output/(run+'_env04_'+('success' if successful else 'failure')+'_trajectory')
-    for suffix in ['png','pdf','svg']:
+    for suffix in formats:
         fig.savefig(str(stem)+'.'+suffix,dpi=350,facecolor='white')
     plt.close(fig)
     with (output/'trajectory_samples.csv').open('w',newline='') as stream:
@@ -471,7 +475,7 @@ def main():
             'stop_reason':attempt.get('reason'),'stall_pose':attempt.get('stall_pose'),
             'omitted_gap_segments':int(np.count_nonzero(~valid)),'gap_limit_sim_s':gap_limit,
             'final_exposure_frames':{'matched':matched,'exposed':exposed},
-            'missing_meshes':missing,'figures':[str(stem)+'.'+s for s in ['png','pdf','svg']]}
+            'missing_meshes':missing,'figures':[str(stem)+'.'+s for s in formats]}
     (output/'visualization_summary.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))
 

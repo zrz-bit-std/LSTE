@@ -15,6 +15,7 @@ from global_frontier_semantic_belief import (
     SemanticPlaceBelief,
     matched_terms,
     semantic_place_action,
+    semantic_room_score,
     semantic_tokens,
     task_intent_from_message,
 )
@@ -143,3 +144,24 @@ class SemanticBeliefTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SemanticRoomScoreTest(unittest.TestCase):
+    def test_negative_clue_rooms_rank_below_environment_rooms(self):
+        intent = task_intent_from_message(
+            task(obj_negative_clues=[
+                "door", "fire hydrant", "fire extinguisher",
+            ]),
+            "version-a",
+        )
+        fire = semantic_room_score(intent, ["fire hydrant"])
+        environment = semantic_room_score(intent, ["chair", "monitor"])
+        self.assertLess(fire, 0.0)
+        self.assertGreater(environment, 0.0)
+        self.assertGreater(environment, fire)
+
+    def test_room_score_requires_a_task_vocabulary(self):
+        self.assertIsNone(semantic_room_score(None, ["chair"]))
+        self.assertIsNone(
+            semantic_room_score(task_intent_from_message(None), ["chair"])
+        )

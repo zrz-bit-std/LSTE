@@ -8,9 +8,14 @@ import math
 
 
 class JunctionObservationTree:
-    def __init__(self, stable_window_ratio=0.6, negative_score=-1.0):
+    def __init__(self, stable_window_ratio=0.6, negative_score=-1.0,
+                 semantic_scorer=None):
         self.stable_window_ratio = min(1.0, max(0.25, float(stable_window_ratio)))
         self.negative_score = float(negative_score)
+        # Optional pure callable: labels -> score | None.  ``None`` keeps the
+        # legacy mean detector confidence, so ROS-free tests and baselines
+        # without a semantic task remain unchanged.
+        self.semantic_scorer = semantic_scorer
         self.junctions = {}
 
     def begin(self, junction_id, branch_id, relative_heading):
@@ -27,6 +32,8 @@ class JunctionObservationTree:
                 "invalidated": False,
                 "exploration_suppressed": False,
                 "semantic_score": None,
+                "semantic_score_source": None,
+                "detector_confidence_score": None,
                 "priority": None,
                 "place_id": None,
                 "work_item_ids": [],
@@ -49,6 +56,7 @@ class JunctionObservationTree:
         room["exploration_suppressed"] = True
         room["invalidated"] = bool(invalidated)
         room["semantic_score"] = self.negative_score
+        room["semantic_score_source"] = "pruned"
         room["priority"] = None
         room["frames"] = []
         room["labels"] = []
@@ -115,6 +123,7 @@ class JunctionObservationTree:
             room["state"] = "invalidated"
             room["exploration_suppressed"] = True
             room["semantic_score"] = self.negative_score
+            room["semantic_score_source"] = "invalid"
             room["labels"] = []
             room["stable_frame_count"] = 0
             return room
@@ -122,10 +131,25 @@ class JunctionObservationTree:
         detections = [item for frame in stable for item in frame["detections"]]
         room["stable_frame_count"] = len(stable)
         room["labels"] = sorted(set(item["label"] for item in detections))
-        room["semantic_score"] = (
+        detector_score = (
             self.negative_score if not detections
             else sum(item["score"] for item in detections) / len(detections)
         )
+        room["detector_confidence_score"] = detector_score
+        task_score = None
+        if detections and callable(self.semantic_scorer):
+            try:
+                task_score = self.semantic_scorer(room["labels"])
+            except (TypeError, ValueError):
+                task_score = None
+        if task_score is None:
+            room["semantic_score"] = detector_score
+            room["semantic_score_source"] = (
+                "unavailable" if not detections else "detector_confidence"
+            )
+        else:
+            room["semantic_score"] = float(task_score)
+            room["semantic_score_source"] = "task_environment"
         # A completed physical certification is valid even when WeDetect
         # supplied no stable labels. Unknown semantics ranks last; it is not
         # evidence that this child subtree has been explored or rejected.

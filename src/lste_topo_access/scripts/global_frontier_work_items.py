@@ -546,11 +546,68 @@ class PlaceWorkItemLedger:
                 continue
             if item.get("state") == WORK_RESOLVED:
                 return item
+            active = self._active_attempt(item)
+            if active is not None:
+                self._finish_active_attempt(
+                    item, ATTEMPT_SUCCEEDED, now, reason,
+                )
             item["state"] = WORK_RESOLVED
             item["last_reason"] = str(reason)
             item["updated_at"] = float(now)
             return item
         return None
+
+    def prune_frontier_observations(self, place_id, now, reason="semantic_portal_entry_selected"):
+        """Resolve every source-Place frontier observation before a semantic entry.
+
+        The highest-semantic Portal becomes the only active obligation.  Keeping
+        the old local observation WIs alive makes them compete with the doorway
+        entry and produces the repeated micro-route churn.
+        """
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return []
+        pruned = []
+        for item in self._items.values():
+            if (int(item.get("place_id", -1)) != place_id
+                    or item.get("kind") != "frontier_observation"
+                    or item.get("state") != WORK_UNRESOLVED):
+                continue
+            active = self._active_attempt(item)
+            if active is not None:
+                self._finish_active_attempt(
+                    item, ATTEMPT_SUSPENDED, now, reason,
+                )
+            item["state"] = WORK_RESOLVED
+            item["dismissed"] = True
+            item["resolution"] = "superseded_by_semantic_portal_entry"
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            pruned.append(int(item["id"]))
+        return pruned
+
+    def defer_portal_entries(self, place_id, keep_portal_id, now,
+                             reason="lower_semantic_priority_deferred"):
+        """Keep only the top semantic Portal entry active in this Place."""
+        try:
+            place_id, keep_portal_id = int(place_id), int(keep_portal_id)
+        except (TypeError, ValueError):
+            return []
+        deferred = []
+        for item in self._items.values():
+            if (int(item.get("place_id", -1)) != place_id
+                    or item.get("kind") != "portal_entry"
+                    or int(item.get("portal_id", -1)) == keep_portal_id
+                    or item.get("state") == WORK_RESOLVED):
+                continue
+            item["state"] = WORK_RESOLVED
+            item["dismissed"] = True
+            item["resolution"] = "deferred_lower_semantic_priority"
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            deferred.append(int(item["id"]))
+        return deferred
 
     def dispatch(self, place_id, xy, now, map_epoch=None):
         """Create or reserve the one work item represented by ``xy``."""
@@ -597,6 +654,11 @@ class PlaceWorkItemLedger:
         """Resolve work only from observation evidence, never route failure."""
         item = self._items.get(item_id)
         if item is None:
+            return None
+        if item.get("kind") == "portal_entry":
+            # Reaching or observing the doorway is not entering the Place.
+            # Only resolve_portal_entry() after the destination Place commit
+            # may close this semantic entry.
             return None
         active = self._active_attempt(item)
         if active is not None:
@@ -692,6 +754,11 @@ class PlaceWorkItemLedger:
         for item in self._items.values():
             if int(item.get("place_id", -1)) != place_id or item.get("state") != WORK_UNRESOLVED:
                 continue
+            if item.get("kind") == "portal_entry":
+                # The semantic doorway entry is the source Place's final exit
+                # obligation.  Source-place cleanup must not consume it; only
+                # resolve_portal_entry() may close it after the crossing.
+                continue
             attempt = self._active_attempt(item)
             if attempt is not None:
                 self._finish_active_attempt(item, ATTEMPT_SUSPENDED, now, reason)
@@ -723,6 +790,9 @@ class PlaceWorkItemLedger:
         scoped = isinstance(branch_scope, dict)
         for item in self._items.values():
             if int(item.get("place_id", -1)) != place_id or item.get("state") != WORK_UNRESOLVED:
+                continue
+            if item.get("kind") == "portal_entry":
+                # Keep the semantic entry alive across a scoped arm close.
                 continue
             in_selected_arm = (
                 not scoped or work_item_belongs_to_branch(item, branch_scope)

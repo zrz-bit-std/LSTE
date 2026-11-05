@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import math
 
 from global_frontier_portal_crossing import portal_signed_distance, portal_section_destination
+from global_frontier_place_partition import point_in_place_scope
 
 
 def _xy(value):
@@ -16,6 +17,44 @@ def _xy(value):
 
 def _angle_delta(target, source):
     return math.atan2(math.sin(target - source), math.cos(target - source))
+
+
+def destination_returns_into_source_place(
+    node, destination_xy, source_place_id, region_memory=None,
+    physical_xy=None,
+):
+    """Return whether a doorway's inside witness is already the source Place.
+
+    GP authenticates one doorway per branch, so a branch whose "inside"
+    witness lands back in the room the robot already occupies must not mint a
+    second Place.  Prefer the live Place partition mask; fall back to durable
+    region identity only when no partition exists.
+    """
+    point = _xy(destination_xy)
+    try:
+        source_place_id = int(source_place_id)
+    except (TypeError, ValueError):
+        return False
+    if point is None or source_place_id <= 0:
+        return False
+    member = point_in_place_scope(node, point)
+    if member is True:
+        return True
+    if member is not True and region_memory is not None:
+        try:
+            _tier, region = region_memory.candidate_tier(
+                point[0], point[1], 0.0,
+                component=None,
+                physical_xy=physical_xy,
+            )
+        except (AttributeError, TypeError, ValueError):
+            region = None
+        try:
+            if region is not None and int(region.get("id", -1)) == source_place_id:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
 
 
 @dataclass
@@ -771,11 +810,46 @@ class GlobalFrontierPortalAuthenticationMixin:
             portal_id = tree_branch.get("canonical_portal_id")
             portal_ledger = getattr(self, "portal_hypothesis_ledger", None)
             portal = None if portal_ledger is None or portal_id is None else portal_ledger.get(portal_id)
+            destination_region = None
             if portal is not None and branch.state == "completed":
                 portal["gp_authentication_state"] = "completed"
                 portal["gp_authentication_node_id"] = int(task.node_id)
                 portal["gp_authentication_branch_id"] = int(branch.branch_id)
                 portal["gp_authentication_evidence"] = result
+                if portal.get("destination_place_id") is None:
+                    region_memory = getattr(self, "region_memory", None)
+                    map_goal = portal.get("map_destination")
+                    if (
+                        region_memory is not None
+                        and isinstance(map_goal, (list, tuple))
+                        and len(map_goal) >= 2
+                    ):
+                        destination_region, _tier = (
+                            region_memory.enter_new_portal_destination(
+                                float(map_goal[0]), float(map_goal[1]), now,
+                                component=None,
+                                entry_portal=portal.get("map_gate"),
+                                physical_xy=portal.get("physical_destination"),
+                                physical_entry_portal=portal.get("physical_gate"),
+                                source_place_id=portal.get("source_place_id"),
+                            )
+                        )
+                        if destination_region is not None:
+                            portal["destination_place_id"] = int(
+                                destination_region["id"]
+                            )
+                            destination_region["observed_by_portal_authentication"] = True
+                            destination_region["last_reason"] = (
+                                "observed_portal_destination_place"
+                            )
+                            self.publish_status(
+                                "portal_destination_place_created",
+                                portal_id=int(portal_id),
+                                place_id=int(destination_region["id"]),
+                                gate=portal.get("map_gate"),
+                                inside=portal.get("map_destination"),
+                                source_place_id=portal.get("source_place_id"),
+                            )
             observation_tree = getattr(self, "gp_observation_tree", None)
             if observation_tree is not None:
                 room = observation_tree.finish_room(
@@ -783,6 +857,17 @@ class GlobalFrontierPortalAuthenticationMixin:
                     valid=(branch.state == "completed"),
                 )
                 if room is not None:
+                    if destination_region is not None:
+                        destination_region["semantic_score"] = room.get(
+                            "semantic_score"
+                        )
+                        destination_region["semantic_priority"] = room.get(
+                            "priority"
+                        )
+                        destination_region["labels"] = list(
+                            room.get("labels", [])
+                        )
+                        room["place_id"] = int(destination_region["id"])
                     tree_branch["room_observation"] = {key: value for key, value in room.items() if key != "frames"}
                     tree_branch["semantic_score"] = room["semantic_score"]
                     tree_branch["room_semantic_score"] = room["semantic_score"]
@@ -807,6 +892,7 @@ class GlobalFrontierPortalAuthenticationMixin:
         if next_branch is None and task.all_finished() and observation_tree is not None:
             ranked = observation_tree.finish_junction(task.node_id)
             if tree is not None:
+                top_entry_created = False
                 for room in ranked:
                     item = tree.branches.get(int(room["branch_id"]))
                     if item is not None:
@@ -823,11 +909,157 @@ class GlobalFrontierPortalAuthenticationMixin:
                             portal["exploration_suppressed"] = bool(
                                 room.get("invalidated") or room.get("exploration_suppressed")
                             )
-                            if not portal["exploration_suppressed"]:
-                                entry_goal = portal.get("physical_destination")
+                            # Establish the observed destination Place now,
+                            # before any crossing.  The GP observation already
+                            # entered the room and produced a semantic score;
+                            # waiting for a later portal transaction leaves the
+                            # Place graph with only the source Place and makes
+                            # the semantic entry unprojectable.
+                            if portal.get("destination_place_id") is None:
+                                region_memory = getattr(self, "region_memory", None)
+                                map_goal = (
+                                    portal.get("map_destination")
+                                    or portal.get("physical_destination")
+                                )
+                                destination_goal = (
+                                    _xy(portal.get("physical_destination"))
+                                    or _xy(map_goal)
+                                )
+                                source_place_id = portal.get("source_place_id")
+                                if destination_returns_into_source_place(
+                                    self,
+                                    destination_goal,
+                                    source_place_id,
+                                    region_memory=region_memory,
+                                    physical_xy=portal.get("physical_destination"),
+                                ):
+                                    # The doorway observed by GP leads back into
+                                    # the Place the robot already occupies.  A
+                                    # new destination Place here is a duplicate
+                                    # (P3 == P1 in run 20261105_210329), so keep
+                                    # the source identity and retire the room.
+                                    try:
+                                        source_place_id = int(source_place_id)
+                                    except (TypeError, ValueError):
+                                        source_place_id = None
+                                    portal["destination_place_id"] = source_place_id
+                                    portal["self_loop"] = True
+                                    portal["exploration_suppressed"] = True
+                                    room["exploration_suppressed"] = True
+                                    room["place_id"] = source_place_id
+                                    self.publish_status(
+                                        "portal_destination_self_loop_suppressed",
+                                        portal_id=int(portal_id),
+                                        source_place_id=source_place_id,
+                                        gate=(
+                                            portal.get("physical_gate")
+                                            or portal.get("map_gate")
+                                        ),
+                                        destination=(
+                                            None if destination_goal is None
+                                            else [round(float(v), 3) for v in destination_goal]
+                                        ),
+                                        semantic_score=room.get("semantic_score"),
+                                        priority=room.get("priority"),
+                                        reason="doorway_destination_inside_source_place",
+                                    )
+                                elif (
+                                    region_memory is not None
+                                    and isinstance(map_goal, (list, tuple))
+                                    and len(map_goal) >= 2
+                                ):
+                                    destination_region, _tier = (
+                                        region_memory.enter_new_portal_destination(
+                                            float(map_goal[0]),
+                                            float(map_goal[1]),
+                                            now,
+                                            component=None,
+                                            entry_portal=(
+                                                portal.get("map_gate")
+                                                or portal.get("physical_gate")
+                                            ),
+                                            physical_xy=portal.get("physical_destination"),
+                                            physical_entry_portal=portal.get("physical_gate"),
+                                            source_place_id=portal.get("source_place_id"),
+                                        )
+                                    )
+                                    if destination_region is not None:
+                                        portal["destination_place_id"] = int(
+                                            destination_region["id"]
+                                        )
+                                        destination_region["semantic_score"] = room.get("semantic_score")
+                                        destination_region["semantic_priority"] = room.get("priority")
+                                        destination_region["labels"] = list(room.get("labels", []))
+                                        destination_region["observed_by_portal_authentication"] = True
+                                        destination_region["last_reason"] = "observed_portal_destination_place"
+                                        room["place_id"] = int(destination_region["id"])
+                                        self.publish_status(
+                                            "portal_destination_place_created",
+                                            portal_id=int(portal_id),
+                                            place_id=int(destination_region["id"]),
+                                            gate=portal.get("map_gate"),
+                                            inside=portal.get("map_destination"),
+                                            source_place_id=portal.get("source_place_id"),
+                                            semantic_score=room.get("semantic_score"),
+                                            priority=room.get("priority"),
+                                        )
+                            if (
+                                not portal["exploration_suppressed"]
+                                and not top_entry_created
+                            ):
+                                # Only the highest-semantic Portal gets an active
+                                # entry WorkItem.  Clear the source Place's local
+                                # observation WIs first, otherwise they compete
+                                # with the doorway entry and recreate the
+                                # micro-route churn.
+                                top_entry_created = True
+                                entry_goal = (
+                                    portal.get("physical_gate")
+                                    or portal.get("map_gate")
+                                    or portal.get("physical_destination")
+                                )
                                 source_place_id = portal.get("source_place_id")
                                 item_ledger = getattr(self, "place_work_items", None)
-                                ensure_entry = getattr(item_ledger, "ensure_portal_entry", None)
+                                pruned = []
+                                if item_ledger is not None:
+                                    prune = getattr(
+                                        item_ledger,
+                                        "prune_frontier_observations",
+                                        None,
+                                    )
+                                    if callable(prune):
+                                        pruned = prune(
+                                            source_place_id, now,
+                                            reason="semantic_portal_entry_selected",
+                                        )
+                                    defer_entries = getattr(
+                                        item_ledger,
+                                        "defer_portal_entries",
+                                        None,
+                                    )
+                                    if callable(defer_entries):
+                                        deferred_entries = defer_entries(
+                                            source_place_id, portal_id, now,
+                                            reason="lower_semantic_priority_deferred",
+                                        )
+                                        if deferred_entries:
+                                            self.publish_status(
+                                                "portal_lower_entries_deferred",
+                                                node_id=int(task.node_id),
+                                                portal_id=int(portal_id),
+                                                work_item_ids=list(deferred_entries),
+                                            )
+                                if pruned:
+                                    self.publish_status(
+                                        "portal_source_work_items_pruned",
+                                        node_id=int(task.node_id),
+                                        place_id=int(source_place_id),
+                                        work_item_ids=list(pruned),
+                                        reason="semantic_portal_entry_selected",
+                                    )
+                                ensure_entry = getattr(
+                                    item_ledger, "ensure_portal_entry", None
+                                )
                                 entry_id = (
                                     None if not callable(ensure_entry) else ensure_entry(
                                         portal_id, source_place_id, entry_goal,
@@ -847,6 +1079,11 @@ class GlobalFrontierPortalAuthenticationMixin:
                                         place_id=int(source_place_id), priority=int(room["priority"]),
                                         semantic_score=float(room["semantic_score"]), goal_xy=list(entry_goal),
                                     )
+                            elif not portal["exploration_suppressed"]:
+                                # Lower-scored rooms remain candidates in the
+                                # Portal ledger, but never own an active WI.
+                                portal["semantic_entry_work_item_id"] = None
+                                room["work_item_ids"] = []
                             entry_ready = bool(
                                 portal["exploration_suppressed"]
                                 or portal.get("semantic_entry_work_item_id") is not None

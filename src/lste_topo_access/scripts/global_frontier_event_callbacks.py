@@ -119,6 +119,7 @@ class GlobalFrontierEventCallbacksMixin:
             task_version=task_version or None,
             target_terms=sorted(self.semantic_place_belief.intent.target_terms),
             context_terms=sorted(self.semantic_place_belief.intent.context_terms),
+            room_terms=sorted(self.semantic_place_belief.intent.room_terms),
             negative_terms=sorted(self.semantic_place_belief.intent.negative_terms),
         )
 
