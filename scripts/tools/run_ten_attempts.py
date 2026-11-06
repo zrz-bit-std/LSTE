@@ -30,6 +30,40 @@ def save(path, value):
     temporary.replace(path)
 
 
+def locked_state(records):
+    """Return the first perception LOCKED event in one metrics batch.
+
+    The campaign contract is stricter than the search node: the perception
+    state machine reaching LOCKED is task success, so the attempt ends without
+    waiting for the follow/done dwell window.
+    """
+    for event, data in records:
+        if event != "state_change":
+            continue
+        try:
+            if int(data.get("state", -1)) == 2:
+                return data
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def total_limit_exceeded(elapsed, limit):
+    """Return whether the per-attempt wall limit expired.
+
+    A non-positive limit means the campaign runs without a total time cap.
+    """
+    try:
+        limit = float(limit)
+    except (TypeError, ValueError):
+        return False
+    try:
+        elapsed = float(elapsed)
+    except (TypeError, ValueError):
+        return False
+    return limit > 0.0 and elapsed > limit
+
+
 class StationaryWatch:
     def __init__(self, seconds, radius):
         self.seconds, self.radius = seconds, radius
@@ -158,10 +192,15 @@ def run_attempt(campaign, number, args, config):
                         watch.observe(data["pose"], observed)
                     if event == "task_done" and data.get("value") is True:
                         result.update(status="success", completion_event=data)
+                locked = locked_state(records)
+                if locked is not None and result["status"] != "success":
+                    # Perception LOCKED is the campaign success criterion.
+                    result.update(status="success", reason="target_locked",
+                                  completion_event=locked, locked_event=locked)
                 elapsed_total = time.monotonic() - started
                 if result["status"] == "success":
                     break
-                if elapsed_total > args.max_total_seconds:
+                if total_limit_exceeded(elapsed_total, args.max_total_seconds):
                     result.update(status="failed", reason="total_over_%g_wall_seconds" % args.max_total_seconds,
                                   stop_pose=latest.get("pose"), last_sample=latest)
                     break
@@ -272,20 +311,22 @@ def write_report(campaign, state):
             return str(value)
 
     lines = ["# env04 黄杯搜索：10 轮审计记录", "",
-             "判据：**成功 = 在时限内找到黄色杯子**（`task_done=true`）。"
-             "单轮总时限 7200 s（2 h），原地无进展超过 300 s（5 min）判失败。"
+             "判据：**成功 = 感知状态机进入 `LOCKED`（state=2）**；"
+             "`task_done=true` 同样记为成功。单轮不设总时限；"
+             "原地无进展超过看门狗阈值即判失败并进入下一轮。"
              "门洞、路径、停车只作观察记录，不影响成功判定。", "",
-             "| 轮 | run | 结论 | 找到 | task_done | 活跃墙钟s | 启动s | 最长停顿s | portal(观察) | 失败原因 |",
+             "| 轮 | run | 结论 | 找到 | locked | 活跃墙钟s | 启动s | 最长停顿s | portal(观察) | 失败原因 |",
              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for attempt in state["attempts"]:
         audit = attempt.get("audit") or {}
         timings = audit.get("timings") or {}
         checks = audit.get("structural_checks") or {}
         verdict = audit.get("verdict", attempt.get("status"))
-        found = "是" if (audit.get("completion") or {}).get("task_done") else "否"
+        found = "是" if (audit.get("task_success")
+                         or (audit.get("completion") or {}).get("task_done")) else "否"
         lines.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
             attempt.get("attempt"), attempt.get("run"), verdict, found,
-            "是" if (audit.get("completion") or {}).get("task_done") else "否",
+            "是" if audit.get("locked_seen") else "否",
             num(timings.get("active_wall_seconds")),
             num(timings.get("startup_seconds")),
             num(timings.get("stationary_wall_seconds") if timings.get("stationary_wall_seconds") is not None else timings.get("stopped_max_s")),

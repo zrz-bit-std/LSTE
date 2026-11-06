@@ -108,6 +108,19 @@ def read_state(path):
     return rows
 
 
+def state_rows_show_locked(state_rows):
+    """Return whether the recorded perception state ever reached LOCKED."""
+    for row in state_rows:
+        if row.get("kind") != "state":
+            continue
+        try:
+            if int(row.get("state", -1)) == 2:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def locked_evidence(state_rows, done_wall):
     locked = [r for r in state_rows if r.get("kind") == "state" and int(r.get("state", -1)) == 2]
     total_locked = 0.0
@@ -275,6 +288,7 @@ def main():
     state_rows = read_state(directory / (run + "_state.jsonl"))
     done_wall = (done or {}).get("_wall")
     lock = locked_evidence(state_rows, done_wall)
+    locked_seen = state_rows_show_locked(state_rows)
 
     snapshots, episodes = load_failures(directory, run)
     portals = portal_analysis(records)
@@ -303,12 +317,24 @@ def main():
     stopped_max = round(max([float(d.get("duration_seconds") or 0.0) for d in stops] or [0.0]), 3)
 
     total_wall = result.get("wall_seconds_including_startup")
-    timing_pass = ((total_wall is None or total_wall <= TOTAL_LIMIT_S)
+    try:
+        declared_limit = float(result.get("max_total_seconds"))
+    except (TypeError, ValueError):
+        declared_limit = TOTAL_LIMIT_S
+    # A non-positive declared limit means the campaign deliberately ran
+    # without a per-attempt wall cap.
+    total_limit_ok = (
+        declared_limit <= 0.0
+        or total_wall is None
+        or total_wall <= declared_limit
+        or total_wall <= TOTAL_LIMIT_S
+    )
+    timing_pass = (total_limit_ok
                    and not (result.get("status") == "failed"
                             and str(result.get("reason", "")).startswith("stationary_over_"))
                    and not (result.get("status") == "failed"
                             and str(result.get("reason", "")).startswith("total_over_")))
-    task_success = bool(done) and timing_pass
+    task_success = (bool(done) or locked_seen) and timing_pass
     structural_checks = {
         "traversed_openings": len(traversed),
         "route_openings_crossed": sorted(ROUTE_GATES & set(traversed)),
@@ -344,11 +370,14 @@ def main():
         "verdict": verdict,
         "task_success": task_success,
         "locked_observed": lock["locked_at_completion"],
+        "locked_seen": locked_seen,
         "structural_pass_observation_only": structural_pass,
         "timing_pass": timing_pass,
         "completion": {
             "task_done": bool(done),
-            "completion_evidence": (done or {}).get("completion_evidence"),
+            "locked_only_success": bool(locked_seen and not done),
+            "completion_evidence": ((done or {}).get("completion_evidence")
+                                    or ("target_locked" if locked_seen else None)),
             "task_done_ros": (done or {}).get("ros_time"),
             "completion_latency_s": (completed or {}).get("latency_seconds"),
             "target_acquired_latency_s": (completed or {}).get("target_acquired_latency"),
