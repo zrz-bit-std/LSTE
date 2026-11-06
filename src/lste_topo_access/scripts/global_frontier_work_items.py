@@ -535,6 +535,102 @@ class PlaceWorkItemLedger:
         })
         return int(item["id"])
 
+    def cooldown_portal_entry(self, portal_id, now, seconds,
+                              reason="materialization_unreachable"):
+        """Pause one Portal-entry WorkItem without closing the obligation.
+
+        The item stays unresolved: only its navigation eligibility is paused
+        so an unmaterializable crossing cannot monopolize the whole Place.
+        The next ``active_portal_entry_cooldowns`` call after expiry clears
+        the window, which re-arms the exact same durable item.
+        """
+        try:
+            portal_id = int(portal_id)
+            now = float(now)
+            until = now + max(0.0, float(seconds))
+        except (TypeError, ValueError):
+            return None
+        for item in self._items.values():
+            if (item.get("kind") != "portal_entry"
+                    or int(item.get("portal_id", -1)) != portal_id):
+                continue
+            if item.get("state") != WORK_UNRESOLVED:
+                return None
+            previous = item.get("cooldown_until")
+            try:
+                if previous is not None and float(previous) >= until:
+                    return item
+            except (TypeError, ValueError):
+                pass
+            item["cooldown_until"] = until
+            item["cooldown_started_at"] = now
+            item["cooldown_seconds"] = max(0.0, float(seconds))
+            item["cooldown_reason"] = str(reason or "materialization_unreachable")
+            item["cooldown_count"] = int(
+                item.get("cooldown_count", 0) or 0
+            ) + 1
+            item["updated_at"] = now
+            return item
+        return None
+
+    def active_portal_entry_cooldowns(self, now):
+        """Return ``{portal_id: until}`` and re-arm expired entries."""
+        try:
+            now = float(now)
+        except (TypeError, ValueError):
+            now = 0.0
+        active = {}
+        for item in self._items.values():
+            if item.get("kind") != "portal_entry":
+                continue
+            until = item.get("cooldown_until")
+            if until is None:
+                continue
+            try:
+                until = float(until)
+            except (TypeError, ValueError):
+                item.pop("cooldown_until", None)
+                continue
+            if until > now:
+                try:
+                    portal_id = int(item.get("portal_id"))
+                except (TypeError, ValueError):
+                    continue
+                active[portal_id] = until
+                continue
+            # Expired window: keep the durable obligation and the escalation
+            # counter, but let the same item participate in planning again.
+            item["cooldown_expired_at"] = now
+            item["last_reason"] = str(
+                item.get("cooldown_reason") or "cooldown_expired_rearm"
+            )
+            for key in (
+                "cooldown_until", "cooldown_started_at",
+                "cooldown_seconds", "cooldown_reason",
+            ):
+                item.pop(key, None)
+            item["updated_at"] = now
+        return active
+
+    def clear_portal_entry_cooldown(self, portal_id):
+        """Reset the cooldown after the crossing actually succeeds."""
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return None
+        for item in self._items.values():
+            if (item.get("kind") != "portal_entry"
+                    or int(item.get("portal_id", -1)) != portal_id):
+                continue
+            for key in (
+                "cooldown_until", "cooldown_started_at",
+                "cooldown_seconds", "cooldown_reason",
+                "cooldown_expired_at", "cooldown_count",
+            ):
+                item.pop(key, None)
+            return item
+        return None
+
     def resolve_portal_entry(self, portal_id, now, reason="portal_crossing_created_place"):
         """Complete the Portal entry WorkItem only after destination Place commit."""
         try:

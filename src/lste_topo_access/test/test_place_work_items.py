@@ -219,5 +219,46 @@ class PlaceWorkItemTest(unittest.TestCase):
         )
 
 
+class PortalEntryCooldownTest(unittest.TestCase):
+    def test_cooldown_pauses_then_rearms_the_same_item(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        item_id = ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)
+
+        ledger.cooldown_portal_entry(4, 10.0, 45.0, "costmap_route_unreachable")
+        self.assertEqual(
+            ledger.active_portal_entry_cooldowns(20.0),
+            {4: 55.0},
+        )
+        self.assertEqual(ledger._items[item_id]["state"], WORK_UNRESOLVED)
+
+        # Expiry must re-arm the exact same durable obligation.
+        self.assertEqual(ledger.active_portal_entry_cooldowns(56.0), {})
+        self.assertNotIn("cooldown_until", ledger._items[item_id])
+        self.assertEqual(ledger._items[item_id]["state"], WORK_UNRESOLVED)
+        self.assertEqual(ledger.unresolved_count(1), 1)
+
+    def test_cooldown_escalation_count_and_success_reset(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        item_id = ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)
+        ledger.cooldown_portal_entry(4, 10.0, 45.0)
+        ledger.active_portal_entry_cooldowns(56.0)
+        ledger.cooldown_portal_entry(4, 60.0, 90.0)
+        self.assertEqual(ledger._items[item_id]["cooldown_count"], 2)
+
+        ledger.clear_portal_entry_cooldown(4)
+        self.assertNotIn("cooldown_count", ledger._items[item_id])
+        self.assertEqual(ledger.active_portal_entry_cooldowns(61.0), {})
+
+    def test_resolved_portal_entry_ignores_cooldown(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        item_id = ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)
+        ledger.resolve_portal_entry(4, 2.0)
+        self.assertIsNone(
+            ledger.cooldown_portal_entry(4, 3.0, 45.0)
+        )
+        self.assertEqual(ledger.active_portal_entry_cooldowns(4.0), {})
+        self.assertEqual(ledger._items[item_id]["state"], WORK_RESOLVED)
+
+
 if __name__ == "__main__":
     unittest.main()

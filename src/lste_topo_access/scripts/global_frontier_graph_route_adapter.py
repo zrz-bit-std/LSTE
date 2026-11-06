@@ -28,6 +28,13 @@ _GRAPH_ROUTE_MATERIALIZATION_MAX_EPOCH_SPAN = 2
 _GRAPH_ROUTE_MATERIALIZATION_EXCLUSION_EPOCHS = 8
 _GRAPH_ROUTE_MATERIALIZATION_INVALIDATED_MAX = 128
 _GRAPH_ROUTE_MATERIALIZATION_TRACKERS_MAX = 128
+# One exhausted Portal obligation must not monopolize planning.  Pause it for
+# a short window, release the lease, then re-arm the same durable obligation.
+# Repeated failures escalate, but the window is capped so a real doorway is
+# always retried instead of being retired for the run.
+_GRAPH_ROUTE_OBLIGATION_COOLDOWN_SECONDS = 45.0
+_GRAPH_ROUTE_OBLIGATION_COOLDOWN_MAX_SECONDS = 180.0
+_GRAPH_ROUTE_OBLIGATION_COOLDOWN_MAX_ENTRIES = 128
 _GRAPH_ROUTE_FSM_SEARCHING = "SEARCHING"
 _GRAPH_ROUTE_FSM_PLANNING = "PLANNING"
 _GRAPH_ROUTE_FSM_WAITING = "WAITING_MATERIALIZATION"
@@ -472,6 +479,235 @@ class GlobalFrontierGraphRouteAdapterMixin:
         self.graph_route_materialization_first_epoch = None
         self.graph_route_materialization_last_epoch = None
 
+    def _graph_route_now(self):
+        """Return the clock used by obligation cooldowns."""
+        try:
+            return float(rospy.Time.now().to_sec())
+        except Exception:
+            return float(time.time())
+
+    @staticmethod
+    def _graph_route_obligation_portal_ids(plan):
+        portal_ids = set()
+        values = [getattr(plan, "first_portal_id", None)]
+        if str(getattr(plan, "obligation_kind", "") or "") in (
+            "portal_edge", "unbound_portal",
+        ):
+            values.append(getattr(plan, "obligation_id", None))
+        for value in values:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                portal_ids.add(value)
+        return portal_ids
+
+    def _start_graph_route_obligation_cooldown(
+        self, plan, now=None, reason=None,
+    ):
+        """Pause one unmaterializable Portal obligation, then re-arm it."""
+        key = self._graph_route_materialization_obligation_key(plan)
+        portal_ids = self._graph_route_obligation_portal_ids(plan)
+        if key is None or not portal_ids:
+            return None
+        now = self._graph_route_now() if now is None else float(now)
+        cooldowns = getattr(
+            self, "graph_route_obligation_cooldowns", None
+        )
+        if not isinstance(cooldowns, dict):
+            cooldowns = {}
+            self.graph_route_obligation_cooldowns = cooldowns
+        previous = cooldowns.get(key)
+        count = 1
+        if isinstance(previous, dict):
+            try:
+                count = int(previous.get("count", 0) or 0) + 1
+            except (TypeError, ValueError):
+                count = 1
+        seconds = min(
+            _GRAPH_ROUTE_OBLIGATION_COOLDOWN_MAX_SECONDS,
+            _GRAPH_ROUTE_OBLIGATION_COOLDOWN_SECONDS
+            * (2 ** max(0, count - 1)),
+        )
+        entry = {
+            "until": now + seconds,
+            "started_at": now,
+            "seconds": seconds,
+            "count": count,
+            "reason": str(
+                reason or "graph_route_materialization_expired"
+            ),
+            "portal_ids": tuple(sorted(portal_ids)),
+            "map_epoch": getattr(plan, "map_epoch", None),
+        }
+        cooldowns[key] = entry
+        while len(cooldowns) > _GRAPH_ROUTE_OBLIGATION_COOLDOWN_MAX_ENTRIES:
+            cooldowns.pop(next(iter(cooldowns)))
+        ledger = getattr(self, "place_work_items", None)
+        cooldown_entry = getattr(ledger, "cooldown_portal_entry", None)
+        if callable(cooldown_entry):
+            for portal_id in sorted(portal_ids):
+                try:
+                    cooldown_entry(
+                        portal_id, now, seconds, entry["reason"],
+                    )
+                except (TypeError, ValueError):
+                    continue
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "graph_route_obligation_cooldown_started",
+                obligation_key=list(key),
+                portal_ids=sorted(portal_ids),
+                cooldown_seconds=seconds,
+                cooldown_count=count,
+                cooldown_until=now + seconds,
+                reason=entry["reason"],
+            )
+        return entry
+
+    def _active_graph_route_obligation_cooldowns(self, now=None):
+        cooldowns = getattr(self, "graph_route_obligation_cooldowns", None)
+        if not isinstance(cooldowns, dict) or not cooldowns:
+            return {}
+        now = self._graph_route_now() if now is None else float(now)
+        active = {}
+        expired = []
+        for key, entry in cooldowns.items():
+            try:
+                until = float(entry.get("until", 0.0))
+            except (AttributeError, TypeError, ValueError):
+                expired.append(key)
+                continue
+            if until > now:
+                active[key] = entry
+            else:
+                expired.append(key)
+        if expired:
+            invalidated = getattr(
+                self,
+                "graph_route_materialization_invalidated_obligations",
+                None,
+            )
+            identity_map = getattr(
+                self,
+                "graph_route_materialization_invalidated_identity_map",
+                None,
+            )
+            for key in expired:
+                cooldowns.pop(key, None)
+                if isinstance(invalidated, set):
+                    invalidated.discard(key)
+                if isinstance(identity_map, dict):
+                    identity_map.pop(key, None)
+                publish = getattr(self, "publish_status", None)
+                if callable(publish):
+                    publish(
+                        "graph_route_obligation_cooldown_expired",
+                        obligation_key=list(key),
+                        reason="cooldown_elapsed_rearm",
+                    )
+        return active
+
+    def _active_graph_route_obligation_cooldown_portals(self, now=None):
+        portals = set()
+        for entry in self._active_graph_route_obligation_cooldowns(
+            now
+        ).values():
+            for value in entry.get("portal_ids", ()):
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if value > 0:
+                    portals.add(value)
+        ledger = getattr(self, "place_work_items", None)
+        active_entries = getattr(
+            ledger, "active_portal_entry_cooldowns", None
+        )
+        if callable(active_entries):
+            try:
+                values = active_entries(
+                    self._graph_route_now() if now is None else float(now)
+                )
+            except TypeError:
+                values = active_entries(self._graph_route_now())
+            if isinstance(values, dict):
+                for value in values:
+                    try:
+                        value = int(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if value > 0:
+                        portals.add(value)
+        return portals
+
+    def _clear_graph_route_obligation_cooldown(self, portal_id=None):
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return False
+        cleared = False
+        cooldowns = getattr(
+            self, "graph_route_obligation_cooldowns", None
+        )
+        if isinstance(cooldowns, dict):
+            invalidated = getattr(
+                self,
+                "graph_route_materialization_invalidated_obligations",
+                None,
+            )
+            identity_map = getattr(
+                self,
+                "graph_route_materialization_invalidated_identity_map",
+                None,
+            )
+            for key, entry in tuple(cooldowns.items()):
+                try:
+                    ids = {
+                        int(value)
+                        for value in entry.get("portal_ids", ())
+                    }
+                except (TypeError, ValueError):
+                    ids = set()
+                if portal_id not in ids:
+                    continue
+                cooldowns.pop(key, None)
+                if isinstance(invalidated, set):
+                    invalidated.discard(key)
+                if isinstance(identity_map, dict):
+                    identity_map.pop(key, None)
+                cleared = True
+        ledger = getattr(self, "place_work_items", None)
+        clear_entry = getattr(ledger, "clear_portal_entry_cooldown", None)
+        if callable(clear_entry):
+            clear_entry(portal_id)
+            cleared = True
+        return cleared
+
+    @staticmethod
+    def _without_cooled_portal_entries(items, cooled_portal_ids):
+        """Hide a paused Portal-entry item so the planner can make progress.
+
+        The durable item stays unresolved in the ledger; only this planning
+        input omits it.  The owned boundary path otherwise re-selects the same
+        excluded Portal through ``_durable_entry_portal``.
+        """
+        if not cooled_portal_ids:
+            return items
+        kept = []
+        for item in items:
+            if str(item.get("kind", "") or "") == "portal_entry":
+                try:
+                    portal_id = int(item.get("portal_id"))
+                except (TypeError, ValueError):
+                    portal_id = None
+                if portal_id in cooled_portal_ids:
+                    continue
+            kept.append(item)
+        return kept
+
     def _target_observation_materialization_deferred(self, place_id):
         """Return whether target reinspection is deferred at one Place.
 
@@ -578,8 +814,9 @@ class GlobalFrontierGraphRouteAdapterMixin:
                 exclusions.pop(old_epoch, None)
         return True
 
-    def _graph_route_materialization_exclusions(self, map_epoch):
+    def _graph_route_materialization_exclusions(self, map_epoch, now=None):
         """Return epoch and run-scoped exclusions for graph planning."""
+        active_cooldowns = self._active_graph_route_obligation_cooldowns(now)
         epoch = self._normalise_graph_map_epoch(map_epoch)
         if epoch is None:
             epoch_bucket = {}
@@ -664,6 +901,20 @@ class GlobalFrontierGraphRouteAdapterMixin:
                 portal_ids.add(identity)
             elif kind in {"portal_edge", "unbound_portal"}:
                 portal_ids.add(identity)
+        # A live cooldown is authoritative even if the invalidated key was
+        # already pruned.  Expired windows are removed above, which re-arms
+        # the exact same durable obligation for the next plan.
+        for entry in active_cooldowns.values():
+            for value in entry.get("portal_ids", ()):
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if value > 0:
+                    portal_ids.add(value)
+        portal_ids.update(
+            self._active_graph_route_obligation_cooldown_portals(now)
+        )
         return (
             tuple(sorted(portal_ids)),
             tuple(sorted(work_item_ids)),
@@ -718,7 +969,9 @@ class GlobalFrontierGraphRouteAdapterMixin:
                 reason="fresh_executable_projection",
             )
 
-    def _remember_graph_route_materialization_invalidation(self, plan):
+    def _remember_graph_route_materialization_invalidation(
+        self, plan, now=None, reason=None,
+    ):
         """Keep an exhausted obligation out of the next graph-plan pass."""
         # A room WorkItem that misses in one projection remains an unresolved
         # room obligation.  The epoch-scoped negative evidence recorded by
@@ -791,6 +1044,9 @@ class GlobalFrontierGraphRouteAdapterMixin:
         identity_map[tuple(key)] = linked
         while len(identity_map) > _GRAPH_ROUTE_MATERIALIZATION_INVALIDATED_MAX:
             identity_map.pop(next(iter(identity_map)))
+        self._start_graph_route_obligation_cooldown(
+            plan, now=now, reason=reason,
+        )
         return tuple(key)
 
     def _record_graph_route_negative_evidence(
@@ -937,7 +1193,7 @@ class GlobalFrontierGraphRouteAdapterMixin:
     ):
         """Invalidate one exhausted graph plan and enter NEXT_ACTION."""
         obligation_key = self._remember_graph_route_materialization_invalidation(
-            plan
+            plan, reason=reason
         )
         target_deferred_place = self._defer_target_observation_materialization(
             plan, reason
@@ -2248,6 +2504,15 @@ class GlobalFrontierGraphRouteAdapterMixin:
                 ),
             )
         route_work_items, robot_pose = self._graph_route_tsp_inputs(work_ledger)
+        cooled_portal_ids = self._active_graph_route_obligation_cooldown_portals()
+        route_work_items = self._without_cooled_portal_entries(
+            route_work_items, cooled_portal_ids,
+        )
+        if cooled_portal_ids:
+            # A paused ranked Portal must not resurrect the frozen
+            # pre-observation WorkItem; the Place waits for the exact same
+            # Portal obligation to re-arm instead of switching identity.
+            suspended_work_item_id = None
         dfs_node = (
             None if dfs is None else dfs.nodes.get(int(current_place_id), {})
         )
@@ -2992,6 +3257,12 @@ class GlobalFrontierGraphRouteAdapterMixin:
         return True
 
     def _publish_graph_route_materialized(self, plan, candidate):
+        # A real crossing success resets the escalation; a later failure
+        # starts again from the base cooldown instead of inheriting a long
+        # penalty from an earlier, unrelated projection miss.
+        portal_id = getattr(plan, "first_portal_id", None)
+        if portal_id is not None:
+            self._clear_graph_route_obligation_cooldown(portal_id)
         publish = getattr(self, "publish_status", None)
         if publish is None:
             return

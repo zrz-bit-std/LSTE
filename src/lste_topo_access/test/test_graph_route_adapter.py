@@ -1248,5 +1248,108 @@ class GraphRouteGateTest(unittest.TestCase):
         self.assertFalse(candidate_matches_graph_plan(plan, local_route))
 
 
+class PortalObligationCooldownTest(unittest.TestCase):
+    def _portal_plan(self, portal_id=11):
+        return GraphRoutePlan(
+            PLAN_READY,
+            ACTION_CROSS_PORTAL,
+            current_place_id=6,
+            obligation_kind="portal_edge",
+            obligation_id=portal_id,
+            first_portal_id=portal_id,
+        )
+
+    def test_exhausted_portal_is_paused_then_rearmed(self):
+        fixture = AdapterFixture()
+        plan = self._portal_plan()
+        fixture._remember_graph_route_materialization_invalidation(
+            plan, now=100.0, reason="graph_route_materialization_expired",
+        )
+
+        excluded, _, _ = fixture._graph_route_materialization_exclusions(
+            371, now=120.0,
+        )
+        self.assertIn(11, excluded)
+        self.assertEqual(
+            fixture.events[-1][0],
+            "graph_route_obligation_cooldown_started",
+        )
+
+        excluded, _, _ = fixture._graph_route_materialization_exclusions(
+            371, now=146.0,
+        )
+        self.assertNotIn(11, excluded)
+        self.assertEqual(
+            fixture.events[-1][0],
+            "graph_route_obligation_cooldown_expired",
+        )
+        self.assertNotIn(
+            ("obligation", "portal_edge", 11),
+            fixture.graph_route_materialization_invalidated_obligations,
+        )
+
+    def test_cooldown_escalates_and_caps(self):
+        fixture = AdapterFixture()
+        plan = self._portal_plan()
+        key = ("obligation", "portal_edge", 11)
+        expected = (45.0, 90.0, 180.0, 180.0)
+        for index, seconds in enumerate(expected):
+            fixture._remember_graph_route_materialization_invalidation(
+                plan, now=float(index), reason="graph_route_materialization_expired",
+            )
+            self.assertEqual(
+                fixture.graph_route_obligation_cooldowns[key]["seconds"],
+                seconds,
+            )
+
+    def test_materialized_crossing_clears_cooldown(self):
+        fixture = AdapterFixture()
+        plan = self._portal_plan()
+        fixture._remember_graph_route_materialization_invalidation(
+            plan, now=10.0, reason="graph_route_materialization_expired",
+        )
+        self.assertIn(
+            11, fixture._active_graph_route_obligation_cooldown_portals(now=20.0),
+        )
+        fixture._publish_graph_route_materialized(
+            plan, (1, 2, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, None, 1,
+                   "portal_transition"),
+        )
+        self.assertNotIn(
+            11, fixture._active_graph_route_obligation_cooldown_portals(now=20.0),
+        )
+        excluded, _, _ = fixture._graph_route_materialization_exclusions(371, now=20.0)
+        self.assertNotIn(11, excluded)
+
+    def test_cooled_entry_item_is_hidden_from_the_planner_input(self):
+        items = [
+            {"id": 3, "kind": "portal_entry", "portal_id": 11},
+            {"id": 4, "kind": "portal_entry", "portal_id": 12},
+            {"id": 5, "kind": "frontier_observation", "portal_id": 11},
+        ]
+        kept = AdapterFixture._without_cooled_portal_entries(items, {11})
+        self.assertEqual([item["id"] for item in kept], [4, 5])
+
+    def test_cooled_entry_is_not_the_semantic_pending_obligation(self):
+        # The planner input no longer contains the paused item; the durable
+        # ledger still does, so a later plan can re-arm without recreating it.
+        fixture = AdapterFixture(work_items=[
+            {"id": 3, "kind": "portal_entry", "portal_id": 11,
+             "place_id": 6, "state": "unresolved"},
+        ])
+        plan = self._portal_plan()
+        fixture._remember_graph_route_materialization_invalidation(
+            plan, now=1.0, reason="graph_route_materialization_expired",
+        )
+        kept = fixture._without_cooled_portal_entries(
+            fixture.place_work_items.snapshot(),
+            fixture._active_graph_route_obligation_cooldown_portals(now=20.0),
+        )
+        self.assertEqual(kept, [])
+        self.assertEqual(
+            fixture.place_work_items.get(3)["state"], "unresolved",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
