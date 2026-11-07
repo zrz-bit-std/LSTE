@@ -374,7 +374,18 @@ class GoalManagerSchedulingMixin:
             ):
                 left_ctx, right_ctx = self.pick_ctx_pair()
                 if left_ctx is not None and right_ctx is not None:
-                    return self.goal_from_ctx_follow(now)
+                    if self.context_pair_is_exhausted(
+                        now, left_ctx, right_ctx
+                    ):
+                        rospy.loginfo_throttle(
+                            3.0,
+                            "GoalManager: context pair exhausted; "
+                            "using frontier fallback",
+                        )
+                    else:
+                        ctx_goal = self.goal_from_ctx_follow(now)
+                        if ctx_goal is not None:
+                            return ctx_goal
             global_frontier = self.fresh_global_frontier_goal(now)
             if global_frontier is not None:
                 self.goal_source = "global_slam_frontier"

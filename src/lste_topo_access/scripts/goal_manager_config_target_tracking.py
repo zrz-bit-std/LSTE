@@ -51,6 +51,39 @@ class GoalManagerTargetTrackingConfigMixin:
         self.context_follow_cooldown = max(
             0.0, float(gp("~context_follow_cooldown", 30.0))
         )
+        # A context pair that produced no target evidence must stay out of the
+        # next plans long enough for the robot to make real progress.  This is
+        # separate from the short retry cooldown above.
+        self.context_follow_exhausted_cooldown = max(
+            self.context_follow_cooldown,
+            float(gp("~context_follow_exhausted_cooldown", 120.0)),
+        )
+        memory = getattr(self, "ctx_pair_exhaustion", None)
+        if memory is not None:
+            memory.cooldown = self.context_follow_exhausted_cooldown
+        self.context_observe_trigger_seconds = max(
+            0.5, float(gp("~context_observe_trigger_seconds", 4.0))
+        )
+        self.context_observe_duration = max(
+            1.0, float(gp("~context_observe_duration", 10.0))
+        )
+        self.context_observe_hold_seconds = max(
+            0.2, float(gp("~context_observe_hold_seconds", 2.0))
+        )
+        sweep = gp("~context_observe_sweep_deg", "0,30,-30,60,-60")
+        if isinstance(sweep, str):
+            sweep = [value for value in sweep.split(",") if value.strip()]
+        try:
+            sweep = tuple(float(value) for value in sweep)
+        except (TypeError, ValueError):
+            sweep = (0.0, 30.0, -30.0, 60.0, -60.0)
+        policy = getattr(self, "ctx_observation", None)
+        if policy is not None:
+            policy.trigger_seconds = self.context_observe_trigger_seconds
+            policy.observe_seconds = self.context_observe_duration
+            policy.hold_seconds = self.context_observe_hold_seconds
+            if sweep:
+                policy.sweep_deg = sweep
         self.follow_min_update_period = float(gp("~follow_min_update_period", 0.3))
         self.follow_heading_alpha = float(gp("~follow_heading_alpha", 0.5))
         self.target_bbox_alpha = min(

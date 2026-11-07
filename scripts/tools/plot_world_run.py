@@ -154,7 +154,20 @@ def read_scene(world_path, model_roots):
                 for v in vertices:
                     polygon = hull(transform(v, matrix))
                     if polygon is not None:
-                        shapes.append({'model': name, 'link': link.get('name'), 'kind': 'wall' if name in ('env04', 'semantic_room_structure') else 'object', 'xy': polygon.tolist()})
+                        link_name = str(link.get('name') or '')
+                        is_wall = (
+                            link_name.startswith('wall_')
+                            or name in ('env04', 'semantic_room_structure')
+                        )
+                        shapes.append({'model': name, 'link': link.get('name'), 'kind': 'wall' if is_wall else 'object', 'xy': polygon.tolist()})
+    # Included models (env05/env06 target and furniture are <include> blocks,
+    # not inline <model> blocks).  Resolve the task target by the explicit
+    # *_target include name used by the new session worlds.
+    for include in world.findall('include'):
+        name = str(include.findtext('name') or '')
+        uri = str(include.findtext('uri') or '')
+        if target is None and (name.endswith('_target') or 'cup_yellow' in uri):
+            target = pose_matrix(include.findtext('pose'))[:2, 3].tolist()
     return shapes, target, missing
 
 
@@ -327,8 +340,9 @@ def main():
     gs = fig.add_gridspec(3, 2, width_ratios=[1.65, 1], height_ratios=[1, .65, .38],
                          left=.06, right=.965, top=.865, bottom=.28, wspace=.21, hspace=.55)
     ax = fig.add_subplot(gs[:2,0]); zoom = fig.add_subplot(gs[0,1]); info = fig.add_subplot(gs[1,1]); timeline = fig.add_subplot(gs[2,:])
-    fig.text(.06,.952,'ENV04  /  VISUAL OBJECT SEARCH',fontsize=11,weight='bold',color='#147d92')
-    fig.text(.06,.913,('Successful' if successful else 'Unsuccessful')+' yellow-cup search',fontsize=26,weight='bold')
+    world_label = args.world.stem.replace('_', ' ').upper()
+    fig.text(.06,.952,world_label+'  /  VISUAL OBJECT SEARCH',fontsize=11,weight='bold',color='#147d92')
+    fig.text(.06,.913,('Successful' if successful else 'Unsuccessful')+' object search',fontsize=26,weight='bold')
     fig.text(.965,.935,'RUN '+run+'\nTEB navigation · online SLAM',ha='right',va='center',fontsize=10,color='#64748b')
     cmap = matplotlib.colors.LinearSegmentedColormap.from_list('route',['#263e78','#247fa0','#31a997','#c5b948'])
     norm = matplotlib.colors.Normalize(0,max(td, 1))
@@ -361,9 +375,15 @@ def main():
     elif not successful:
         zoom.set_xlim(14.5,25.5); zoom.set_ylim(-13.6,-1.8)
         detail_title = 'Target-area context · no pose recorded'
-    else:
-        zoom.set_xlim(14.5,25.5); zoom.set_ylim(-13.6,-1.8)
+    elif target is not None:
+        zoom.set_xlim(target[0]-4, target[0]+4)
+        zoom.set_ylim(target[1]-4, target[1]+4)
         detail_title = 'Target-area detail'
+    else:
+        center = xy[-1] if len(xy) else (0.0, 0.0)
+        zoom.set_xlim(center[0]-4, center[0]+4)
+        zoom.set_ylim(center[1]-4, center[1]+4)
+        detail_title = 'End-area detail'
     zoom.set_title('b   '+detail_title,loc='left',pad=14,weight='bold')
     def label(a, point, text, offset):
         a.annotate(text,xy=point,xytext=offset,textcoords='offset points',fontsize=8,
@@ -374,7 +394,7 @@ def main():
         label(zoom,xy[-1],'Task complete' if successful else 'Run stopped',(-89,12))
     else:
         ax.text(.5,.5,'No recorded odometry',transform=ax.transAxes,ha='center')
-    if target: label(zoom,target,'Yellow cup\n(saved world state)',(-65,-38))
+    if target: label(zoom,target,'Target\n(saved world state)',(-65,-38))
     if first_pose: label(zoom,first_pose,'First target detection',(-109,15))
     if stall: label(ax,stall[:2],'Stationary failure' if attempt.get('stall_pose') else 'Recorded planning episode',(15,-20))
     for i in range(8,len(xy)-1,23):
@@ -449,7 +469,7 @@ def main():
     if data['time_origin'] != 'run_start':
         fig.text(.06,.012,'Time origin: first recorded pose sample; run_start ROS clock was not ready (0 before saved-world clock loaded).',fontsize=7,color='#64748b')
     output = args.output_dir;output.mkdir(parents=True,exist_ok=True)
-    stem = output/(run+'_env04_'+('success' if successful else 'failure')+'_trajectory')
+    stem = output/(run+'_'+args.world.stem+'_'+('success' if successful else 'failure')+'_trajectory')
     for suffix in formats:
         fig.savefig(str(stem)+'.'+suffix,dpi=350,facecolor='white')
     plt.close(fig)
@@ -461,7 +481,7 @@ def main():
               'frame_assumption':'logged odom and world nominally aligned; no recorded full TF available',
               'footprint_method':'per-mesh projected convex hull; furniture footprint is not a SLAM occupancy map',
               'missing_meshes':missing,'shapes':shapes}
-    (output/'env04_scene_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (output/(args.world.stem+'_scene_manifest.json')).write_text(json.dumps(manifest,indent=2)+'\n')
     report={'run':run,'outcome':data['outcome'],'task_done':data['recorded_task_done_true'],
             'within_trial_success':successful,
             'recorded_task_done_true':data['recorded_task_done_true'],'completion_evidence':data['evidence'],

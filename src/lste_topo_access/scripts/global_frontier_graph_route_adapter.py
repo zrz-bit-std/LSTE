@@ -35,6 +35,11 @@ _GRAPH_ROUTE_MATERIALIZATION_TRACKERS_MAX = 128
 _GRAPH_ROUTE_OBLIGATION_COOLDOWN_SECONDS = 45.0
 _GRAPH_ROUTE_OBLIGATION_COOLDOWN_MAX_SECONDS = 180.0
 _GRAPH_ROUTE_OBLIGATION_COOLDOWN_MAX_ENTRIES = 128
+# The ordinary observation WorkItems can be exhausted while the coverage
+# counter is still below its threshold.  After this bounded grace period a
+# Place receives one best-effort coverage viewpoint so the mission can move
+# on instead of holding forever.
+_PLACE_OBSERVATION_BEST_EFFORT_SECONDS = 60.0
 _GRAPH_ROUTE_FSM_SEARCHING = "SEARCHING"
 _GRAPH_ROUTE_FSM_PLANNING = "PLANNING"
 _GRAPH_ROUTE_FSM_WAITING = "WAITING_MATERIALIZATION"
@@ -707,6 +712,84 @@ class GlobalFrontierGraphRouteAdapterMixin:
                     continue
             kept.append(item)
         return kept
+
+    def _place_observation_best_effort_due(self, place_id, now):
+        """Return whether an exhausted Place coverage gate may be released."""
+        memory = getattr(self, "region_memory", None)
+        ledger = getattr(self, "place_work_items", None)
+        if memory is None or ledger is None or place_id is None:
+            return False
+        by_id = getattr(memory, "by_id", None)
+        region = by_id(place_id) if callable(by_id) else None
+        if region is None:
+            self.place_observation_block_since = None
+            return False
+        if str(region.get("state", "")).strip().lower() not in (
+            "open", "suspended",
+        ):
+            self.place_observation_block_since = None
+            return False
+        try:
+            if int(region.get("endpoint_observations", 0) or 0) > 0:
+                self.place_observation_block_since = None
+                return False
+        except (TypeError, ValueError):
+            pass
+        counter = getattr(
+            ledger, "actionable_frontier_observation_count", None
+        )
+        if not callable(counter):
+            counter = getattr(
+                ledger, "unresolved_frontier_observation_count", None
+            )
+        unresolved = int(counter(place_id) or 0) if callable(counter) else 0
+        if unresolved > 0:
+            # Ordinary observation work still exists; the planner should
+            # dispatch it rather than silently declaring the Place covered.
+            self.place_observation_block_since = None
+            return False
+        # The exact planner reason can change between the read-only and
+        # committed planning phases.  The invariant that matters is narrower
+        # and stable: the Place is not covered and no actionable observation
+        # WorkItem exists.  Give that state one bounded grace period before
+        # recording best-effort coverage.
+        try:
+            now = float(now)
+        except (TypeError, ValueError):
+            return False
+        since = getattr(self, "place_observation_block_since", None)
+        if since is None:
+            self.place_observation_block_since = now
+            return False
+        threshold = float(getattr(
+            self,
+            "place_observation_best_effort_seconds",
+            _PLACE_OBSERVATION_BEST_EFFORT_SECONDS,
+        ))
+        return now - float(since) >= max(0.0, threshold)
+
+    def _mark_place_observation_best_effort(self, place_id, now):
+        memory = getattr(self, "region_memory", None)
+        method = getattr(memory, "mark_observation_best_effort", None)
+        if not callable(method):
+            return False
+        region = method(
+            place_id, now, reason="observation_work_exhausted_best_effort",
+        )
+        if region is None:
+            return False
+        self.place_observation_block_since = None
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "place_observation_best_effort",
+                place_id=int(place_id),
+                endpoint_observations=int(
+                    region.get("endpoint_observations", 0) or 0
+                ),
+                reason="observation_work_exhausted_best_effort",
+            )
+        return True
 
     def _target_observation_materialization_deferred(self, place_id):
         """Return whether target reinspection is deferred at one Place.
@@ -2502,6 +2585,13 @@ class GlobalFrontierGraphRouteAdapterMixin:
                     or getattr(self, "topology_component_epoch", 1)
                     or 1
                 ),
+            )
+        best_effort_now = self._graph_route_now()
+        if self._place_observation_best_effort_due(
+            current_place_id, best_effort_now
+        ):
+            self._mark_place_observation_best_effort(
+                current_place_id, best_effort_now,
             )
         route_work_items, robot_pose = self._graph_route_tsp_inputs(work_ledger)
         cooled_portal_ids = self._active_graph_route_obligation_cooldown_portals()

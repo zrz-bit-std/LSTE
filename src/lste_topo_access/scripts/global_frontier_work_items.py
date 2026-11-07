@@ -612,6 +612,47 @@ class PlaceWorkItemLedger:
             item["updated_at"] = now
         return active
 
+    def abandon_portal_entry(self, portal_id, now, reason,
+                             resolution="return_unrecoverable",
+                             item_id=None):
+        """Retire a Portal entry whose execution can never complete.
+
+        This is deliberately separate from ``resolve_portal_entry``: success
+        is still owned exclusively by destination-Place commit.  A failed
+        return, however, must stop occupying the source Place forever.
+        """
+        item = None
+        if item_id is not None:
+            try:
+                candidate = self._items.get(int(item_id))
+            except (TypeError, ValueError):
+                candidate = None
+            if (candidate is not None
+                    and candidate.get("kind") == "portal_entry"):
+                item = candidate
+        if item is None:
+            try:
+                portal_id = int(portal_id)
+            except (TypeError, ValueError):
+                return None
+            for candidate in self._items.values():
+                if (candidate.get("kind") == "portal_entry"
+                        and int(candidate.get("portal_id", -1)) == portal_id):
+                    item = candidate
+                    break
+        if item is None or item.get("state") != WORK_UNRESOLVED:
+            return None
+        active = self._active_attempt(item)
+        if active is not None:
+            self._finish_active_attempt(
+                item, ATTEMPT_BLOCKED, now, reason,
+            )
+        item["state"] = WORK_RESOLVED
+        item["resolution"] = str(resolution or "return_unrecoverable")
+        item["last_reason"] = str(reason or "return_unrecoverable")
+        item["updated_at"] = float(now)
+        return item
+
     def clear_portal_entry_cooldown(self, portal_id):
         """Reset the cooldown after the crossing actually succeeds."""
         try:
@@ -973,6 +1014,47 @@ class PlaceWorkItemLedger:
                 continue
             count += 1
         return count
+
+    def actionable_frontier_observation_count(self, place_id):
+        """Count observation WIs that the planner can actually dispatch.
+
+        A WorkItem whose only Attempt is ``suspended`` is frozen ownership
+        (for example the pre-observation item preserved across a Portal
+        authentication period).  It must not be treated as available
+        coverage work: otherwise an exhausted Place waits forever for an item
+        nobody is allowed to dispatch.
+        """
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return 0
+        count = 0
+        for item in self._items.values():
+            if (int(item.get("place_id", -1)) != place_id
+                    or item.get("state") != WORK_UNRESOLVED
+                    or item.get("kind") != "frontier_observation"):
+                continue
+            active = self._active_attempt(item)
+            if active is None:
+                count += 1
+                continue
+            if str(active.get("state", "")).strip().lower() == "suspended":
+                continue
+            count += 1
+        return count
+
+    def unresolved_frontier_observation_count(self, place_id):
+        """Count only ordinary observation WorkItems for one Place."""
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return 0
+        return sum(
+            1 for item in self._items.values()
+            if int(item.get("place_id", -1)) == place_id
+            and item.get("state") == WORK_UNRESOLVED
+            and item.get("kind") == "frontier_observation"
+        )
 
     def snapshot(self):
         """Return a read-only, JSON-safe view for graph-level planning.

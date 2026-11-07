@@ -22,6 +22,8 @@ from lste_msgs.msg import (
     LsteTask,
 )
 from goal_context import default_goal_context
+from goal_context_exhaustion import ContextPairExhaustion
+from goal_context_observation import ContextObservationPolicy
 from goal_manager_modes import EXPLORE_PASS_MODE, STATE_PASS
 from goal_manager_target_approach_transaction import TargetApproachTransaction
 from goal_manager_target_observation_gate import TargetObservationGate
@@ -347,6 +349,11 @@ class GoalManagerRuntimeStateMixin:
         self.ctx_goal_heading_update_threshold = math.radians(max(
             1.0, float(gp("~context_goal_heading_update_threshold_deg", 35.0))
         ))
+        self.ctx_pair_exhaustion = ContextPairExhaustion()
+        self.ctx_pair_labels = ("", "")
+        self.ctx_pair_key = None
+        self.ctx_observation = ContextObservationPolicy()
+        self.ctx_observation_pair_key = None
 
         # 模式：base_mode 直接由 state/subtype 映射得到；后续可在 effective_mode 上做 override
         self.base_mode = EXPLORE_PASS_MODE

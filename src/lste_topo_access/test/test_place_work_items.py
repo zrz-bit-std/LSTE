@@ -260,5 +260,53 @@ class PortalEntryCooldownTest(unittest.TestCase):
         self.assertEqual(ledger._items[item_id]["state"], WORK_RESOLVED)
 
 
+class FrontierObservationCountTest(unittest.TestCase):
+    def test_suspended_attempt_is_not_actionable(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        item = ledger._new_item(1, frozenset(), 1.0)
+        self.assertEqual(ledger.actionable_frontier_observation_count(1), 1)
+        item["attempts"].append({
+            "id": 7, "state": "suspended", "item_id": item["id"],
+        })
+        item["active_attempt_id"] = 7
+        self.assertEqual(ledger.actionable_frontier_observation_count(1), 0)
+
+    def test_portal_entry_is_not_counted_as_unfinished_coverage(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)
+        self.assertEqual(ledger.unresolved_frontier_observation_count(1), 0)
+
+        item = ledger._new_item(1, frozenset(), 2.0)
+        self.assertEqual(ledger.unresolved_frontier_observation_count(1), 1)
+        item["state"] = WORK_RESOLVED
+        self.assertEqual(ledger.unresolved_frontier_observation_count(1), 0)
+
+
+class PortalEntryAbandonTest(unittest.TestCase):
+    def test_return_unrecoverable_retires_the_exact_portal_entry(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        item_id = ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)
+        retired = ledger.abandon_portal_entry(
+            4, 10.0, "return_unrecoverable",
+            resolution="return_unrecoverable",
+        )
+        self.assertIsNotNone(retired)
+        self.assertEqual(retired["id"], item_id)
+        self.assertEqual(retired["state"], WORK_RESOLVED)
+        self.assertEqual(retired["resolution"], "return_unrecoverable")
+        self.assertEqual(retired["last_reason"], "return_unrecoverable")
+        self.assertEqual(ledger.unresolved_frontier_observation_count(1), 0)
+
+    def test_second_abandon_is_a_no_op(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)
+        self.assertIsNotNone(
+            ledger.abandon_portal_entry(4, 10.0, "return_unrecoverable")
+        )
+        self.assertIsNone(
+            ledger.abandon_portal_entry(4, 11.0, "return_unrecoverable")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

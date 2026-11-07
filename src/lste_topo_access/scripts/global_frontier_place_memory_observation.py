@@ -91,6 +91,33 @@ class FrontierRegionObservationMixin:
             return None
         return region
 
+    def mark_observation_best_effort(
+        self, region_id, now, reason="observation_work_exhausted",
+    ):
+        """Give an open Place a bounded coverage exit.
+
+        The ordinary observation WorkItems can all be resolved while the
+        coverage counter still stays below its threshold.  The graph then has
+        no bootstrap action and holds forever.  After the adapter has allowed
+        a bounded grace period, this records a best-effort coverage viewpoint
+        so the Place can proceed to its next obligation instead of freezing
+        the whole mission.
+        """
+        region = self.by_id(region_id)
+        if region is None or region.get("state") not in (
+            PLACE_OPEN, PLACE_SUSPENDED,
+        ):
+            return None
+        if int(region.get("endpoint_observations", 0) or 0) > 0:
+            return region
+        region["endpoint_observations"] = 1
+        region["covered_best_effort"] = True
+        region["covered_best_effort_at"] = float(now)
+        region["last_reason"] = str(
+            reason or "observation_work_exhausted"
+        )
+        return region
+
     def endpoint_observed(
         self, x, y, now, component=None, region_id=None,
         retain_for_target=False, physical_xy=None,

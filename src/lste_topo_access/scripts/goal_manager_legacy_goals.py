@@ -10,16 +10,48 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 
 from lste_msgs.msg import LsteDetection
-from goal_manager_modes import CATCH_TARGET_MODE, EXPLORE_SUS_C_MODE
+from goal_manager_modes import (
+    CATCH_TARGET_MODE,
+    EXPLORE_SUS_C_MODE,
+    STATE_LOCKED,
+)
 from goal_manager_target_utils import wrap_angle
 
 class GoalManagerLegacyGoalsMixin:
+    def context_pair_key(self, left=None, right=None):
+        """Return the task-scoped identity of one context pair."""
+        task_id = (
+            str(getattr(self, "current_mission_id", "") or "")
+            or str(getattr(self, "current_task_id", "") or "")
+        )
+        if left is None or right is None:
+            left_label, right_label = getattr(
+                self, "ctx_pair_labels", ("", "")
+            )
+        else:
+            left_label = str(getattr(left, "label", "") or "")
+            right_label = str(getattr(right, "label", "") or "")
+        return self.ctx_pair_exhaustion.key(
+            task_id, left_label, right_label,
+        )
+
+    def context_pair_is_exhausted(self, now, left=None, right=None):
+        key = self.context_pair_key(left, right)
+        return self.ctx_pair_exhaustion.is_exhausted(key, now)
+
     def goal_from_ctx_follow(self, now: float) -> Optional[PoseStamped]:
         if self.ctx_start_time is None:
             self.ctx_start_time = now
+            self.ctx_observation.reset()
+            self.ctx_observation_pair_key = None
 
         # ctx 期间检测到 target：直接切到 target 模式
         if self.pick_best_target() is not None:
+            # Real target evidence re-arms the pair; the prior inspection was
+            # not a dead end after all.
+            self.ctx_pair_exhaustion.clear(self.ctx_pair_key)
+            self.ctx_observation.reset()
+            self.ctx_observation_pair_key = None
             self.effective_mode = CATCH_TARGET_MODE
             self.pub_access_mode.publish(String(data=self.effective_mode))
             self.ctx_start_time = None
@@ -27,6 +59,24 @@ class GoalManagerLegacyGoalsMixin:
 
         goal = None
         left_det, right_det = self.pick_ctx_pair()
+        pair_key = self.context_pair_key(left_det, right_det)
+        if pair_key is not None and self.ctx_pair_exhaustion.is_exhausted(
+            pair_key, now
+        ):
+            # The pair was already inspected without target evidence.  Do not
+            # regenerate the same unreachable inspection goal; let the caller
+            # fall through to frontier/Place observation.
+            self.ctx_last_goal = None
+            return None
+        if pair_key is not None:
+            self.ctx_pair_key = pair_key
+            self.ctx_pair_labels = (
+                str(getattr(left_det, "label", "") or ""),
+                str(getattr(right_det, "label", "") or ""),
+            )
+            if pair_key != self.ctx_observation_pair_key:
+                self.ctx_observation.reset()
+                self.ctx_observation_pair_key = pair_key
         if left_det is not None and right_det is not None:
             # 用两框中心的中点方向
             mid_det = LsteDetection()
@@ -89,8 +139,81 @@ class GoalManagerLegacyGoalsMixin:
                         goal = self.ctx_last_goal
                         self.goal_source = "ctx_pair_cached"
 
+        # A stalled approach is still useful: stop, sweep the camera, and
+        # decide whether the pair produced target evidence.  The observation
+        # window owns the context timeout while it is active.
+        if goal is not None and self.latest_pose is not None:
+            action = self.ctx_observation.update(
+                now,
+                (float(self.latest_pose.x), float(self.latest_pose.y)),
+                (
+                    float(goal.pose.position.x),
+                    float(goal.pose.position.y),
+                ),
+                target_detected=self.pick_best_target() is not None,
+                locked=(
+                    getattr(self, "current_state", None) == STATE_LOCKED
+                ),
+            )
+            state = str(action.get("state") or "")
+            if state == "target":
+                self.ctx_pair_exhaustion.clear(self.ctx_pair_key)
+                self.ctx_observation.reset()
+                self.ctx_observation_pair_key = None
+                self.effective_mode = CATCH_TARGET_MODE
+                self.pub_access_mode.publish(
+                    String(data=self.effective_mode)
+                )
+                self.ctx_start_time = None
+                return self.goal_from_target_follow(now)
+            if state == "abandon":
+                if self.ctx_pair_key is not None:
+                    until = self.ctx_pair_exhaustion.mark(
+                        self.ctx_pair_key,
+                        now,
+                        self.context_follow_exhausted_cooldown,
+                    )
+                    rospy.loginfo(
+                        "GoalManager: context inspection abandoned key=%s "
+                        "until=%.1f",
+                        self.ctx_pair_key,
+                        float(until or 0.0),
+                    )
+                self.ctx_observation.reset()
+                self.ctx_observation_pair_key = None
+                self.ctx_last_goal = None
+                self.ctx_start_time = None
+                self.effective_mode = EXPLORE_SUS_C_MODE
+                self.pub_access_mode.publish(
+                    String(data=self.effective_mode)
+                )
+                self.ctx_cooldown_until = (
+                    now + self.context_follow_cooldown
+                )
+                return None
+            if state == "observe":
+                # Keep the context branch eligible for every observe tick so
+                # the bounded window can actually advance and expire.
+                self.ctx_cooldown_until = 0.0
+                yaw = float(self.latest_pose.theta) + float(
+                    action.get("yaw_offset", 0.0)
+                )
+                observe_goal = self.make_goal_pose(
+                    (
+                        float(self.latest_pose.x),
+                        float(self.latest_pose.y),
+                        0.0,
+                    ),
+                    yaw,
+                )
+                self.goal_source = "ctx_observe_in_place"
+                return observe_goal
+
         # ctx 窗口过期：回到探索
-        if (now - self.ctx_start_time) >= self.follow_ctx_lost_timeout:
+        if (
+            self.ctx_observation.state != "observe"
+            and (now - self.ctx_start_time) >= self.follow_ctx_lost_timeout
+        ):
             if goal is None:
                 goal = self.ctx_last_goal
             rospy.loginfo_throttle(2.0, "GoalManager: ctx window %.1fs expired, switch to explore_sus_c_mode",
@@ -99,6 +222,23 @@ class GoalManagerLegacyGoalsMixin:
             self.pub_access_mode.publish(String(data=self.effective_mode))
             self.ctx_start_time = None
             self.ctx_cooldown_until = now + self.context_follow_cooldown
+            if self.ctx_pair_key is not None and self.pick_best_target() is None:
+                until = self.ctx_pair_exhaustion.mark(
+                    self.ctx_pair_key,
+                    now,
+                    self.context_follow_exhausted_cooldown,
+                )
+                rospy.loginfo(
+                    "GoalManager: context pair exhausted key=%s until=%.1f",
+                    self.ctx_pair_key,
+                    float(until or 0.0),
+                )
+                # Do not return the very goal we just rejected.  The caller
+                # must fall through to the frontier/Place observation path.
+                goal = None
+            self.ctx_last_goal = None
+            self.ctx_observation.reset()
+            self.ctx_observation_pair_key = None
             rospy.loginfo(
                 "GoalManager: context observation complete; global coverage cooldown %.1fs",
                 self.context_follow_cooldown,

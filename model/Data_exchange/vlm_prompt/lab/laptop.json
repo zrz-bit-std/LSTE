@@ -1,0 +1,57 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "black laptop",
+      "attributes": [
+        "black",
+        "open",
+        "screen facing the room",
+        "office laptop",
+        "placed on a wooden office desk"
+      ],
+      "typical_locations": [
+        "office desks",
+        "workstations",
+        "single offices"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "office workspace",
+        "shared working area"
+      ],
+      "layout_prior": [
+        "long office desks arranged in rows",
+        "monitors and desk lamps on desks",
+        "office chairs around the workstations"
+      ],
+      "related_structures": [
+        "office desk",
+        "monitor",
+        "chair"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "monitor",
+        "desk lamp",
+        "desk",
+        "chair"
+      ],
+      "search_strategy": "walk around the partition and check the far side of the office desk",
+      "negative_clues": [
+        "door",
+        "fire hydrant",
+        "fire extinguisher",
+        "file cabinet",
+        "cardboard box",
+        "construction cone",
+        "traffic cone"
+      ]
+    },
+    "target_ctx": {
+      "left": "monitor",
+      "right": "desk lamp"
+    }
+  }
+}

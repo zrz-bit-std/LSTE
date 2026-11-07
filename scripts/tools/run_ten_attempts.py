@@ -310,7 +310,10 @@ def write_report(campaign, state):
         except (TypeError, ValueError):
             return str(value)
 
-    lines = ["# env04 黄杯搜索：10 轮审计记录", "",
+    world_stem = Path(str(state.get("world", ""))).stem
+    task_id = str(state.get("task_id") or "task")
+    lines = ["# %s %s：%d 轮审计记录" % (
+                 world_stem or "world", task_id, len(state["attempts"])), "",
              "判据：**成功 = 感知状态机进入 `LOCKED`（state=2）**；"
              "`task_done=true` 同样记为成功。单轮不设总时限；"
              "原地无进展超过看门狗阈值即判失败并进入下一轮。"

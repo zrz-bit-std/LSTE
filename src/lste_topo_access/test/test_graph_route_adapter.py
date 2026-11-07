@@ -1351,5 +1351,83 @@ class PortalObligationCooldownTest(unittest.TestCase):
         )
 
 
+class _BestEffortMemory:
+    def __init__(self):
+        self.region = {
+            "id": 6, "state": "open", "endpoint_observations": 0,
+        }
+
+    def by_id(self, place_id):
+        return self.region if int(place_id) == 6 else None
+
+    def mark_observation_best_effort(self, place_id, now, reason=""):
+        if int(place_id) != 6:
+            return None
+        self.region["endpoint_observations"] = 1
+        self.region["covered_best_effort"] = True
+        self.region["last_reason"] = reason
+        return self.region
+
+
+class _BestEffortLedger:
+    def __init__(self, unresolved=0):
+        self.unresolved = unresolved
+
+    def unresolved_frontier_observation_count(self, place_id):
+        return self.unresolved
+
+
+class PlaceObservationBestEffortAdapterTest(unittest.TestCase):
+    def _fixture(self, unresolved=0):
+        fixture = AdapterFixture()
+        fixture.region_memory = _BestEffortMemory()
+        fixture.place_work_items = _BestEffortLedger(unresolved)
+        fixture.last_graph_route_plan = GraphRoutePlan(
+            PLAN_BLOCKED,
+            "hold",
+            current_place_id=6,
+            reason="place_observation_required_before_graph_route",
+        )
+        fixture.place_observation_best_effort_seconds = 10.0
+        return fixture
+
+    def test_due_after_grace_then_marks_coverage(self):
+        fixture = self._fixture()
+        self.assertFalse(
+            fixture._place_observation_best_effort_due(6, now=100.0)
+        )
+        self.assertTrue(
+            fixture._place_observation_best_effort_due(6, now=111.0)
+        )
+        self.assertTrue(
+            fixture._mark_place_observation_best_effort(6, 111.0)
+        )
+        self.assertEqual(
+            fixture.region_memory.region["endpoint_observations"], 1
+        )
+        self.assertEqual(
+            fixture.events[-1][0], "place_observation_best_effort"
+        )
+
+    def test_unresolved_observation_work_blocks_best_effort(self):
+        fixture = self._fixture(unresolved=1)
+        self.assertFalse(
+            fixture._place_observation_best_effort_due(6, now=100.0)
+        )
+        self.assertFalse(
+            fixture._place_observation_best_effort_due(6, now=200.0)
+        )
+
+    def test_covered_place_does_not_arm(self):
+        fixture = self._fixture()
+        fixture.region_memory.region["endpoint_observations"] = 1
+        self.assertFalse(
+            fixture._place_observation_best_effort_due(6, now=100.0)
+        )
+        self.assertFalse(
+            fixture._place_observation_best_effort_due(6, now=200.0)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

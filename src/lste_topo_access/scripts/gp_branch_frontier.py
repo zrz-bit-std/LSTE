@@ -1106,6 +1106,63 @@ class GPBranchFrontierMixin:
             return True
         return False
 
+    def retire_unrecoverable_portal_entry(self, auth, tree_branch, now):
+        """Close the failed branch's Portal entry so it cannot block a Place."""
+        portal_id = None
+        if isinstance(tree_branch, dict):
+            portal_id = tree_branch.get("canonical_portal_id")
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        snapshot = getattr(ledger, "snapshot", None)
+        if portal_id is None and callable(snapshot):
+            try:
+                branch_id = int(auth.branch_id)
+            except (AttributeError, TypeError, ValueError):
+                branch_id = None
+            for record in snapshot():
+                if not isinstance(record, dict):
+                    continue
+                try:
+                    linked = int(record.get("gp_authentication_branch_id", -1))
+                except (TypeError, ValueError):
+                    continue
+                if branch_id is not None and linked == branch_id:
+                    portal_id = record.get("id")
+                    break
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return False
+        get_portal = getattr(ledger, "get", None)
+        record = get_portal(portal_id) if callable(get_portal) else None
+        entry_id = (
+            record.get("semantic_entry_work_item_id")
+            if isinstance(record, dict) else None
+        )
+        work = getattr(self, "place_work_items", None)
+        abandon = getattr(work, "abandon_portal_entry", None)
+        retired = None
+        if callable(abandon):
+            retired = abandon(
+                portal_id, now, "return_unrecoverable",
+                resolution="return_unrecoverable", item_id=entry_id,
+            )
+        execution_failed = getattr(ledger, "execution_failed", None)
+        if callable(execution_failed):
+            execution_failed(
+                portal_id, now, getattr(self, "last_map_epoch", None),
+            )
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "portal_entry_return_unrecoverable_retired",
+                portal_id=portal_id,
+                entry_work_item_id=(
+                    None if retired is None else retired.get("id")
+                ),
+                reason="return_unrecoverable",
+            )
+        return True
+
     def check_portal_authentication_physical_progress(self, now):
         """Check the same physical budget even when no map plan is rebuilt."""
         # A pinned observation period with no active branch must be concluded
@@ -1152,6 +1209,7 @@ class GPBranchFrontierMixin:
                     if callable(fail):
                         fail("return_unrecoverable")
                     tree = getattr(self, "gp_exploration_tree", None)
+                    tree_branch = None
                     if tree is not None:
                         tree_branch = tree.branches.get(int(auth.branch_id))
                         if tree_branch is not None:
@@ -1159,6 +1217,11 @@ class GPBranchFrontierMixin:
                             tree_branch["authentication_failure_reason"] = (
                                 "return_unrecoverable")
                             tree_branch["return_obligation_pending"] = True
+                    retire = getattr(
+                        self, "retire_unrecoverable_portal_entry", None
+                    )
+                    if callable(retire):
+                        retire(auth, tree_branch, now)
                     self.release_active_frontier(
                         discard_prefetch=True,
                         preserve_place_departure=bool(getattr(
