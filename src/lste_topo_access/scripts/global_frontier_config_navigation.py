@@ -228,3 +228,11 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.place_wall_progress_radius = max(
             0.05, float(gp("~place_wall_progress_radius", 0.35))
         )
+        # A predecessor release ACK is normally immediate. When the bridge
+        # restamped the controller identity on adoption, or already cleaned
+        # the route up, the exact ACK never arrives and successor planning is
+        # gated forever. Bound that wait in wall time; the route's own health
+        # budgets stay in simulation time.
+        self.controller_release_ack_wall_seconds = max(
+            10.0, float(gp("~controller_release_ack_wall_seconds", 30.0))
+        )

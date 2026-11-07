@@ -173,6 +173,14 @@ class GlobalFrontierPlanningRuntimeMixin:
             if drain_terminals is not None:
                 drain_terminals()
             self._clear_planning_preempt_if_drained()
+            # A pending predecessor ACK gates every successor cycle and no
+            # policy timer reaches it. Bound that wait in wall time before the
+            # block below is evaluated.
+            expire_release = getattr(
+                self, "expire_stale_controller_release_wait", None
+            )
+            if callable(expire_release):
+                expire_release()
             pending_for_route = getattr(
                 self, "_pending_controller_release_for_route", None
             )

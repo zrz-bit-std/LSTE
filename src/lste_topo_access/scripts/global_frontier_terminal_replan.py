@@ -5,6 +5,8 @@ from the fixed tick.  The lock/timer path remains only for older compositions
 and focused compatibility fixtures.
 """
 
+import time
+
 import rospy
 
 from lifecycle_manager import EventType
@@ -15,6 +17,21 @@ class GlobalFrontierTerminalReplanMixin:
 
     _FAILURE_STATUS_CODES = frozenset((4, 5, 8, 9))
     _MAX_PENDING_CONTROLLER_RELEASES = 64
+    # The bridge restamps these two fields when it adopts a frontier goal.  A
+    # contract built from this node's own publication (because the route ended
+    # without a terminal) therefore holds pre-adoption values, while the
+    # watchdog ACK holds the post-adoption ones.  They are the only fields
+    # allowed to advance, and only in the monotonic direction.
+    _LEASE_RELEASE_ADOPTION_FIELDS = ("transaction_id", "action_generation")
+    # Ownership identity.  Any divergence here means a different route, not a
+    # restamped goal, so the ACK must stay exact.
+    _LEASE_RELEASE_EXACT_FIELDS = (
+        "route_id",
+        "route_kind",
+        "lifecycle_transaction_id",
+        "graph_transaction_id",
+    )
+    _DEFAULT_CONTROLLER_RELEASE_ACK_WALL_SECONDS = 30.0
 
     def _pending_controller_release_table(self):
         """Return the route-keyed predecessor release contracts.
@@ -268,16 +285,38 @@ class GlobalFrontierTerminalReplanMixin:
             )
 
         mismatch = None
-        for field in (
-            "route_id",
-            "route_kind",
-            "transaction_id",
-            "lifecycle_transaction_id",
-            "action_generation",
-            "graph_transaction_id",
-        ):
+        for field in self._LEASE_RELEASE_EXACT_FIELDS:
             expected = pending.get(field, 0 if field != "route_kind" else "")
             if identity[field] != expected:
+                mismatch = "lease_release_ack_%s_mismatch" % field
+                break
+        pre_adoption = dict(pending)
+        adopted_fields = []
+        if mismatch is None:
+            terminal_received = bool(pending.get("terminal_received", False))
+            for field in self._LEASE_RELEASE_ADOPTION_FIELDS:
+                try:
+                    expected_value = int(pending.get(field, 0) or 0)
+                    received_value = int(identity.get(field, 0) or 0)
+                except (TypeError, ValueError):
+                    mismatch = "lease_release_ack_%s_invalid" % field
+                    break
+                if received_value == expected_value:
+                    continue
+                # A terminal-less predecessor never learned the identity the
+                # bridge actually dispatched.  The bridge re-stamps the goal
+                # on adoption, so the ACK legitimately carries a larger
+                # controller identity for the very same route.  Accept only
+                # that monotonic same-route advance; every other divergence
+                # stays stale.
+                if (
+                    not terminal_received
+                    and expected_value > 0
+                    and received_value > expected_value
+                ):
+                    pending[field] = received_value
+                    adopted_fields.append(field)
+                    continue
                 mismatch = "lease_release_ack_%s_mismatch" % field
                 break
         if mismatch is None and pending.get("map_epoch") is not None:
@@ -305,6 +344,15 @@ class GlobalFrontierTerminalReplanMixin:
                 received_identity=identity,
             )
             return False
+        if adopted_fields:
+            self.publish_status(
+                "controller_lease_release_ack_identity_adopted",
+                route_id=identity.get("route_id", 0),
+                adopted_fields=list(adopted_fields),
+                expected_identity=pre_adoption,
+                received_identity=dict(identity),
+                reason="bridge_restamped_controller_goal_on_adoption",
+            )
         if str(payload.get("controller_lease", "")).strip().lower() not in {
             "released",
             "transport_released",
@@ -389,6 +437,86 @@ class GlobalFrontierTerminalReplanMixin:
                 rospy.Duration(0.01), self.on_immediate_plan, oneshot=True
             )
         return False
+
+    def _controller_release_ack_wall_budget(self):
+        """Return the wall-clock bound for one pending release ACK."""
+        try:
+            configured = float(
+                getattr(self, "controller_release_ack_wall_seconds", 0.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            configured = 0.0
+        if configured <= 0.0:
+            configured = self._DEFAULT_CONTROLLER_RELEASE_ACK_WALL_SECONDS
+        return max(5.0, configured)
+
+    def expire_stale_controller_release_wait(self, now_wall=None):
+        """Drop predecessor release contracts that can never be ACKed.
+
+        ``awaiting_controller_lease_release_ack`` gates every successor
+        planning cycle and no policy timer reaches it.  A bridge that
+        restamped the controller identity on adoption, or one that already
+        cleaned the route up, can therefore stall the graph for the rest of
+        the mission even though the transport lease is gone.  Bound that wait
+        in wall time only: the route's own health budgets stay in simulation
+        time.
+        """
+        table = self._pending_controller_release_table()
+        wait_since = getattr(
+            self, "pending_controller_release_wait_since_wall", None
+        )
+        if not isinstance(wait_since, dict):
+            wait_since = {}
+            self.pending_controller_release_wait_since_wall = wait_since
+        expired = []
+        if table:
+            now_wall = (
+                time.monotonic() if now_wall is None else float(now_wall)
+            )
+            budget = self._controller_release_ack_wall_budget()
+            for raw_route_id, contract in list(table.items()):
+                try:
+                    route_id = int(raw_route_id or 0)
+                except (TypeError, ValueError):
+                    continue
+                if route_id <= 0:
+                    continue
+                started = wait_since.get(route_id)
+                if started is None:
+                    wait_since[route_id] = now_wall
+                    continue
+                try:
+                    waited = now_wall - float(started)
+                except (TypeError, ValueError):
+                    wait_since[route_id] = now_wall
+                    continue
+                if waited < budget:
+                    continue
+                table.pop(raw_route_id, None)
+                wait_since.pop(route_id, None)
+                expired.append((route_id, dict(contract), waited))
+        # A contract closed by its exact ACK must not leave a stale anchor.
+        for raw_route_id in list(wait_since):
+            if raw_route_id not in table:
+                wait_since.pop(raw_route_id, None)
+        if not expired:
+            return []
+        self._sync_controller_release_compatibility()
+        budget = self._controller_release_ack_wall_budget()
+        for route_id, contract, waited in expired:
+            self.publish_status(
+                "controller_lease_release_desynced",
+                route_id=route_id,
+                route_kind=str(contract.get("route_kind", "") or ""),
+                wall_seconds=round(float(waited), 1),
+                budget_seconds=budget,
+                reason="controller_release_ack_wall_timeout",
+                expected_identity=contract,
+            )
+        # The successor is authorized now; bypass only the compute throttle so
+        # the same timer tick can select the next route.
+        self.last_planning_wall = 0.0
+        return [route_id for route_id, _contract, _waited in expired]
 
     def schedule_terminal_replan(self, completed, terminal_delta):
         """Release a finished lease and schedule normal successor selection."""

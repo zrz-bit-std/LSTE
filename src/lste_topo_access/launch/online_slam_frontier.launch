@@ -106,6 +106,12 @@
        simulation-time timer can reach while the robot is also not moving. -->
   <arg name="place_wall_fallback_seconds" default="45.0"/>
   <arg name="place_wall_progress_radius" default="0.35"/>
+  <!-- Last-resort liveness bound for a predecessor controller-lease ACK.
+       The bridge normally acknowledges a release immediately; a restamped
+       identity or an already-cleaned route can withhold it forever, which
+       would gate every successor planning cycle. Route health budgets stay
+       in simulation time; this only bounds the handshake. -->
+  <arg name="controller_release_ack_wall_seconds" default="30.0"/>
   <arg name="completed_radius" default="1.25"/>
   <!-- Research method boundary. All values keep the same SLAM, Navfn, TEB,
        perception and task pipeline; they only change persistent exploration
@@ -236,6 +242,7 @@
     <param name="rejected_timeout" value="$(arg rejected_timeout)"/>
     <param name="place_wall_fallback_seconds" value="$(arg place_wall_fallback_seconds)"/>
     <param name="place_wall_progress_radius" value="$(arg place_wall_progress_radius)"/>
+    <param name="controller_release_ack_wall_seconds" value="$(arg controller_release_ack_wall_seconds)"/>
     <param name="completed_radius" value="$(arg completed_radius)"/>
     <param name="exploration_method" value="$(arg exploration_method)"/>
     <param name="target_done_policy" value="$(arg target_done_policy)"/>

@@ -349,6 +349,10 @@ class GlobalFrontierRuntimeStateMixin:
         self.awaiting_controller_lease_release_ack = False
         self.last_controller_lease_release_ack = None
         self.last_controller_lease_wait_report_wall = 0.0
+        # Wall-clock anchor per pending release contract. The bridge normally
+        # closes these with an exact ACK; this only bounds one that no bridge
+        # message can ever close.
+        self.pending_controller_release_wait_since_wall = {}
         # Bridge terminal failures are accepted only after this process has
         # observed the matching action dispatch contract.
         self._bridge_dispatch_contracts = {}
