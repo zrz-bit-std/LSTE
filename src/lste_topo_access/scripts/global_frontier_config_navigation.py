@@ -216,3 +216,15 @@ class GlobalFrontierNavigationConfigurationMixin:
         # route out of candidate selection long enough to explore a different
         # branch instead of alternating between the same two boundaries.
         self.rejected_timeout = max(5.0, float(gp("~rejected_timeout", 180.0)))
+        # Place observation budgets remain simulation-time policy. This is a
+        # last-resort liveness bound for the pathological case where the Place
+        # still lacks its first observation, no observation WorkItem can be
+        # dispatched, and the robot has not moved in wall time either. Without
+        # it a slow simulator can hold the graph until the mission watchdog
+        # declares a failure that no policy timer was able to reach.
+        self.place_wall_fallback_seconds = max(
+            10.0, float(gp("~place_wall_fallback_seconds", 45.0))
+        )
+        self.place_wall_progress_radius = max(
+            0.05, float(gp("~place_wall_progress_radius", 0.35))
+        )

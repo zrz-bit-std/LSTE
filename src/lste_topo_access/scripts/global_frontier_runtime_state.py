@@ -12,6 +12,7 @@ from global_frontier_place_lifecycle import (
     PlaceDepartureTransaction,
 )
 from global_frontier_place_memory import FrontierRegionMemory
+from global_frontier_place_wall_fallback import PlaceWallFallback
 from global_frontier_completion_recovery import GraphCompletionStateMachine
 from global_frontier_portal_belief import PortalHypothesisLedger
 from global_frontier_route_history import ReachedRouteHistory
@@ -117,6 +118,16 @@ class GlobalFrontierRuntimeStateMixin:
             self.navfn_make_plan_service, GetPlan
         )
         self.pose_odom = None
+        # Wall-clock dwell of the current uncovered Place. Observation work
+        # budgets stay in simulation time; this only releases a graph hold
+        # that no simulation-time timer can reach.
+        self.place_wall_fallback = PlaceWallFallback(
+            seconds=getattr(self, "place_wall_fallback_seconds", 45.0),
+            progress_radius=getattr(
+                self, "place_wall_progress_radius", 0.35,
+            ),
+        )
+        self._sim_wall_anchor = None
         # Recovery arbitration uses the forward lidar arc, not the global
         # minimum: a corridor wall close to either side is normal, while an
         # obstacle directly in front means a new global endpoint cannot make

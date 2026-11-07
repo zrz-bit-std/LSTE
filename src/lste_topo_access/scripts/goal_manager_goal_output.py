@@ -146,6 +146,48 @@ class GoalManagerGoalOutputMixin:
                 return False
         return True
 
+    def _apply_geometry_route_identity(self, intent):
+        """Complete the canonical identity of a non-frontier geometry route.
+
+        Frontier and target sources already own an explicit identity branch.
+        Every other executable source (context follow, in-place observation,
+        legacy local frontier) still runs through the same TEB bridge, so it
+        must present the last canonical map epoch and the inherited frontier
+        route id.  Without them the bridge rejects the command as
+        ``missing_map_epoch`` or ``missing_route_identity`` and the robot
+        remains parked at the previous endpoint while the planner stream is
+        invalidated.
+        """
+        if not bool(getattr(self, "global_frontier_enabled", False)):
+            return intent
+        source = str(intent.get("source", "") or "")
+        if source == "global_slam_frontier" or source.startswith("target_"):
+            return intent
+        epoch = self._canonical_map_epoch()
+        if epoch > 0:
+            intent["map_epoch"] = epoch
+            intent["origin_epoch"] = max(
+                1,
+                int(
+                    getattr(self, "global_frontier_origin_epoch", None)
+                    or epoch
+                ),
+            )
+            intent["projection_epoch"] = max(
+                1,
+                int(
+                    getattr(self, "global_frontier_projection_epoch", None)
+                    or epoch
+                ),
+            )
+        inherited_route_id = int(
+            getattr(self, "global_frontier_route_id", 0) or 0
+        )
+        if inherited_route_id > 0:
+            intent["route_id"] = inherited_route_id
+            intent["route_ownership"] = "observation"
+        return intent
+
     @staticmethod
     def _frame_name(frame: str) -> str:
         return (frame or "odom").strip().lstrip("/") or "odom"
@@ -632,6 +674,7 @@ class GoalManagerGoalOutputMixin:
             intent["target_viewpoint_attempt_id"] = str(
                 getattr(self, "target_viewpoint_attempt_id", "") or ""
             )
+        intent = self._apply_geometry_route_identity(intent)
         # The graph identity is present at the top level for both frontier and
         # target routes. Keep the nested context derived from that same
         # identity so Bridge adoption cannot observe two route contracts.

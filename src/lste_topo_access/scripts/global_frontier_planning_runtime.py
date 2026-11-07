@@ -17,6 +17,77 @@ class GlobalFrontierPlanningRuntimeMixin:
         lock = getattr(self, "planning_lock", None)
         return nullcontext() if lock is None else lock
 
+    def sim_wall_ratio(self, now_wall=None):
+        """Return the simulation-to-wall clock rate for diagnostics.
+
+        The ratio is anchored at the first call in this process. It explains
+        why a simulation-time budget can outlive a wall-clock mission bound;
+        it never feeds back into any policy decision.
+        """
+        now_wall = time.monotonic() if now_wall is None else float(now_wall)
+        now_sim = now_for(self)
+        anchor = getattr(self, "_sim_wall_anchor", None)
+        if anchor is None:
+            self._sim_wall_anchor = (now_sim, now_wall)
+            return None
+        elapsed_wall = now_wall - float(anchor[1])
+        if elapsed_wall < 5.0:
+            return None
+        return round((now_sim - float(anchor[0])) / elapsed_wall, 3)
+
+    def _apply_place_wall_fallback(self):
+        """Release one Place coverage gate that cannot progress in wall time.
+
+        This mirrors the graph adapter's best-effort exit, but measures the
+        dwell from the first timer tick that observed the uncovered Place.
+        The adapter timer only starts when a graph route is materialized, so a
+        held graph could otherwise wait for a budget that was never armed.
+        """
+        helper = getattr(self, "place_wall_fallback", None)
+        report_method = getattr(self, "place_progress_report", None)
+        pose = getattr(self, "pose_odom", None)
+        now_wall = time.monotonic()
+        ratio = self.sim_wall_ratio(now_wall)
+        if helper is None or not callable(report_method) or pose is None:
+            if helper is not None:
+                helper.reset()
+            return False
+        report = report_method()
+        place_id = report.get("place_id")
+        ledger = getattr(self, "place_work_items", None)
+        counter = getattr(
+            ledger, "actionable_frontier_observation_count", None
+        )
+        actionable = (
+            int(counter(place_id) or 0)
+            if place_id is not None and callable(counter)
+            else 0
+        )
+        waiting = (
+            place_id is not None
+            and not bool(report.get("observed"))
+            and actionable == 0
+        )
+        due = helper.observe(
+            place_id, waiting, (float(pose.x), float(pose.y)), now_wall,
+        )
+        if due is None:
+            return False
+        if not self._mark_place_observation_best_effort(due, now_for(self)):
+            helper.reset()
+            return False
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "place_observation_wall_fallback",
+                place_id=int(due),
+                wall_seconds=round(float(helper.seconds), 1),
+                sim_wall_ratio=ratio,
+                reason="place_observation_no_wall_progress",
+            )
+        helper.reset()
+        return True
+
     def planning_should_preempt(self):
         """Return whether the current snapshot has lost execution ownership."""
         if getattr(self, "planning_preempt_requested", False):
@@ -217,6 +288,10 @@ class GlobalFrontierPlanningRuntimeMixin:
         self.planning_cycle_started_wall = started
         try:
             try:
+                # A held graph materializes no route, so the adapter's
+                # simulation-time best-effort timer is never armed. Bound that
+                # hold in wall time before the mission watchdog fires.
+                self._apply_place_wall_fallback()
                 recovery = getattr(self, "_update_place_execution_recovery", None)
                 if callable(recovery) and recovery():
                     return
