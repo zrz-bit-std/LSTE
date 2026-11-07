@@ -72,6 +72,7 @@ class GlobalFrontierSelectionContextMixin:
         self.last_portal_bound_reused = 0
         self.last_portal_bound_reprojection_skips = 0
         self.last_portal_bound_relaxed_reused = 0
+        self.last_portal_gp_witness_admitted = 0
         self.last_sealed_portal_reentry_skips = 0
         self.last_sealed_portal_reentry_region_id = None
         self.last_sealed_portal_reentry_gate = None

@@ -201,10 +201,37 @@ class GlobalFrontierPortalAdmissionMixin:
                 pass
 
         covered_region = destination_region
+        # A destination Place that only GP ray authentication witnessed is not
+        # physically covered: the robot peeked through the doorway from the
+        # gate and never stood in the room.  Treating such a Place as covered
+        # lets the 1.25 m physical-coverage radius of the *current* room
+        # swallow the new doorway, so the first real crossing is refused and
+        # the source Place deadlocks at zero candidates.  Keep the virtual
+        # witness distinct from a physical viewpoint and allow that first
+        # crossing.
+        gp_virtual_witness = bool(
+            destination_region is not None
+            and bool(
+                destination_region.get(
+                    "observed_by_portal_authentication", False,
+                )
+            )
+            and int(destination_region.get("endpoint_observations", 0) or 0) == 0
+            and str(destination_region.get("state", "")).strip().lower()
+            == "open"
+        )
+        if gp_virtual_witness:
+            self.last_portal_gp_witness_admitted = int(
+                getattr(self, "last_portal_gp_witness_admitted", 0)
+            ) + 1
         physical_coverage = getattr(
             self.region_memory, "physical_coverage_region", None,
         )
-        if physical_coverage is not None and physical_destination is not None:
+        if (
+            physical_coverage is not None
+            and physical_destination is not None
+            and not gp_virtual_witness
+        ):
             observed = physical_coverage(
                 physical_destination,
                 self.completed_radius,
