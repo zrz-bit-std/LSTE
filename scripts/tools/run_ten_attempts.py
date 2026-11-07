@@ -99,16 +99,23 @@ def capture_windows(directory):
 
 
 def read_new_records(path, offset):
+    """Read complete appended records from a byte offset.
+
+    Binary offsets are deliberate: a text-mode ``tell()`` cookie is not a
+    stable position while another process is appending large JSON lines.  A
+    partial trailing line is returned un-consumed and retried next cycle.
+    """
     records = []
     if not path.exists():
         return records, offset
-    with path.open(encoding="utf-8", errors="replace") as stream:
+    with path.open("rb") as stream:
         stream.seek(offset)
         while True:
             start = stream.tell()
-            line = stream.readline()
-            if not line or not line.endswith("\n"):
+            raw = stream.readline()
+            if not raw or not raw.endswith(b"\n"):
                 return records, start
+            line = raw.decode("utf-8", "replace")
             if " event=" not in line or " data=" not in line:
                 continue
             event = line.split(" event=", 1)[1].split(" data=", 1)[0]
@@ -122,16 +129,68 @@ def read_new_records(path, offset):
             except Exception:
                 data["_wall"] = time.time()
             records.append((event, data))
+    return records, offset
+
+
+def recover_latest_sample(path, tail_bytes=4_000_000):
+    """Recover the newest complete sample from the file tail.
+
+    Used only when the incremental reader has made no progress for several
+    seconds while the metrics file is still growing.  This prevents a
+    partial-line/offset problem from becoming a false stationary failure.
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as stream:
+            stream.seek(max(0, size - int(tail_bytes)))
+            tail = stream.read()
+    except (OSError, ValueError):
+        return None
+    for raw in reversed(tail.split(b"\n")):
+        if b" event=sample" not in raw or b" data=" not in raw:
+            continue
+        line = raw.decode("utf-8", "replace")
+        try:
+            data = json.loads(line.split(" data=", 1)[1])
+        except Exception:
+            continue
+        if not data.get("pose"):
+            continue
+        try:
+            data["_wall"] = dt.datetime.fromisoformat(
+                line.split(" level=", 1)[0]).timestamp()
+        except Exception:
+            data["_wall"] = time.time()
+        return data
+    return None
 
 
 def start_recorder(directory, run, environment):
     path = directory / (run + "_state.jsonl")
+    pose_path = directory / (run + "_pose.jsonl")
     command = ["bash", "-lc",
                "source scripts/config/pipeline_env.sh; exec python3 "
-               "scripts/tools/record_search_events.py --out %s" % str(path)]
+               "scripts/tools/record_search_events.py --out %s --pose-out %s"
+               % (str(path), str(pose_path))]
     process = subprocess.Popen(command, cwd=str(WS), env=environment,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return process, path
+    return process, path, pose_path
+
+
+def read_latest_json_line(path, kind):
+    """Return the newest complete record of one kind from a small JSONL file."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        if payload.get("kind") == kind:
+            return payload
+    return None
 
 
 def run_attempt(campaign, number, args, config):
@@ -171,25 +230,88 @@ def run_attempt(campaign, number, args, config):
                 if probe.returncode == 0:
                     break
                 time.sleep(2)
-            recorder, state_path = start_recorder(directory, run, environment)
+            recorder, state_path, pose_path = start_recorder(
+                directory, run, environment
+            )
             result["state_recording"] = str(state_path)
+            result["pose_recording"] = str(pose_path)
             watch = StationaryWatch(args.stall_seconds, args.radius)
             offset = 0
             latest = {}
+            pose_latest = {}
             exploration_started = None
             last_report = 0.0
+            last_parsed = time.monotonic()
+            reader_stale_seconds = 15.0
             while True:
                 now = time.monotonic()
+                pose_record = read_latest_json_line(pose_path, "pose")
+                if pose_record is not None:
+                    previous_pose_ros = pose_latest.get("ros")
+                    pose_ros = pose_record.get("ros")
+                    if (
+                        previous_pose_ros is None
+                        or pose_ros is None
+                        or float(pose_ros) >= float(previous_pose_ros)
+                    ):
+                        pose_latest = pose_record
+                        observed = now - max(
+                            0.0, time.time() - pose_record.get("wall", 0.0)
+                        )
+                        watch.observe(
+                            [pose_record["x"], pose_record["y"],
+                             pose_record.get("theta", 0.0)],
+                            observed,
+                        )
+                state_record = read_latest_json_line(state_path, "state")
+                if (
+                    state_record is not None
+                    and int(state_record.get("state", -1)) == 2
+                    and result["status"] != "success"
+                ):
+                    result.update(status="success", reason="target_locked",
+                                  completion_event=state_record,
+                                  locked_event=state_record,
+                                  locked_source="state_recorder")
                 records, offset = read_new_records(metrics, offset)
+                if records:
+                    last_parsed = now
+                # The incremental reader is useful for event ownership but a
+                # single unread sample line must never drive the stationary
+                # watchdog.  Reconcile the watchdog against the newest
+                # complete sample in the file tail on every cycle.
+                tail_sample = recover_latest_sample(metrics, tail_bytes=262144)
+                if tail_sample is not None and tail_sample.get("pose"):
+                    previous_ros = latest.get("ros_time")
+                    tail_ros = tail_sample.get("ros_time")
+                    if (
+                        previous_ros is None
+                        or tail_ros is None
+                        or float(tail_ros) >= float(previous_ros)
+                    ):
+                        latest = tail_sample
+                        observed = now - max(
+                            0.0, time.time() - tail_sample.get("_wall", 0.0)
+                        )
+                        watch.observe(tail_sample["pose"], observed)
                 for event, data in records:
                     if event == "run_start":
                         exploration_started = data.get("_wall")
                     if event == "sample" and data.get("pose"):
-                        if exploration_started is None:
-                            exploration_started = data.get("_wall")
-                        latest = data
-                        observed = now - max(0.0, time.time() - data["_wall"])
-                        watch.observe(data["pose"], observed)
+                        previous_ros = latest.get("ros_time")
+                        sample_ros = data.get("ros_time")
+                        if (
+                            previous_ros is None
+                            or sample_ros is None
+                            or float(sample_ros) >= float(previous_ros)
+                        ):
+                            if exploration_started is None:
+                                exploration_started = data.get("_wall")
+                            latest = data
+                            observed = now - max(
+                                0.0, time.time() - data["_wall"]
+                            )
+                            watch.observe(data["pose"], observed)
                     if event == "task_done" and data.get("value") is True:
                         result.update(status="success", completion_event=data)
                 locked = locked_state(records)
@@ -205,31 +327,106 @@ def run_attempt(campaign, number, args, config):
                                   stop_pose=latest.get("pose"), last_sample=latest)
                     break
                 if watch.stalled(now):
-                    result.update(status="failed",
-                                  reason="stationary_over_%g_wall_seconds" % args.stall_seconds,
-                                  stall_pose=latest.get("pose"), stall_anchor=watch.anchor,
-                                  stationary_wall_seconds=watch.age(now), last_sample=latest)
-                    break
+                    # A non-sample line can keep the incremental reader
+                    # advancing while every sample after the last pose is
+                    # missed.  Always reconcile against the newest complete
+                    # sample in the file tail before declaring a failure.
+                    recovered = recover_latest_sample(metrics)
+                    previous_ros = latest.get("ros_time")
+                    recovered_ros = (
+                        None if recovered is None else recovered.get("ros_time")
+                    )
+                    newer_sample = (
+                        recovered is not None
+                        and recovered.get("pose")
+                        and (
+                            previous_ros is None
+                            or recovered_ros is None
+                            or float(recovered_ros) > float(previous_ros)
+                        )
+                    )
+                    if newer_sample:
+                        latest = recovered
+                        observed = now - max(
+                            0.0, time.time() - recovered.get("_wall", 0.0)
+                        )
+                        watch.observe(recovered["pose"], observed)
+                        try:
+                            offset = metrics.stat().st_size
+                        except OSError:
+                            pass
+                        last_parsed = now
+                        result["metrics_reader_recoveries"] = int(
+                            result.get("metrics_reader_recoveries", 0)
+                        ) + 1
+                        result["metrics_reader_last_recovery_ros"] = (
+                            recovered.get("ros_time")
+                        )
+                    if watch.stalled(now):
+                        reported_pose = (
+                            pose_latest.get("pose")
+                            if isinstance(pose_latest, dict)
+                            and pose_latest.get("pose") is not None
+                            else latest.get("pose")
+                        )
+                        if reported_pose is None and pose_latest:
+                            reported_pose = [
+                                pose_latest.get("x"), pose_latest.get("y"),
+                                pose_latest.get("theta", 0.0),
+                            ]
+                        result.update(
+                            status="failed",
+                            reason="stationary_over_%g_wall_seconds" % args.stall_seconds,
+                            stall_pose=reported_pose,
+                            stall_anchor=watch.anchor,
+                            stationary_wall_seconds=watch.age(now),
+                            last_sample=latest,
+                            last_pose_record=pose_latest or None,
+                        )
+                        break
                 code = launcher.poll()
                 if code is not None and code != 0:
                     result.update(status="infrastructure_failure", reason="launcher_failed",
                                   launcher_exit_code=code)
                     break
-                if not latest and elapsed_total > 420:
+                if not latest and not pose_latest and elapsed_total > 420:
                     result.update(status="infrastructure_failure",
                                   reason="no_metrics_pose_after_420s")
                     break
                 if now - last_report >= 60:
-                    print(json.dumps({"run": run, "attempt": number,
-                                      "pose": latest.get("pose"),
-                                      "total_s": round(elapsed_total, 1),
-                                      "stall_s": round(watch.age(now), 1)},
-                                     ensure_ascii=False), flush=True)
+                    try:
+                        metrics_size = metrics.stat().st_size
+                    except OSError:
+                        metrics_size = None
+                    diagnostic = {
+                        "run": run, "attempt": number,
+                        "pose": (
+                            pose_latest.get("x"), pose_latest.get("y")
+                        ) if pose_latest else latest.get("pose"),
+                        "total_s": round(elapsed_total, 1),
+                        "stall_s": round(watch.age(now), 1),
+                        "latest_ros": latest.get("ros_time"),
+                        "tail_ros": (
+                            None if tail_sample is None
+                            else tail_sample.get("ros_time")
+                        ),
+                        "metrics_size": metrics_size,
+                        "record_count": len(records),
+                    }
+                    print(json.dumps(diagnostic, ensure_ascii=False), flush=True)
                     save(campaign / "live_status.json",
-                         dict(result, pose=latest.get("pose"),
+                         dict(result, pose=(
+                             [pose_latest.get("x"), pose_latest.get("y")]
+                             if pose_latest else latest.get("pose")),
                               stationary_wall_seconds=watch.age(now),
                               total_elapsed_seconds=elapsed_total,
-                              runner_pid=os.getpid()))
+                              runner_pid=os.getpid(),
+                              latest_ros=latest.get("ros_time"),
+                              tail_ros=(
+                                  None if tail_sample is None
+                                  else tail_sample.get("ros_time")
+                              ),
+                              metrics_size=metrics_size))
                     last_report = now
                 time.sleep(2)
     finally:

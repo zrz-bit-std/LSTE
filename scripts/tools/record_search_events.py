@@ -10,6 +10,7 @@ import json
 import time
 
 import rospy
+from geometry_msgs.msg import Pose2D
 from std_msgs.msg import Bool
 
 from lste_msgs.msg import LsteState
@@ -18,7 +19,9 @@ from lste_msgs.msg import LsteState
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
+    parser.add_argument("--pose-out", default="")
     args = parser.parse_args()
+    pose_out = args.pose_out or (args.out + ".pose")
 
     deadline = time.time() + 600.0
     while True:
@@ -32,9 +35,13 @@ def main():
             time.sleep(1.0)
 
     stream = open(args.out, "a", buffering=1)
+    pose_stream = open(pose_out, "a", buffering=1)
 
     def write(payload):
         stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def write_pose(payload):
+        pose_stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def on_state(msg):
         write({"kind": "state", "wall": time.time(),
@@ -45,8 +52,15 @@ def main():
         write({"kind": "task_done", "wall": time.time(),
                "ros": rospy.Time.now().to_sec(), "value": bool(msg.data)})
 
+    def on_pose(msg):
+        write_pose({"kind": "pose", "wall": time.time(),
+                    "ros": rospy.Time.now().to_sec(),
+                    "x": float(msg.x), "y": float(msg.y),
+                    "theta": float(msg.theta)})
+
     rospy.Subscriber("/lste/state", LsteState, on_state, queue_size=50)
     rospy.Subscriber("/lste/task_done", Bool, on_done, queue_size=10)
+    rospy.Subscriber("/rbt_pose", Pose2D, on_pose, queue_size=50)
     rate = rospy.Rate(2.0)
     while not rospy.is_shutdown():
         rate.sleep()
