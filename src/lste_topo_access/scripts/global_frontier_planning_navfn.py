@@ -228,7 +228,18 @@ class GlobalFrontierPlanningNavfnMixin:
         }
 
     def _navfn_local_goal_place(self, goal_xy):
-        """Bind a local Navfn request to the Place owning its endpoint."""
+        """Bind a local Navfn request to the Place owning its endpoint.
+
+        Portal authentication is an explicit cross-doorway move: the robot
+        stands on the destination side while the return goal is on the source
+        side, so the path necessarily starts outside the goal's Place mask.
+        ``set_mode`` already treats any active authentication as unbounded;
+        binding the validation to the goal's Place would reject every
+        legitimate return route as a path leak.
+        """
+        auth_getter = getattr(self, "active_portal_authentication", None)
+        if callable(auth_getter) and auth_getter() is not None:
+            return None
         mask = getattr(self, "current_place_scope_mask", None)
         message = getattr(self, "current_place_scope_message", None)
         place_id = getattr(self, "current_place_scope_id", None)

@@ -145,6 +145,40 @@ class NavfnAsyncValidationTest(unittest.TestCase):
         self.assertEqual(explorer._navfn_local_goal_place((2.2,3.2)),2)
         self.assertIsNone(explorer._navfn_local_goal_place((7.2,3.2)))
 
+    def _bindable_explorer(self):
+        import numpy as np
+        explorer = _SlowNavfnExplorer()
+        explorer.current_place_scope_mask = np.zeros((10, 10), dtype=bool)
+        explorer.current_place_scope_mask[:, :5] = True
+        explorer.current_place_scope_valid = True
+        explorer.current_place_scope_id = 2
+        explorer.current_physical_place_id = 2
+        explorer.current_place_scope_message = SimpleNamespace(
+            info=SimpleNamespace(resolution=1.0,
+                origin=SimpleNamespace(position=SimpleNamespace(x=0.0, y=0.0)))
+        )
+        return explorer
+
+    def test_portal_authentication_is_not_bound_to_the_place_scope(self):
+        explorer = self._bindable_explorer()
+        explorer.active_portal_authentication = lambda: SimpleNamespace(
+            state="returning"
+        )
+        payload = explorer._navfn_validation_request_payload(
+            (5.8, 2.1), (3.35, 2.05), "map", 0.1,
+        )
+        # The robot is on the destination side and the return goal is on the
+        # source side. Binding this request to the goal's Place would reject
+        # the legitimate return path as a leak.
+        self.assertIsNone(payload["scope_place_id"])
+
+    def test_local_goal_still_binds_without_authentication(self):
+        explorer = self._bindable_explorer()
+        payload = explorer._navfn_validation_request_payload(
+            (2.2, 3.2), (2.4, 3.4), "map", 0.1,
+        )
+        self.assertEqual(payload["scope_place_id"], 2)
+
     def test_slow_service_does_not_block_planning_call(self):
         explorer = _SlowNavfnExplorer()
         started = time.monotonic()
