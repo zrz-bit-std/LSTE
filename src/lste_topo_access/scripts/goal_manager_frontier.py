@@ -581,10 +581,12 @@ class GoalManagerFrontierMixin:
         target_room_claim_release = bool(
             fields.get("target_room_claim_release", False)
         )
+        force_region_recovery = bool(fields.get("force_region_recovery", False))
         if (
             self.frontier_replan_pending_id > 0
             and self.frontier_replan_ready_id != self.frontier_replan_pending_id
             and not target_room_claim_release
+            and not force_region_recovery
         ):
             return self.frontier_replan_pending_id
         self.frontier_replan_request_id += 1

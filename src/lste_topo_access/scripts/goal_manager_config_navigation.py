@@ -54,6 +54,15 @@ class GoalManagerNavigationConfigMixin:
         self.frontier_replan_request_id = 0
         self.frontier_replan_pending_id = 0
         self.frontier_replan_ready_id = 0
+        # Bounded escape for successor starvation: if the frontier executive
+        # never publishes a strictly-newer route after the current one reaches
+        # its terminal, the Goal Manager would otherwise hold a zero command
+        # forever (planner_contract_boundary).  After this wall-clock timeout
+        # it forces a region-recovery replan instead.
+        self.frontier_successor_starvation_timeout = max(
+            5.0, float(gp("~frontier_successor_starvation_timeout", 30.0))
+        )
+        self.frontier_successor_starvation_since = None
         self.teb_goal_terminal_topic = gp(
             "~teb_goal_terminal_topic", "/lste/teb_goal_terminal"
         )

@@ -221,3 +221,23 @@ class FrontierRegionStateMixin:
         region["last_selected"] = float(now)
         region["last_reason"] = str(reason)
         return True
+
+    def reactivate_dormant(self, now, reason="frontier_successor_recovery"):
+        """Re-open dormant places as a bounded starvation-recovery edge.
+
+        Dormant places are normally immutable completed-place memory.  When
+        the frontier executive has no other candidate and the base is
+        physically clear, a permanent hold leaves the Goal Manager publishing
+        a zero command forever.  Re-opening only happens on an explicit
+        force-region-recovery replan; normal selection never re-enters a
+        dormant place.
+        """
+        reopened = 0
+        for region in self.regions:
+            if region.get("state") == PLACE_DORMANT:
+                region["state"] = PLACE_OPEN
+                region["failures"] = 0
+                region["last_selected"] = float(now)
+                region["last_reason"] = str(reason)
+                reopened += 1
+        return reopened

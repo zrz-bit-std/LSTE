@@ -312,6 +312,26 @@ class GoalManagerGoalArbitrationMixin:
             <= int(getattr(self, "last_published_frontier_route_id", 0) or 0)
             and not turn_only
         ):
+            starvation_since = getattr(
+                self, "frontier_successor_starvation_since", None
+            )
+            timeout = getattr(
+                self, "frontier_successor_starvation_timeout", 30.0
+            )
+            if starvation_since is None:
+                self.frontier_successor_starvation_since = now
+            elif now - starvation_since > timeout:
+                self.frontier_successor_starvation_since = now
+                rospy.logwarn(
+                    "GoalManager: no frontier successor for %.1fs; forcing "
+                    "region-recovery replan",
+                    now - starvation_since,
+                )
+                self.request_global_frontier_replan(
+                    "frontier_successor_starvation",
+                    force_region_recovery=True,
+                )
+                return None
             rospy.loginfo_throttle(
                 2.0,
                 "GoalManager: holds terminal frontier route=%d until a "
@@ -319,6 +339,7 @@ class GoalManagerGoalArbitrationMixin:
                 int(getattr(self, "global_frontier_route_id", 0) or 0),
             )
             return None
+        self.frontier_successor_starvation_since = None
         stamp = self.latest_global_frontier_goal.header.stamp
         if self.global_frontier_max_age > 0.0 and stamp:
             age = now - stamp.to_sec()

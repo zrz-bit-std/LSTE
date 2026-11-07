@@ -1080,6 +1080,20 @@ class GlobalFrontierEventCallbacksMixin:
                     route_id=int(getattr(lease_decision, "route_id", 0) or 0),
                 )
                 return
+        if bool(payload.get("force_region_recovery", False)):
+            memory = getattr(self, "region_memory", None)
+            reactivate = getattr(memory, "reactivate_dormant", None)
+            if callable(reactivate):
+                reopened = reactivate(
+                    rospy.Time.now().to_sec(),
+                    reason="frontier_successor_starvation",
+                )
+                self.publish_status(
+                    "region_recovery_reopened",
+                    request_id=request_id,
+                    reopened_regions=int(reopened or 0),
+                    reason=str(payload.get("reason", "unknown")),
+                )
         old_goal = self.active_frontier
         # ``on_replan_request`` is also an execution boundary. Target-route
         # failures can release the bridge lease before this callback runs, so
