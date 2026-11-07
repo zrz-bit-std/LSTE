@@ -65,6 +65,13 @@ class GlobalFrontierSelectionContextMixin:
         self.last_portal_destination_class = None
         self.last_portal_unbound_reused = 0
         self.last_portal_unbound_reprojection_skips = 0
+        # A portal certified and bound to a destination Place during GP
+        # authentication otherwise falls between the unbound-probe path and
+        # the transient-grid adjacent-transition path. These counters make its
+        # re-exposure as a selectable doorway visible.
+        self.last_portal_bound_reused = 0
+        self.last_portal_bound_reprojection_skips = 0
+        self.last_portal_bound_relaxed_reused = 0
         self.last_sealed_portal_reentry_skips = 0
         self.last_sealed_portal_reentry_region_id = None
         self.last_sealed_portal_reentry_gate = None

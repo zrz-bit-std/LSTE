@@ -347,6 +347,92 @@ class GlobalFrontierCandidatePortalMixin:
                 getattr(self, "last_portal_unbound_reused", 0)
             ) + 1
 
+    def _populate_bound_portal_sources(
+        self, request, context, portal_sources, relaxed=False,
+    ):
+        """Expose certified, bound, uncrossed portals as selectable doorways.
+
+        A portal that GP authentication certified *and* bound to a destination
+        Place otherwise falls into a gap: _ensure_portal_hypothesis_probe only
+        serves unbound portals, and the adjacent-transition path only sees
+        doorways the current transient grid still exposes.  The source Place can
+        therefore exhaust every local WorkItem and still report zero candidates
+        while several certified doorways are already known.  Re-expose them here
+        so the ordinary selector can cross one.
+
+        ``relaxed`` drops the covered-destination filter and is used only after
+        the strict pass produced no candidate, so a neighbourhood whose only
+        exits lead to already-covered Places still cannot hold a zero command
+        forever.
+        """
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        if ledger is None or context.source_place_id is None:
+            return
+        snapshot = getattr(ledger, "snapshot", None)
+        if not callable(snapshot):
+            return
+        try:
+            records = snapshot()
+        except Exception:
+            return
+        try:
+            source_place_id = int(context.source_place_id)
+        except (TypeError, ValueError):
+            return
+        region_memory = getattr(self, "region_memory", None)
+        place_is_covered = getattr(ledger, "place_is_covered", None)
+        reused_attr = (
+            "last_portal_bound_relaxed_reused"
+            if relaxed
+            else "last_portal_bound_reused"
+        )
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            try:
+                record_source = int(record.get("source_place_id", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if record_source != source_place_id:
+                continue
+            if record.get("destination_place_id") is None:
+                continue
+            if str(record.get("state", "")).strip().lower() != "certified":
+                continue
+            if bool(record.get("exploration_suppressed", False)):
+                continue
+            try:
+                if int(record.get("crossing_count", 0) or 0) > 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if not relaxed and callable(place_is_covered) and region_memory is not None:
+                try:
+                    destination_place_id = int(record.get("destination_place_id"))
+                except (TypeError, ValueError):
+                    destination_place_id = None
+                destination_region = (
+                    None
+                    if destination_place_id is None
+                    else region_memory.by_id(destination_place_id)
+                )
+                if place_is_covered(destination_region):
+                    continue
+            source = self._portal_source_for_unbound_hypothesis(request, record)
+            if source is None:
+                self.last_portal_bound_reprojection_skips = int(
+                    getattr(self, "last_portal_bound_reprojection_skips", 0)
+                ) + 1
+                continue
+            portal_sources.setdefault(
+                ("hypothesis", int(record["id"])), source,
+            )
+            setattr(
+                self,
+                reused_attr,
+                int(getattr(self, reused_attr, 0)) + 1,
+            )
+
     def _populate_preferred_crossed_portal_source(
         self, request, context, portal_sources,
     ):
@@ -983,7 +1069,22 @@ class GlobalFrontierCandidatePortalMixin:
         # durable source Place and its doorway remain known. Rehydrate those
         # identities before asking the transient grid for a new portal.
         self._populate_unbound_portal_sources(request, context, portal_sources)
-        if portal_sources or not context.place_graph_ready:
+        if portal_sources:
+            return
+        # A certified portal that GP authentication already bound to a
+        # destination Place never reaches the unbound-probe path above and may
+        # no longer appear in the transient grid below. Re-expose it now so an
+        # exhausted source Place still has a selectable doorway.
+        self._populate_bound_portal_sources(request, context, portal_sources)
+        if portal_sources:
+            return
+        if not context.place_graph_ready:
+            # No transient topology is available to discover a fresh doorway,
+            # so allow a bound doorway whose destination is already covered
+            # rather than holding a zero command forever.
+            self._populate_bound_portal_sources(
+                request, context, portal_sources, relaxed=True,
+            )
             return
         blocked_labels = set(context.blocked_place_labels)
         if context.covered_place_reachable is not None:
@@ -1032,4 +1133,10 @@ class GlobalFrontierCandidatePortalMixin:
                 continue
             portal_sources.setdefault(
                 (source.identity_row, source.identity_col), source,
+            )
+        if not portal_sources:
+            self._populate_bound_portal_sources(request, context, portal_sources)
+        if not portal_sources:
+            self._populate_bound_portal_sources(
+                request, context, portal_sources, relaxed=True,
             )
