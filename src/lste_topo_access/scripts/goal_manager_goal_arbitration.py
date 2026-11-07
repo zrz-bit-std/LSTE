@@ -282,6 +282,40 @@ class GoalManagerGoalArbitrationMixin:
         return None
 
     def fresh_global_frontier_goal(self, now: float) -> Optional[PoseStamped]:
+        # Bounded successor-starvation escape.  A terminated frontier route
+        # must be followed by a strictly-newer successor.  When the frontier
+        # executive exhausts its candidates (its room goes dormant and no
+        # portal has been crossed), no successor ever arrives and any of the
+        # early returns below would otherwise hold a zero command forever.
+        # Track the starvation window before those returns and force a
+        # region-recovery replan once the timeout expires.
+        if (
+            self.global_frontier_enabled
+            and int(getattr(self, "last_published_frontier_route_id", 0) or 0) > 0
+            and not getattr(self, "task_done_published", False)
+        ):
+            starvation_since = getattr(
+                self, "frontier_successor_starvation_since", None
+            )
+            timeout = getattr(
+                self, "frontier_successor_starvation_timeout", 30.0
+            )
+            if starvation_since is None:
+                self.frontier_successor_starvation_since = now
+            elif now - starvation_since > timeout:
+                self.frontier_successor_starvation_since = now
+                rospy.logwarn(
+                    "GoalManager: no frontier successor for %.1fs; forcing "
+                    "region-recovery replan",
+                    now - starvation_since,
+                )
+                self.request_global_frontier_replan(
+                    "frontier_successor_starvation",
+                    force_region_recovery=True,
+                )
+        else:
+            self.frontier_successor_starvation_since = None
+
         if (
             self.frontier_replan_pending_id > 0
             and self.frontier_replan_ready_id != self.frontier_replan_pending_id
@@ -312,26 +346,6 @@ class GoalManagerGoalArbitrationMixin:
             <= int(getattr(self, "last_published_frontier_route_id", 0) or 0)
             and not turn_only
         ):
-            starvation_since = getattr(
-                self, "frontier_successor_starvation_since", None
-            )
-            timeout = getattr(
-                self, "frontier_successor_starvation_timeout", 30.0
-            )
-            if starvation_since is None:
-                self.frontier_successor_starvation_since = now
-            elif now - starvation_since > timeout:
-                self.frontier_successor_starvation_since = now
-                rospy.logwarn(
-                    "GoalManager: no frontier successor for %.1fs; forcing "
-                    "region-recovery replan",
-                    now - starvation_since,
-                )
-                self.request_global_frontier_replan(
-                    "frontier_successor_starvation",
-                    force_region_recovery=True,
-                )
-                return None
             rospy.loginfo_throttle(
                 2.0,
                 "GoalManager: holds terminal frontier route=%d until a "
@@ -339,12 +353,12 @@ class GoalManagerGoalArbitrationMixin:
                 int(getattr(self, "global_frontier_route_id", 0) or 0),
             )
             return None
-        self.frontier_successor_starvation_since = None
         stamp = self.latest_global_frontier_goal.header.stamp
         if self.global_frontier_max_age > 0.0 and stamp:
             age = now - stamp.to_sec()
             if age > self.global_frontier_max_age:
                 return None
+        self.frontier_successor_starvation_since = None
         return self.latest_global_frontier_goal
 
     def _complete_target_task(
