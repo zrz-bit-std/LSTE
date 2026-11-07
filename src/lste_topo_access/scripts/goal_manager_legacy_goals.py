@@ -39,6 +39,56 @@ class GoalManagerLegacyGoalsMixin:
         key = self.context_pair_key(left, right)
         return self.ctx_pair_exhaustion.is_exhausted(key, now)
 
+    def _context_goal_route_status(self, goal, now):
+        """Return the Navfn reachability of one context approach goal.
+
+        A context hint is a direction, not a proven route: the midpoint may
+        land inside an obstacle or in unmapped space.  The in-place
+        observation pose is deliberately a zero-distance goal, so it is not
+        validated here once the observation window owns the timeout.
+        """
+        if goal is None or self.latest_pose is None:
+            return None
+        if str(getattr(self.ctx_observation, "state", "")) == "observe":
+            return None
+        return self.validate_target_route(goal, now)
+
+    def _retire_unreachable_context_pair(self, now):
+        """Retire a context pair whose hint Navfn cannot connect.
+
+        Publishing such a goal makes Navfn return an empty plan, the
+        controller stand still, and the observation window replace the goal
+        with the robot's own pose.  Retire the pair immediately so the caller
+        can choose a different hint or a map frontier.
+        """
+        until = None
+        if self.ctx_pair_key is not None:
+            until = self.ctx_pair_exhaustion.mark(
+                self.ctx_pair_key,
+                now,
+                self.context_route_blocked_cooldown,
+            )
+            rospy.loginfo(
+                "GoalManager: context pair unreachable; retiring key=%s "
+                "until=%.1f",
+                self.ctx_pair_key,
+                float(until or 0.0),
+            )
+        self.publish_goal_arbitration(
+            "context_pair_retired",
+            reason="navfn_empty_plan",
+            key=list(self.ctx_pair_key or ()),
+            until=float(until or 0.0),
+        )
+        self.ctx_last_goal = None
+        self.ctx_observation.reset()
+        self.ctx_observation_pair_key = None
+        self.ctx_start_time = None
+        self.effective_mode = EXPLORE_SUS_C_MODE
+        self.pub_access_mode.publish(String(data=self.effective_mode))
+        self.ctx_cooldown_until = now + self.context_follow_cooldown
+        return None
+
     def goal_from_ctx_follow(self, now: float) -> Optional[PoseStamped]:
         if self.ctx_start_time is None:
             self.ctx_start_time = now
@@ -138,6 +188,14 @@ class GoalManagerLegacyGoalsMixin:
                     elif self.ctx_last_goal is not None:
                         goal = self.ctx_last_goal
                         self.goal_source = "ctx_pair_cached"
+
+        # A context hint can point into an obstacle or into unmapped space.
+        # Validate it with the same Navfn transaction the target ladder uses
+        # before publishing; an empty plan means the controller would stand
+        # still while the observation window replaces the goal with the
+        # robot's own pose.
+        if self._context_goal_route_status(goal, now) is False:
+            return self._retire_unreachable_context_pair(now)
 
         # A stalled approach is still useful: stop, sweep the camera, and
         # decide whether the pair produced target evidence.  The observation

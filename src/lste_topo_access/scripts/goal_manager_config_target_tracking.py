@@ -58,6 +58,15 @@ class GoalManagerTargetTrackingConfigMixin:
             self.context_follow_cooldown,
             float(gp("~context_follow_exhausted_cooldown", 120.0)),
         )
+        # A context hint is a geometric direction, not a proven route.  When
+        # Navfn cannot connect it, keep the pair out of the next plans long
+        # enough to try another hint or a map frontier, but much shorter than
+        # the "inspected and found nothing" cooldown so a corrected map can
+        # offer it again.
+        self.context_route_blocked_cooldown = max(
+            self.context_follow_cooldown,
+            float(gp("~context_route_blocked_cooldown", 30.0)),
+        )
         memory = getattr(self, "ctx_pair_exhaustion", None)
         if memory is not None:
             memory.cooldown = self.context_follow_exhausted_cooldown
