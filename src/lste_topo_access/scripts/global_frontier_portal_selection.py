@@ -171,20 +171,31 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 )
             except (KeyError, TypeError, ValueError):
                 valid_source = False
+            bound_state = str(hypothesis.get("state", "")).strip().lower()
             allow_bound_graph_edge = (
                 preferred_portal_id is not None
                 and int(hypothesis.get("id", -1)) == preferred_portal_id
-                and str(hypothesis.get("state", "")).strip().lower()
-                == "crossed"
+                and bound_state == "crossed"
+            )
+            # A bound doorway that this snapshot deliberately re-exposed is a
+            # legitimate exit even though the graph did not name it as the
+            # preferred crossed edge. It still has to pass portal admission,
+            # the graph action, and the physical route checks below; once it
+            # is crossed the record is no longer re-exposed.
+            allow_bound_portal_reuse = (
+                bound_state in ("certified", "selected")
+                and int(hypothesis.get("id", -1))
+                in (getattr(self, "_bound_portal_source_ids", None) or ())
             )
             if (
                 not valid_source
                 or (
                     hypothesis.get("destination_place_id") is not None
-                    and not allow_bound_graph_edge
+                    and not (
+                        allow_bound_graph_edge or allow_bound_portal_reuse
+                    )
                 )
-                or str(hypothesis.get("state", "")).strip().lower()
-                not in ("certified", "selected", "crossed")
+                or bound_state not in ("certified", "selected", "crossed")
             ):
                 return None
             refresh = getattr(ledger, "refresh_projection", None)
@@ -334,6 +345,7 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         self.last_portal_executable_candidates = 0
         self.last_portal_hard_rejected = 0
 
+        rejected_notes = []
         preferred_portal_id = getattr(self, "graph_route_portal_id", None)
         try:
             preferred_portal_id = (
@@ -358,6 +370,7 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 except (TypeError, ValueError):
                     source_portal_id = None
                 if source_portal_id != preferred_portal_id:
+                    rejected_notes.append((source_portal_id, "not_preferred_portal"))
                     continue
             frontier_row, frontier_col = source.frontier_row, source.frontier_col
             # Keep the labelled core for admission and place identity, while
@@ -376,9 +389,15 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 for old_x, old_y in request.excluded
             ):
                 self.last_portal_excluded += 1
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None), "excluded_radius")
+                )
                 continue
             if self.frontier_is_rejected(portal_x, portal_y, request.now):
                 self.last_portal_rejected += 1
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None), "frontier_rejected")
+                )
                 continue
 
             costmap_distance = self.candidate_costmap_distance(
@@ -391,6 +410,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 # another portal. Keep this edge pending until a fresh map
                 # yields a valid certified endpoint instead.
                 self.last_portal_costmap_rejected += 1
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None), "costmap_unreachable")
+                )
                 continue
 
             portal_gate_xy = self.cell_xy(
@@ -404,6 +426,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     map_to_physical_xy=request.map_to_physical_xy,
                 ) is not None
             ):
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None), "sealed_reentry")
+                )
                 continue
 
             path_distance = (
@@ -429,6 +454,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 and route_heading_delta > request.max_heading_delta
             ):
                 self.last_portal_heading_rejected += 1
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None), "heading")
+                )
                 continue
 
             information = self.frontier_information(
@@ -475,8 +503,15 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     # A different snapshot-local doorway is not an equivalent
                     # substitute; let the caller retain the plan and wait for
                     # that physical edge to be reprojected.
+                    rejected_notes.append(
+                        (getattr(source, "hypothesis_id", None),
+                         "preferred_identity_mismatch")
+                    )
                     continue
             if hypothesis is None and getattr(source, "hypothesis_id", None) is not None:
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None), "hypothesis_missing")
+                )
                 continue
             if not self.portal_destination_is_admissible(
                 request,
@@ -486,6 +521,10 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 information,
                 hypothesis=hypothesis,
             ):
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None),
+                     "portal_destination_not_admissible")
+                )
                 continue
             if hypothesis is None:
                 hypothesis = self._refresh_or_certify_portal_hypothesis(
@@ -495,6 +534,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     (portal_x, portal_y),
                 )
                 if hypothesis is None:
+                    rejected_notes.append(
+                        (getattr(source, "hypothesis_id", None), "recertify_failed")
+                    )
                     continue
             certify_probe = getattr(self, "certify_portal_probe", None)
             if certify_probe is not None and hypothesis is not None:
@@ -560,6 +602,10 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 self.last_graph_policy_rejections = int(
                     getattr(self, "last_graph_policy_rejections", 0)
                 ) + 1
+                rejected_notes.append(
+                    (getattr(source, "hypothesis_id", None),
+                     "graph_action:%s" % str(graph_action.reason))
+                )
                 continue
             # This counter is deliberately incremented only after route,
             # costmap, portal identity, and graph-action checks. A structural
@@ -694,6 +740,39 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
             portal_best_score = score
             portal_best_hypothesis = hypothesis
             portal_best_class = action_class
+
+        signature = tuple(rejected_notes)
+        if rejected_notes and signature != getattr(
+            self, "_portal_rejection_signature", None
+        ):
+            self._portal_rejection_signature = signature
+            self.publish_status(
+                "portal_candidates_rejected",
+                candidates_seen=int(self.last_portal_candidates_seen),
+                executable_candidates=int(self.last_portal_executable_candidates),
+                rejections=[
+                    {"portal_id": portal_id, "reason": reason}
+                    for portal_id, reason in rejected_notes
+                ],
+                destination_class=getattr(
+                    self, "last_portal_destination_class", None
+                ),
+                graph_action_kind=getattr(self, "last_graph_action_kind", None),
+                graph_action_reason=getattr(
+                    self, "last_graph_action_reason", None
+                ),
+                local_work_pending=bool(
+                    callable(
+                        getattr(self, "context_has_pending_local_work", None)
+                    )
+                    and self.context_has_pending_local_work(
+                        getattr(self, "last_selection_context", None)
+                    )
+                ),
+                source_place_id=getattr(self, "current_physical_place_id", None),
+            )
+        elif not rejected_notes:
+            self._portal_rejection_signature = None
 
         if use_evidence_decision and evidence_candidates:
             decision = select_evidence_portal_transition(evidence_candidates)

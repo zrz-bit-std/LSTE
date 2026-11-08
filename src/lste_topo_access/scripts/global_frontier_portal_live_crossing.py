@@ -21,6 +21,34 @@ class GlobalFrontierPortalLiveCrossingMixin:
             return None
         crossing = self.active_portal_crossing_evidence()
         if not crossing.verified:
+            signature = (
+                int(getattr(self, "active_route_id", 0) or 0),
+                str(crossing.reason),
+            )
+            if signature != getattr(
+                self, "_portal_crossing_unverified_signature", None
+            ):
+                self._portal_crossing_unverified_signature = signature
+                pose = getattr(self, "pose_odom", None)
+                self.publish_status(
+                    "portal_crossing_unverified",
+                    route_id=int(getattr(self, "active_route_id", 0) or 0),
+                    reason=str(crossing.reason),
+                    source_signed_distance=crossing.source_signed_distance,
+                    terminal_signed_distance=crossing.terminal_signed_distance,
+                    required_destination_depth=(
+                        crossing.required_destination_depth
+                    ),
+                    gate=getattr(self, "active_portal_gate_odom_xy", None),
+                    destination=getattr(
+                        self, "active_portal_destination_odom_xy", None
+                    ),
+                    start=getattr(self, "active_start_odom_xy", None),
+                    pose=(
+                        None if pose is None
+                        else (round(float(pose.x), 3), round(float(pose.y), 3))
+                    ),
+                )
             return None
         destination = self.record_portal_place_arrival(
             self.active_frontier,

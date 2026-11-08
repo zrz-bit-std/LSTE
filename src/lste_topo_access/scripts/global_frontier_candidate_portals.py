@@ -397,7 +397,14 @@ class GlobalFrontierCandidatePortalMixin:
                 continue
             if record.get("destination_place_id") is None:
                 continue
-            if str(record.get("state", "")).strip().lower() != "certified":
+            # ``selected`` is the state left by PortalHypothesisLedger.select().
+            # The first selection may happen in a cycle that cannot activate a
+            # new route yet (the predecessor is still terminal-ing), so a
+            # selected-but-uncrossed doorway must stay selectable until the
+            # crossing actually commits.
+            if str(record.get("state", "")).strip().lower() not in (
+                "certified", "selected",
+            ):
                 continue
             if bool(record.get("exploration_suppressed", False)):
                 continue
@@ -427,6 +434,7 @@ class GlobalFrontierCandidatePortalMixin:
             portal_sources.setdefault(
                 ("hypothesis", int(record["id"])), source,
             )
+            self._bound_portal_source_ids.add(int(record["id"]))
             setattr(
                 self,
                 reused_attr,
@@ -1056,6 +1064,11 @@ class GlobalFrontierCandidatePortalMixin:
         rules. In that case, expose only the short destination-side endpoint
         for the first doorway; ranking and publishing still happen later.
         """
+        # Durable identities that this pass re-exposes as bound doorways.
+        # The hypothesis refresh accepts exactly these, otherwise a bound
+        # record is classified as "not graph-preferred" and dropped even
+        # though it is the only remaining executable exit.
+        self._bound_portal_source_ids = set()
         # A graph-selected identity must be added even when the transient
         # snapshot already exposed other doorway candidates.  Otherwise the
         # normal selector can observe only the wrong edges and the graph lease

@@ -1,5 +1,7 @@
 """Bind portal-terminal outcomes to physical gate-crossing evidence."""
 
+import math
+
 from global_frontier_portal_crossing import (
     portal_crossing_depth,
     portal_crossing_evidence,
@@ -28,6 +30,33 @@ class GlobalFrontierPortalCrossingLifecycleMixin:
         ledger = getattr(self, "portal_hypothesis_ledger", None)
         record = getattr(ledger, "get", lambda _id: None)(portal_id)
         minimum_depth = portal_crossing_depth(getattr(self, "clearance", 0.0), record)
+        # The controller terminates within its goal tolerance of the certified
+        # destination. A depth larger than (destination distance - tolerance)
+        # is therefore physically unreachable: the route releases at the
+        # standoff and the transaction aborts as an unconfirmed standoff on
+        # every retry. Keep the certified depth but cap it at what this
+        # approach can actually deliver.
+        destination_xy = getattr(self, "active_portal_destination_odom_xy", None)
+        gate_xy = getattr(self, "active_portal_gate_odom_xy", None)
+        if destination_xy is not None and gate_xy is not None:
+            try:
+                approach_distance = math.hypot(
+                    float(destination_xy[0]) - float(gate_xy[0]),
+                    float(destination_xy[1]) - float(gate_xy[1]),
+                )
+                goal_tolerance = max(
+                    0.30,
+                    float(
+                        getattr(self, "teb_xy_goal_tolerance", 0.5) or 0.5
+                    ),
+                )
+                reachable_depth = max(
+                    0.5 * max(0.0, float(getattr(self, "clearance", 0.0))),
+                    approach_distance - goal_tolerance - 0.05,
+                )
+                minimum_depth = min(minimum_depth, reachable_depth)
+            except (TypeError, ValueError, IndexError):
+                pass
         bounds = record.get("physical_bounds") if isinstance(record, dict) else None
         gate = getattr(self, "active_portal_gate_odom_xy", None)
         if bounds is not None and record.get("physical_gate") is not None:

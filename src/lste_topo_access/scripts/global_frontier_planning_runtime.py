@@ -481,6 +481,17 @@ class GlobalFrontierPlanningRuntimeMixin:
                     route_graph.seed,
                     proposal.selection_mode,
                 ):
+                    self.publish_status(
+                        "route_activation_rejected",
+                        selection_mode=str(proposal.selection_mode),
+                        candidate=[
+                            round(float(proposal.candidate[0]), 3),
+                            round(float(proposal.candidate[1]), 3),
+                        ],
+                        route_kind=str(
+                            getattr(self, "active_route_kind", "") or ""
+                        ),
+                    )
                     return False
                 self.publish_active_route_command(
                     message,
@@ -508,6 +519,18 @@ class GlobalFrontierPlanningRuntimeMixin:
                     rospy.loginfo(
                         "Global frontier discarded stale route proposal reason=%s",
                         decision.reason,
+                    )
+                    self.publish_status(
+                        "route_proposal_discarded",
+                        reason=str(decision.reason),
+                        selection_mode=str(proposal.selection_mode),
+                        candidate=[
+                            round(float(proposal.candidate[0]), 3),
+                            round(float(proposal.candidate[1]), 3),
+                        ],
+                        active_route_id=int(
+                            getattr(self, "active_route_id", 0) or 0
+                        ),
                     )
             return
 

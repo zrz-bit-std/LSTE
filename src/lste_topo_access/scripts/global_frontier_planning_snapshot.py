@@ -1,6 +1,7 @@
 """Creation of internally consistent map, route, and pose planning snapshots."""
 
 import math
+import time
 
 import numpy as np
 import rospy
@@ -177,12 +178,47 @@ class GlobalFrontierPlanningSnapshotMixin:
             # A missing local endpoint is not negative target evidence. Keep
             # the room lease and let the completion gate request another
             # evidence/recovery cycle instead of opening an unrelated Portal.
+            # That wait must still be bounded: when the observation obligation
+            # has no executable viewpoint at all, keeping the claim only
+            # rejects every other candidate and leaves the base standing.
+            now_wall = time.monotonic()
+            wait_since = getattr(
+                self, "target_region_claim_wait_since_wall", None
+            )
+            try:
+                wait_timeout = max(
+                    15.0,
+                    float(
+                        getattr(
+                            self, "target_region_claim_wall_timeout", 60.0
+                        )
+                        or 60.0
+                    ),
+                )
+            except (TypeError, ValueError):
+                wait_timeout = 60.0
+            if wait_since is None:
+                self.target_region_claim_wait_since_wall = now_wall
+            elif now_wall - float(wait_since) >= wait_timeout:
+                self.target_region_claim_wait_since_wall = None
+                self.publish_status(
+                    "target_region_claim_wall_timeout",
+                    place_id=int(current_place_id),
+                    wall_seconds=round(now_wall - float(wait_since), 1),
+                    timeout_seconds=wait_timeout,
+                    reason="target_observation_obligation_not_materialized",
+                )
+                self.clear_target_region_claim(
+                    "target_observation_wall_timeout"
+                )
+                return
             self.publish_status(
                 "target_region_claim_waiting_for_obligation",
                 place_id=int(current_place_id),
                 pending_target_observation=True,
             )
             return
+        self.target_region_claim_wait_since_wall = None
         claimed_component = self.target_region_claim_component
         self.publish_status(
             "target_region_claim_exhausted",

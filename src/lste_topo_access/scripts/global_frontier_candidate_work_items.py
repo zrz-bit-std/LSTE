@@ -218,6 +218,17 @@ class GlobalFrontierCandidateWorkItemMixin:
                 continue
             report["items_seen"] += 1
             audit = {"work_item_id": item_id}
+            if str(item.get("kind", "")).strip().lower() == "portal_entry":
+                # The doorway-entry obligation is executed by the Portal
+                # transition and settled when that crossing commits.  A local
+                # observation route here only reaches a gate-side viewpoint
+                # that is already covered: the attempt terminates immediately,
+                # the item stays unresolved, and it blocks the crossing again
+                # on the next cycle.
+                audit["reason"] = "portal_entry_owned_by_portal_transition"
+                report["item_audit"].append(audit)
+                reject("portal_entry_owned_by_portal_transition")
+                continue
             if item.get("active_attempt_id") is not None:
                 audit["reason"] = "attempt_active"
                 report["item_audit"].append(audit)

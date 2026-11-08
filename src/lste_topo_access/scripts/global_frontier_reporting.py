@@ -919,7 +919,17 @@ class GlobalFrontierReportingMixin:
         )
         auth_getter = getattr(self, "active_portal_authentication", None)
         auth = auth_getter() if callable(auth_getter) else None
-        if graph_transaction_id <= 0 and auth is not None:
+        # A Portal crossing selected from the certified doorway ledger is a
+        # graph-owned edge even when this method runs without the durable
+        # graph planner. The GoalManager requires a positive graph identity on
+        # the wire, so derive it exactly as the GP authentication waypoints do
+        # instead of publishing zero and being discarded.
+        graph_owned_portal_route = (
+            str(route_kind or "").strip().lower() == "portal_transition"
+        )
+        if graph_transaction_id <= 0 and (
+            auth is not None or graph_owned_portal_route
+        ):
             # Authentication waypoints are temporary GP work, but the
             # persistent GoalManager still requires a positive route identity.
             activated = getattr(self, "active_route_dispatch_contract", None) or {}
