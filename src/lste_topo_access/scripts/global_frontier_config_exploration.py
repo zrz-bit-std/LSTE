@@ -167,6 +167,12 @@ class GlobalFrontierExplorationConfigurationMixin:
         self.heading_semantic_override_max_attempts = max(
             0, int(gp("~heading_semantic_override_max_attempts", 2))
         )
+        # A route needs several decision passes to materialize. Keep one
+        # authorized turn from consuming the whole attempt budget before it
+        # was ever dispatched.
+        self.heading_semantic_override_hold_seconds = max(
+            0.0, float(gp("~heading_semantic_override_hold_seconds", 8.0))
+        )
         # Successor selection is a route-transition decision, not merely a
         # weighted frontier score. Reuse the bridge's three execution
         # envelopes: first seek a smooth continuation, then a curve that TEB

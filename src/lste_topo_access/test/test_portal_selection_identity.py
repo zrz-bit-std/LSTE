@@ -169,6 +169,31 @@ class SemanticHeadingOverrideTest(unittest.TestCase):
             )
         )
 
+    def test_override_attempt_holds_while_a_route_materializes(self):
+        delta = math.radians(178.0)
+
+        self.assertIsNotNone(
+            self.fixture._portal_semantic_heading_override(self.source, delta, 100.0)
+        )
+        # Same decision window: the route is still materializing, so this must
+        # not consume the second attempt.
+        self.assertIsNotNone(
+            self.fixture._portal_semantic_heading_override(self.source, delta, 101.0)
+        )
+        self.assertEqual(
+            self.ledger.get(self.edge["id"])["heading_override_count"], 1,
+        )
+        # After the hold window the retry is real and counts.
+        self.assertIsNotNone(
+            self.fixture._portal_semantic_heading_override(self.source, delta, 120.0)
+        )
+        self.assertEqual(
+            self.ledger.get(self.edge["id"])["heading_override_count"], 2,
+        )
+        self.assertIsNone(
+            self.fixture._portal_semantic_heading_override(self.source, delta, 140.0)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

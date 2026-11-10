@@ -166,6 +166,7 @@ class PortalHypothesisLedger:
                 # tried for this doorway, so a failed in-place turn cannot be
                 # retried forever.
                 "heading_override_count": 0,
+                "heading_override_ros": None,
                 "task_versions": set(),
                 "first_seen_at": float(now),
                 "last_seen_at": float(now),

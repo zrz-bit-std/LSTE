@@ -368,7 +368,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
             branch["defer_count"] = int(branch.get("defer_count", 0)) + 1
             branch["defer_heading_delta_deg"] = heading_delta_deg
 
-    def _portal_semantic_heading_override(self, source, route_heading_delta):
+    def _portal_semantic_heading_override(
+        self, source, route_heading_delta, now=0.0,
+    ):
         """Authorize one high-value doorway to be entered after a turn.
 
         The heading bound exists so the forward-only controller is never asked
@@ -426,9 +428,39 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         if score < min_score:
             return None
         attempts = int(record.get("heading_override_count", 0) or 0)
+        # One authorized turn needs several decision passes to materialize a
+        # route (fresh map/TF, Navfn, graph transaction).  Counting every pass
+        # burned both attempts in under a second in run 20261110_184912 and
+        # withdrew the override before the route existed.  Hold the attempt
+        # budget for a bounded window so the count measures real retries.
+        try:
+            hold = max(
+                0.0,
+                float(
+                    getattr(
+                        self,
+                        "heading_semantic_override_hold_seconds",
+                        8.0,
+                    )
+                ),
+            )
+        except (TypeError, ValueError):
+            hold = 8.0
+        last = record.get("heading_override_ros")
+        try:
+            last = None if last is None else float(last)
+        except (TypeError, ValueError):
+            last = None
+        try:
+            now = float(now)
+        except (TypeError, ValueError):
+            now = 0.0
+        if now > 0.0 and last is not None and 0.0 <= now - last < hold:
+            return record
         if attempts >= max_attempts:
             return None
         record["heading_override_count"] = attempts + 1
+        record["heading_override_ros"] = now
         return record
 
     def _select_context_portal_transition(
@@ -584,7 +616,7 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 and route_heading_delta > request.max_heading_delta
             ):
                 override = self._portal_semantic_heading_override(
-                    source, route_heading_delta,
+                    source, route_heading_delta, request.now,
                 )
                 if override is None:
                     self.last_portal_heading_rejected += 1

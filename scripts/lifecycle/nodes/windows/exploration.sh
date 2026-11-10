@@ -54,7 +54,8 @@ start_exploration_windows() {
       heading_hard_limit_deg:=$GLOBAL_FRONTIER_HEADING_HARD_LIMIT_DEG \\
       heading_semantic_override_enabled:=$GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_ENABLED \\
       heading_semantic_override_min_score:=$GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_SCORE \\
-      heading_semantic_override_max_attempts:=$GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MAX_ATTEMPTS \\
+      heading_semantic_override_max_attempts:=$GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MAX_ATTEMPTS \
+      heading_semantic_override_hold_seconds:=$GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_HOLD_SECONDS \\
       successor_smooth_heading_limit_deg:=$TEB_FRONTIER_EARLY_HANDOFF_MAX_HEADING_DEG \\
       successor_curve_heading_limit_deg:=$TEB_PERSISTENT_FRONTIER_CURVE_HANDOFF_MAX_HEADING_DEG \\
       turn_execution_mode:=$GLOBAL_FRONTIER_TURN_EXECUTION_MODE \\

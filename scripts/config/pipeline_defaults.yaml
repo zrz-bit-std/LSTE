@@ -510,6 +510,9 @@ GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_SCORE: 0.5
 # the override is withdrawn for the rest of the run and the doorway keeps its
 # normal deferral. Set 0 to disable the override entirely.
 GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MAX_ATTEMPTS: 2
+# One authorized turn needs a few decision passes to materialize its route.
+# Do not consume another attempt inside this window.
+GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_HOLD_SECONDS: 8.0
 # A locked visual target can lie behind a known wall. After Navfn rejects the
 # direct ray, the next replan softly favours a reachable frontier nearer that
 # direction, so search continues toward a doorway rather than waiting in place.
