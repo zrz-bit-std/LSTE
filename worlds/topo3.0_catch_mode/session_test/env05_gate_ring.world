@@ -214,7 +214,7 @@
     <include>
       <uri>model://desk_brown</uri>
       <name>a2_desk</name>
-      <pose>14.6000 -1.6000 0.0000 0 -0 0.000000</pose>
+      <pose>14.6000 -2.2000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
@@ -238,7 +238,7 @@
     <include>
       <uri>model://monitor_3</uri>
       <name>a2_mon</name>
-      <pose>15.4000 -1.6000 0.7500 0 -0 0.000000</pose>
+      <pose>15.4000 -2.2000 0.7500 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
@@ -278,6 +278,12 @@
       <static>1</static>
     </include>
     <include>
+      <uri>model://first_2015_trash_can</uri>
+      <name>a3_trash</name>
+      <pose>9.0000 -7.1500 0.0000 0 -0 0.000000</pose>
+      <static>1</static>
+    </include>
+    <include>
       <uri>model://cardboard_box</uri>
       <name>a4_box1</name>
       <pose>18.6000 -8.6000 0.0000 0 -0 0.003491</pose>
@@ -311,12 +317,6 @@
       <uri>model://construction_cone</uri>
       <name>n_cone2</name>
       <pose>2.0000 -11.7000 0.0000 0 -0 0.000000</pose>
-      <static>1</static>
-    </include>
-    <include>
-      <uri>model://coffee_machine</uri>
-      <name>a2_coffee</name>
-      <pose>14.0000 -1.6000 0.7500 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <gui fullscreen='0'>

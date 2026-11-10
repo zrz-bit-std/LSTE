@@ -1,18 +1,19 @@
 {
   "task_parsed": {
     "target": {
-      "name": "black laptop",
+      "name": "trash can",
       "attributes": [
-        "black",
-        "open",
-        "screen facing the room",
-        "office laptop",
-        "placed on a wooden office desk"
+        "dark green",
+        "cylindrical",
+        "office trash can",
+        "standing on the floor",
+        "next to an office desk"
       ],
       "typical_locations": [
-        "office desks",
-        "workstations",
-        "single offices"
+        "office corners",
+        "next to desks",
+        "under desks",
+        "near doors"
       ]
     },
     "env": {
@@ -23,22 +24,24 @@
       "layout_prior": [
         "long office desks arranged in rows",
         "monitors and desk lamps on desks",
-        "office chairs around the workstations"
+        "office chairs around the workstations",
+        "a partition separating the work area"
       ],
       "related_structures": [
         "office desk",
         "monitor",
-        "chair"
+        "chair",
+        "desk lamp"
       ]
     },
     "obj_related": {
       "key_objects": [
-        "monitor",
-        "desk lamp",
         "desk",
+        "desk lamp",
+        "monitor",
         "chair"
       ],
-      "search_strategy": "walk around the partition and check the far side of the office desk",
+      "search_strategy": "enter the office, walk around the partition, and check the floor corner beside the desk",
       "negative_clues": [
         "door",
         "fire hydrant",
@@ -50,8 +53,8 @@
       ]
     },
     "target_ctx": {
-      "left": "monitor",
-      "right": "desk lamp"
+      "left": "desk lamp",
+      "right": "monitor"
     }
   }
 }
