@@ -313,6 +313,12 @@
       <pose>2.0000 -11.7000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
+    <include>
+      <uri>model://coffee_machine</uri>
+      <name>a2_coffee</name>
+      <pose>14.0000 -1.6000 0.7500 0 -0 0.000000</pose>
+      <static>1</static>
+    </include>
     <gui fullscreen='0'>
       <camera name='user_camera'>
         <pose>11.00 -4.00 24.90 0 1.35 0</pose>
