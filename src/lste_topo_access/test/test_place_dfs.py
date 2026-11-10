@@ -9,6 +9,13 @@ from global_frontier_place_partition import partition_place
 
 
 class PlaceDfsTest(unittest.TestCase):
+    def test_mark_returning_reopens_a_settled_return_failure(self):
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
+        dfs.nodes[2].update(state='return_failed',failure_reason='dfs_return_no_physical_progress')
+        self.assertTrue(dfs.mark_returning(2,10))
+        self.assertEqual(dfs.nodes[2]['state'],'returning')
+        self.assertNotIn('failure_reason',dfs.nodes[2])
+
     def test_mark_returning_requires_the_active_entry_edge(self):
         dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
         self.assertFalse(dfs.mark_returning(2,11))

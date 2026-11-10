@@ -86,48 +86,61 @@ class GlobalFrontierPortalArrivalCommitMixin:
             if callable(clear):
                 clear()
 
+    def _settle_place_exit_on_return(self, exit_item, room_place_id,
+                                     destination_place_id, portal_id, now):
+        """Close the door obligation only after the DFS stack has popped."""
+        if not isinstance(exit_item, dict):
+            return
+        items = getattr(self, "place_work_items", None)
+        resolver = getattr(items, "resolve_place_exit", None)
+        if not callable(resolver):
+            return
+        resolver(
+            int(exit_item["id"]), now,
+            reason="reverse_arrival_committed",
+        )
+        self.publish_status(
+            "place_exit_completed",
+            work_item_id=int(exit_item["id"]),
+            place_id=int(room_place_id),
+            parent_place_id=int(destination_place_id),
+            portal_id=int(exit_item.get("portal_id", portal_id)),
+            dispatch_count=int(exit_item.get("dispatch_count", 0)),
+        )
+
     def _commit_semantic_room_return(self, active_room, portal_id, destination_place_id,
                                      now, hypothesis_ledger, gp_tree, room_stack):
         room_place_id = int(active_room.get("place_id", -1))
         branch_scope = None
         dfs = getattr(self, "place_dfs", None)
         # The reverse arrival is the completion evidence for the door-owned
-        # exit obligation.  Close it before the return ledger computes
-        # unresolved work, otherwise it sees its own obligation and refuses
-        # to pop the DFS stack.
+        # exit obligation.  Do not resolve it yet: the DFS pop must succeed
+        # first, otherwise the obligation would be closed while the stack is
+        # still stuck on the child (run 20261110_213353 ended with stack [1,2]
+        # and current Place 5 because of exactly that ordering).
         items = getattr(self, "place_work_items", None)
         exit_getter = getattr(items, "place_exit_item", None)
-        exit_resolver = getattr(items, "resolve_place_exit", None)
-        if (
-            callable(exit_getter)
-            and callable(exit_resolver)
-            and room_place_id > 0
-        ):
-            exit_item = exit_getter(room_place_id)
+        exit_item = None
+        if callable(exit_getter) and room_place_id > 0:
+            candidate = exit_getter(room_place_id)
             if (
-                isinstance(exit_item, dict)
-                and str(exit_item.get("exit_state", ""))
-                in ("ready", "returning")
+                isinstance(candidate, dict)
+                and str(candidate.get("exit_state", "")) in ("ready", "returning")
             ):
-                exit_resolver(
-                    int(exit_item["id"]),
-                    now,
-                    reason="reverse_arrival_committed",
-                )
-                self.publish_status(
-                    "place_exit_completed",
-                    work_item_id=int(exit_item["id"]),
-                    place_id=room_place_id,
-                    parent_place_id=int(destination_place_id),
-                    portal_id=int(exit_item.get("portal_id", portal_id)),
-                    dispatch_count=int(exit_item.get("dispatch_count", 0)),
-                )
+                exit_item = candidate
         unresolved_ids = (
             self.place_work_items.unresolved_ids(
                 room_place_id, branch_scope=branch_scope,
             )
             if room_place_id > 0 else []
         )
+        if exit_item is not None:
+            # The door-owned obligation is not unfinished room coverage; it is
+            # settled by this same reverse arrival.
+            unresolved_ids = [
+                item_id for item_id in unresolved_ids
+                if int(item_id) != int(exit_item["id"])
+            ]
         unresolved_set = set(unresolved_ids)
         snapshot = getattr(self.place_work_items, "snapshot", None)
         work_records = snapshot() if callable(snapshot) else ()
@@ -145,6 +158,9 @@ class GlobalFrontierPortalArrivalCommitMixin:
                     parent_place_id=int(destination_place_id), portal_id=int(portal_id),
                     reason="wrong_recovery_return_edge", place_dfs=dfs.snapshot())
                 return
+            self._settle_place_exit_on_return(
+                exit_item, room_place_id, destination_place_id, portal_id, now,
+            )
             self._invalidate_place_scope_for_handoff(destination_place_id)
             if room_stack:
                 room_stack.pop()
@@ -179,6 +195,9 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 parent_place_id=int(destination_place_id), portal_id=int(portal_id),
                 reason="subtree_not_complete_or_wrong_return_edge", place_dfs=dfs.snapshot())
             return
+        self._settle_place_exit_on_return(
+            exit_item, room_place_id, destination_place_id, portal_id, now,
+        )
         self._invalidate_place_scope_for_handoff(destination_place_id)
         closed_items = []
         reassigned_items = []

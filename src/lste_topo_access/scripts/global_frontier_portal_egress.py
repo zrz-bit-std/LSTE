@@ -1083,27 +1083,54 @@ class GlobalFrontierPortalEgressMixin:
                 exit_item = exit_getter(place_id)
                 if (
                     isinstance(exit_item, dict)
+                    and str(exit_item.get("exit_state", ""))
+                    in ("ready", "returning")
                     and int(exit_item.get("portal_id", -1))
                     == int(hypothesis["id"])
                 ):
                     mark = getattr(items, "mark_place_exit_dispatched", None)
-                    if callable(mark):
+                    marked = (
                         mark(
                             int(exit_item["id"]),
                             now=float(getattr(snapshot, "now", 0.0) or 0.0),
                         )
-                    dfs = getattr(self, "place_dfs", None)
-                    if dfs is not None:
-                        dfs.mark_returning(int(place_id), int(hypothesis["id"]))
-                    self.publish_status(
-                        "place_exit_dispatched",
-                        work_item_id=int(exit_item["id"]),
-                        place_id=int(place_id),
-                        portal_id=int(hypothesis["id"]),
-                        dispatch_count=int(
-                            exit_item.get("dispatch_count", 0)
-                        ) + 1,
+                        if callable(mark)
+                        else None
                     )
+                    if isinstance(marked, dict):
+                        dfs = getattr(self, "place_dfs", None)
+                        return_ready = True
+                        if dfs is not None:
+                            return_ready = bool(
+                                dfs.mark_returning(
+                                    int(place_id), int(hypothesis["id"]),
+                                )
+                            )
+                        self.publish_status(
+                            "place_exit_dispatched",
+                            work_item_id=int(exit_item["id"]),
+                            place_id=int(place_id),
+                            portal_id=int(hypothesis["id"]),
+                            dispatch_count=int(
+                                exit_item.get("dispatch_count", 0)
+                            ) + 1,
+                            dfs_return_ready=return_ready,
+                        )
+                        if not return_ready:
+                            block = getattr(items, "block_place_exit", None)
+                            if callable(block):
+                                block(
+                                    int(exit_item["id"]),
+                                    float(getattr(snapshot, "now", 0.0) or 0.0),
+                                    "dfs_return_edge_mismatch",
+                                )
+                            self.publish_status(
+                                "place_exit_blocked",
+                                work_item_id=int(exit_item["id"]),
+                                place_id=int(place_id),
+                                portal_id=int(hypothesis["id"]),
+                                reason="dfs_return_edge_mismatch",
+                            )
             self.publish_status(
                 "durable_portal_egress_selected",
                 place_id=int(place_id),

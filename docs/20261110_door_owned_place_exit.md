@@ -80,8 +80,8 @@ exit_parent_place_id / exit_dispatch_count`，但不影响 `unresolved_work_item
 | 不否决 | raw/pending SLAM frontier（含选择器已拒绝的格子，可能在完成房间里长期非零） |
 | 出口授权 | `global_frontier_portal_egress._egress_is_owned_portal_exit` 加入 covered-to-covered 守卫 |
 | 派发 | 选中 egress 时 `mark_place_exit_dispatched` + `place_dfs.mark_returning` |
-| 到达 | `_commit_semantic_room_return` 先 `resolve_place_exit`，再走原返回记账 |
-| 失败 | 派发超时按 `dispatch_count` 重试，超限 `blocked` |
+| 到达 | `_commit_semantic_room_return` 先弹栈，成功后才 `resolve_place_exit`；弹栈失败则保留义务并重试 |
+| 失败 | 派发超时按 `dispatch_count` 重试，超限 `blocked`；`return_failed` 可被新义务重新打开一次 |
 | 审计 | `audit_place_dfs` 新增 `place_exit_obligation_recorded`（仅新日志生效） |
 
 ### 事件

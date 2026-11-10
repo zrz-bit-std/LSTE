@@ -120,7 +120,12 @@ class PlaceDfsTraversal:
         return True
 
     def mark_returning(self, place_id, portal_id):
-        """Flag one entered Place as leaving through its own entry Portal."""
+        """Flag one entered Place as leaving through its own entry Portal.
+
+        ``return_failed`` is the graph layer's settled verdict after its own
+        return budget expired.  A door-owned exit obligation is fresh physical
+        evidence for exactly that edge, so it may reopen the return once.
+        """
         try:
             place_id, portal_id = int(place_id), int(portal_id)
         except (TypeError, ValueError):
@@ -130,9 +135,10 @@ class PlaceDfsTraversal:
         node = self.nodes.get(place_id)
         if node is None or node.get("portal_id") != portal_id:
             return False
-        if node.get("state") not in ("exploring", "returning"):
+        if node.get("state") not in ("exploring", "returning", "return_failed"):
             return False
         node["state"] = "returning"
+        node.pop("failure_reason", None)
         return True
 
     def return_to_parent(self, source_id, destination_id, portal_id):
