@@ -34,6 +34,7 @@ for _rospy_name in ("logwarn", "logwarn_throttle", "logerr", "loginfo",
 from global_frontier_portal_belief import PortalHypothesisLedger
 from global_frontier_portal_egress import GlobalFrontierPortalEgressMixin
 from global_frontier_portal_probe_ledger import PortalProbeLedger
+from global_frontier_work_items import PlaceWorkItemLedger
 
 
 class DurableEgressExplorer(GlobalFrontierPortalEgressMixin):
@@ -923,6 +924,36 @@ class PortalEgressTest(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertTrue(explorer.last_portal_source_side_proven)
         self.assertEqual(candidate[17], "cross_portal")
+
+
+class OwnedPortalExitAuthorizationTest(unittest.TestCase):
+    """A dormant exit is not progress; an active one owns its entry edge."""
+
+    def setUp(self):
+        self.items = PlaceWorkItemLedger(0.7)
+        self.node = GlobalFrontierPortalEgressMixin()
+        self.node.place_work_items = self.items
+        self.exit_id = self.items.ensure_place_exit(
+            4, 7, 1, (2.0, 0.0), (3.0, 0.0), now=1.0, generation=1,
+        )
+
+    def test_dormant_exit_does_not_authorize_egress(self):
+        self.assertFalse(self.node._egress_is_owned_portal_exit(4, 7))
+
+    def test_ready_exit_authorizes_only_its_own_place_and_portal(self):
+        self.items.activate_place_exit(self.exit_id, now=2.0)
+
+        self.assertTrue(self.node._egress_is_owned_portal_exit(4, 7))
+        self.assertFalse(self.node._egress_is_owned_portal_exit(4, 99))
+        self.assertFalse(self.node._egress_is_owned_portal_exit(5, 7))
+
+    def test_returning_exit_keeps_authorization_and_blocked_revokes_it(self):
+        self.items.activate_place_exit(self.exit_id, now=2.0)
+        self.items.mark_place_exit_dispatched(self.exit_id, now=3.0)
+        self.assertTrue(self.node._egress_is_owned_portal_exit(4, 7))
+
+        self.items.block_place_exit(self.exit_id, now=4.0, reason="timeout")
+        self.assertFalse(self.node._egress_is_owned_portal_exit(4, 7))
 
 
 if __name__ == "__main__":

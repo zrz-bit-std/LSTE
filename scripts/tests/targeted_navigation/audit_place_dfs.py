@@ -56,7 +56,8 @@ def audit(path, min_stack_depth=3):
                 child_before_parent_work=True,full_subtree_before_close=True,
                 returns_through_entry=True,no_closed_place_work=True,
                 spatial_dispatch_evidence=True,finite_portal_width=True,nested_boundary_confirmed=True,
-                no_unresolved_execution_failure=True)
+                no_unresolved_execution_failure=True,place_exit_obligation_recorded=True)
+    exit_created={}
     def fail(key,line,reason):
         checks[key]=False
         if len(errors)<40:errors.append(dict(line=line,check=key,reason=reason))
@@ -111,9 +112,14 @@ def audit(path, min_stack_depth=3):
                         and state!='completed' and edge.get('state') in ('certified','selected','crossed')):
                     fail('child_before_parent_work',line,'parent WI dispatched with pending certified child')
             dispatches.append(dict(place_id=owner,work_item_id=wi,tour=tour,time=d.get('ros_time')))
+        if event=='place_exit_created':
+            exit_created[int(d.get('place_id',0) or 0)]=dict(
+                work_item_id=d.get('work_item_id'),portal_id=d.get('portal_id'),
+                parent_place_id=d.get('parent_place_id'))
         if event=='place_dfs_completion_ready':
             place=d.get('place_id');node=nodes.get(place,{})
-            pending=[i['id'] for i in items if i.get('place_id')==place and i.get('state')=='unresolved']
+            pending=[i['id'] for i in items if i.get('place_id')==place and i.get('state')=='unresolved'
+                     and i.get('kind')!='portal_exit']
             scope=d.get('place_scope') or {}
             if (pending or not scope.get('valid') or scope.get('place_id')!=place
                     or not completed_frontier_accounted(scope,items,place) or node.get('state')!='returning'
@@ -136,7 +142,16 @@ def audit(path, min_stack_depth=3):
             last_stack=list(stack)
     final_dfs=latest.get('place_dfs') or {};final_stack=final_dfs.get('stack') or []
     root_id=final_stack[0] if final_stack else None
-    root_pending=[w['id'] for w in latest.get('work_items',[]) if w.get('place_id')==root_id and w.get('state')=='unresolved']
+    root_pending=[w['id'] for w in latest.get('work_items',[]) if w.get('place_id')==root_id
+                  and w.get('state')=='unresolved' and w.get('kind')!='portal_exit']
+    # Only enforce on logs produced after the door-owned exit obligation was
+    # introduced; sealed historical runs keep their original verdict.
+    if exit_created:
+        missing=[entry['place_id'] for entry in entered if entry['place_id'] not in exit_created]
+        checks['place_exit_obligation_recorded']=not missing
+        if missing and len(errors)<40:
+            errors.append(dict(line=0,check='place_exit_obligation_recorded',
+                reason='entered Place has no door-owned exit obligation: %s'%missing))
     checks.update(root_work_items_complete=bool(final_stack) and not root_pending,
                   dfs_events_recorded=bool(entered and returned),
                   nested_physical_dfs_exercised=max_depth>=int(min_stack_depth),

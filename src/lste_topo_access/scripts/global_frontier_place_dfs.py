@@ -119,6 +119,22 @@ class PlaceDfsTraversal:
         node["state"] = "returning"
         return True
 
+    def mark_returning(self, place_id, portal_id):
+        """Flag one entered Place as leaving through its own entry Portal."""
+        try:
+            place_id, portal_id = int(place_id), int(portal_id)
+        except (TypeError, ValueError):
+            return False
+        if not self.stack or self.stack[-1] != place_id:
+            return False
+        node = self.nodes.get(place_id)
+        if node is None or node.get("portal_id") != portal_id:
+            return False
+        if node.get("state") not in ("exploring", "returning"):
+            return False
+        node["state"] = "returning"
+        return True
+
     def return_to_parent(self, source_id, destination_id, portal_id):
         source_id, destination_id, portal_id = map(int, (source_id, destination_id, portal_id))
         if len(self.stack) < 2 or self.stack[-2:] != [destination_id, source_id]:

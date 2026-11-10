@@ -555,6 +555,32 @@ class GlobalFrontierPortalEgressMixin:
             return False
         return target > 0 and target == destination
 
+    def _egress_is_owned_portal_exit(self, place_id, entry_portal_id):
+        """Return whether this Place owns a ready/returning exit obligation.
+
+        A completed room and its parent are both covered, so the generic
+        covered-to-covered guard refuses the reverse edge forever.  The
+        door-owned exit WorkItem is the explicit progress proof for exactly
+        this edge: the Place has finished its own work and the DFS stack must
+        pop through the Portal it entered by.
+        """
+        items = getattr(self, "place_work_items", None)
+        getter = getattr(items, "place_exit_item", None)
+        if not callable(getter):
+            return False
+        try:
+            item = getter(int(place_id))
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(item, dict):
+            return False
+        if str(item.get("exit_state", "")) not in ("ready", "returning"):
+            return False
+        try:
+            return int(item.get("portal_id", -1)) == int(entry_portal_id)
+        except (TypeError, ValueError):
+            return False
+
     def _covered_portal_transit_is_allowed(self, source_region, destination_region):
         """Permit covered transit only when the durable graph has progress."""
         ledger = getattr(self, "portal_hypothesis_ledger", None)
@@ -989,6 +1015,9 @@ class GlobalFrontierPortalEgressMixin:
                 or self._covered_portal_transit_is_allowed(
                     region, destination_region,
                 )
+                or self._egress_is_owned_portal_exit(
+                    place_id, entry_portal_id,
+                )
             ):
                 self.last_portal_covered_cycle_skips = int(
                     getattr(self, "last_portal_covered_cycle_skips", 0)
@@ -1048,6 +1077,33 @@ class GlobalFrontierPortalEgressMixin:
                 }
                 continue
             self.last_durable_portal_egress_unavailable = None
+            items = getattr(self, "place_work_items", None)
+            exit_getter = getattr(items, "place_exit_item", None)
+            if callable(exit_getter):
+                exit_item = exit_getter(place_id)
+                if (
+                    isinstance(exit_item, dict)
+                    and int(exit_item.get("portal_id", -1))
+                    == int(hypothesis["id"])
+                ):
+                    mark = getattr(items, "mark_place_exit_dispatched", None)
+                    if callable(mark):
+                        mark(
+                            int(exit_item["id"]),
+                            now=float(getattr(snapshot, "now", 0.0) or 0.0),
+                        )
+                    dfs = getattr(self, "place_dfs", None)
+                    if dfs is not None:
+                        dfs.mark_returning(int(place_id), int(hypothesis["id"]))
+                    self.publish_status(
+                        "place_exit_dispatched",
+                        work_item_id=int(exit_item["id"]),
+                        place_id=int(place_id),
+                        portal_id=int(hypothesis["id"]),
+                        dispatch_count=int(
+                            exit_item.get("dispatch_count", 0)
+                        ) + 1,
+                    )
             self.publish_status(
                 "durable_portal_egress_selected",
                 place_id=int(place_id),

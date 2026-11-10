@@ -308,5 +308,99 @@ class PortalEntryAbandonTest(unittest.TestCase):
         )
 
 
+class PlaceExitObligationTest(unittest.TestCase):
+    def test_exit_obligation_is_dormant_and_not_room_coverage(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        exit_id = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0),
+            now=1.0, generation=1,
+        )
+        self.assertIsNotNone(exit_id)
+        item = ledger.place_exit_item(2)
+        self.assertEqual(item["id"], exit_id)
+        self.assertEqual(item["kind"], "portal_exit")
+        self.assertEqual(item["exit_state"], "dormant")
+        self.assertEqual(item["parent_place_id"], 1)
+        # A dormant exit is not unfinished room coverage and is not an
+        # outstanding obligation yet.
+        self.assertEqual(ledger.unresolved_observation_count(2), 0)
+        self.assertEqual(ledger.unresolved_count(2), 0)
+        self.assertEqual(ledger.unresolved_ids(2), [])
+
+    def test_activation_makes_the_exit_selectable_then_resolved(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        exit_id = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=1.0, generation=1,
+        )
+        ledger.activate_place_exit(exit_id, now=2.0)
+        self.assertEqual(ledger.place_exit_item(2)["exit_state"], "ready")
+        self.assertEqual(ledger.unresolved_ids(2), [exit_id])
+        # Still not room coverage.
+        self.assertEqual(ledger.unresolved_observation_count(2), 0)
+
+        ledger.mark_place_exit_dispatched(exit_id, now=3.0)
+        item = ledger.place_exit_item(2)
+        self.assertEqual(item["exit_state"], "returning")
+        self.assertEqual(item["dispatch_count"], 1)
+
+        ledger.resolve_place_exit(exit_id, now=4.0, reason="reverse_arrival")
+        item = ledger.place_exit_item(2, include_resolved=True)
+        self.assertEqual(item["state"], WORK_RESOLVED)
+        self.assertEqual(item["exit_state"], "resolved")
+        self.assertEqual(ledger.unresolved_ids(2), [])
+
+    def test_close_place_keeps_the_exit_obligation(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        room_item = ledger._new_item(
+            2, frozenset(), 1.0, xy=(1.0, 1.0), reason="test_room",
+        )["id"]
+        exit_id = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=1.0, generation=1,
+        )
+        closed = ledger.close_place(2, now=2.0, reason="room_closed")
+
+        self.assertIn(room_item, closed)
+        self.assertNotIn(exit_id, closed)
+        self.assertEqual(
+            ledger.place_exit_item(2)["exit_state"], "dormant",
+        )
+
+    def test_blocked_exit_is_not_progress_but_stays_recorded(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        exit_id = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=1.0, generation=1,
+        )
+        ledger.activate_place_exit(exit_id, now=2.0)
+        ledger.block_place_exit(exit_id, now=3.0, reason="egress_timeout")
+
+        self.assertEqual(ledger.place_exit_item(2)["exit_state"], "blocked")
+        self.assertEqual(ledger.unresolved_count(2), 0)
+        self.assertEqual(ledger.unresolved_ids(2), [])
+
+    def test_exit_identity_is_idempotent_per_generation(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        first = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=1.0, generation=1,
+        )
+        again = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=2.0, generation=1,
+        )
+        next_visit = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=3.0, generation=2,
+        )
+
+        self.assertEqual(first, again)
+        self.assertNotEqual(first, next_visit)
+
+    def test_exit_outward_normal_points_from_inside_to_gate(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        ledger.ensure_place_exit(
+            2, 2, 1, (6.0, 2.0), (5.0, 2.0), now=1.0,
+        )
+        item = ledger.place_exit_item(2)
+        self.assertAlmostEqual(item["normal_xy"][0], 1.0)
+        self.assertAlmostEqual(item["normal_xy"][1], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

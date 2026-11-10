@@ -9,6 +9,13 @@ from global_frontier_place_partition import partition_place
 
 
 class PlaceDfsTest(unittest.TestCase):
+    def test_mark_returning_requires_the_active_entry_edge(self):
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
+        self.assertFalse(dfs.mark_returning(2,11))
+        self.assertTrue(dfs.mark_returning(2,10))
+        self.assertEqual(dfs.nodes[2]['state'],'returning')
+        self.assertTrue(dfs.return_to_parent(2,1,10))
+        self.assertEqual(dfs.stack,[1])
     def test_normal_return_has_physical_budget_independent_of_projection_refresh(self):
         dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
         self.assertTrue(dfs.ready_to_return(2,projection_complete=True))

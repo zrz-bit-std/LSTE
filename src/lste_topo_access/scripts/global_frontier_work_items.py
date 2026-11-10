@@ -32,6 +32,17 @@ ATTEMPT_BLOCKED = "blocked"
 ATTEMPT_SUCCEEDED = "succeeded"
 ATTEMPT_SUSPENDED = "suspended"
 
+# A doorway-exit obligation belongs to the Place that was entered, not to its
+# parent.  It stays dormant while the room is still being observed and becomes
+# selectable only once the room has no remaining coverage or frontier work.
+# ``state`` keeps the two-value WorkItem contract; ``exit_state`` is the
+# dispatch lifecycle of this door-owned obligation.
+WORK_EXIT_DORMANT = "dormant"
+WORK_EXIT_READY = "ready"
+WORK_EXIT_RETURNING = "returning"
+WORK_EXIT_RESOLVED = "resolved"
+WORK_EXIT_BLOCKED = "blocked"
+
 
 class PlaceWorkItemLedger:
     """Keep a small lifecycle ledger for frontier observations per Place."""
@@ -242,6 +253,11 @@ class PlaceWorkItemLedger:
                 if int(item["place_id"]) != int(place_id):
                     continue
                 if item.get("kind") == "portal_entry":
+                    continue
+                if item.get("kind") == "portal_exit":
+                    # A doorway-exit obligation is owned by the door, never by
+                    # room coverage; merging it into a frontier observation
+                    # would let one settle the other.
                     continue
                 prior_state = item["state"]
                 overlap = support_overlap(support_cells, item.get("support_cells", ()))
@@ -489,6 +505,8 @@ class PlaceWorkItemLedger:
                 continue
             if item.get("kind") == "portal_entry":
                 continue
+            if item.get("kind") == "portal_exit":
+                continue
             if item.get("x") is None or item.get("y") is None:
                 continue
             distance = math.hypot(x - item["x"], y - item["y"])
@@ -694,6 +712,152 @@ class PlaceWorkItemLedger:
             return item
         return None
 
+    def ensure_place_exit(
+        self, place_id, portal_id, parent_place_id, gate_xy, inside_xy,
+        now=0.0, generation=0,
+    ):
+        """Create the child-owned reverse obligation for one entry doorway.
+
+        The entry WorkItem belongs to the parent Place and is resolved by the
+        crossing itself.  This is a second obligation with the opposite
+        ownership: the entered Place owns the duty to leave through the same
+        physical edge once its own observation work is finished.
+        """
+        try:
+            place_id = int(place_id)
+            portal_id = int(portal_id)
+            parent_place_id = int(parent_place_id)
+            generation = int(generation)
+        except (TypeError, ValueError):
+            return None
+        gate = self._normalise_xy(gate_xy)
+        inside = self._normalise_xy(inside_xy)
+        if (
+            place_id <= 0
+            or portal_id <= 0
+            or parent_place_id <= 0
+            or gate is None
+            or inside is None
+        ):
+            return None
+        for item in self._items.values():
+            if (
+                item.get("kind") == "portal_exit"
+                and int(item.get("place_id", -1)) == place_id
+                and int(item.get("portal_id", -1)) == portal_id
+                and int(item.get("generation", -1)) == generation
+            ):
+                return int(item["id"])
+        outward = (gate[0] - inside[0], gate[1] - inside[1])
+        normal = None
+        length = math.hypot(outward[0], outward[1])
+        if length > 1e-9:
+            normal = (outward[0] / length, outward[1] / length)
+        item = self._new_item(
+            place_id,
+            frozenset(),
+            now,
+            xy=gate,
+            anchor_xy=inside,
+            normal_xy=normal,
+            reason="entry_portal_crossed",
+        )
+        item.update({
+            "kind": "portal_exit",
+            "portal_id": portal_id,
+            "parent_place_id": parent_place_id,
+            "exit_state": WORK_EXIT_DORMANT,
+            "generation": generation,
+            "activated_at": None,
+            "dispatched_at": None,
+            "dispatch_count": 0,
+        })
+        return int(item["id"])
+
+    def place_exit_item(self, place_id, include_resolved=False):
+        """Return the newest exit obligation owned by one Place."""
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return None
+        matches = [
+            item
+            for item in self._items.values()
+            if item.get("kind") == "portal_exit"
+            and int(item.get("place_id", -1)) == place_id
+            and (
+                include_resolved
+                or item.get("state") == WORK_UNRESOLVED
+            )
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda item: int(item["id"]))
+
+    def activate_place_exit(self, item_id, now=0.0, reason=""):
+        """Make one dormant exit obligation selectable."""
+        item = self._items.get(item_id)
+        if item is None or item.get("kind") != "portal_exit":
+            return None
+        if item.get("state") != WORK_UNRESOLVED:
+            return None
+        if item.get("exit_state") not in (
+            WORK_EXIT_DORMANT,
+            WORK_EXIT_BLOCKED,
+            WORK_EXIT_RETURNING,
+        ):
+            return item
+        item["exit_state"] = WORK_EXIT_READY
+        item["activated_at"] = float(now)
+        item["last_reason"] = str(reason or "place_observation_complete")
+        item["updated_at"] = float(now)
+        return item
+
+    def mark_place_exit_dispatched(self, item_id, now=0.0, route_id=0):
+        """Record that the reverse egress candidate was handed to the executor."""
+        item = self._items.get(item_id)
+        if item is None or item.get("kind") != "portal_exit":
+            return None
+        if item.get("state") != WORK_UNRESOLVED:
+            return None
+        if item.get("exit_state") not in (WORK_EXIT_READY, WORK_EXIT_RETURNING):
+            return None
+        item["exit_state"] = WORK_EXIT_RETURNING
+        item["dispatch_count"] = int(item.get("dispatch_count", 0)) + 1
+        item["dispatched_at"] = float(now)
+        item["dispatch_route_id"] = int(route_id or 0)
+        item["last_reason"] = "reverse_egress_dispatched"
+        item["updated_at"] = float(now)
+        return item
+
+    def resolve_place_exit(self, item_id, now=0.0, reason=""):
+        """Close the exit obligation after the reverse arrival commits."""
+        item = self._items.get(item_id)
+        if item is None or item.get("kind") != "portal_exit":
+            return None
+        if item.get("state") == WORK_RESOLVED:
+            return item
+        active = self._active_attempt(item)
+        if active is not None:
+            self._finish_active_attempt(item, ATTEMPT_SUCCEEDED, now, reason)
+        item["state"] = WORK_RESOLVED
+        item["exit_state"] = WORK_EXIT_RESOLVED
+        item["last_reason"] = str(reason or "reverse_arrival_committed")
+        item["updated_at"] = float(now)
+        return item
+
+    def block_place_exit(self, item_id, now=0.0, reason=""):
+        """Retire a failing exit obligation without pretending it succeeded."""
+        item = self._items.get(item_id)
+        if item is None or item.get("kind") != "portal_exit":
+            return None
+        if item.get("state") != WORK_UNRESOLVED:
+            return None
+        item["exit_state"] = WORK_EXIT_BLOCKED
+        item["last_reason"] = str(reason or "reverse_egress_unavailable")
+        item["updated_at"] = float(now)
+        return item
+
     def prune_frontier_observations(self, place_id, now, reason="semantic_portal_entry_selected"):
         """Resolve every source-Place frontier observation before a semantic entry.
 
@@ -797,6 +961,10 @@ class PlaceWorkItemLedger:
             # Only resolve_portal_entry() after the destination Place commit
             # may close this semantic entry.
             return None
+        if item.get("kind") == "portal_exit":
+            # Only resolve_place_exit() after the reverse arrival commits may
+            # close the door-owned exit obligation.
+            return None
         active = self._active_attempt(item)
         if active is not None:
             # A terminal without ownership metadata is ambiguous once a
@@ -833,6 +1001,8 @@ class PlaceWorkItemLedger:
         """
         item = self._items.get(item_id)
         if item is None or item["state"] != WORK_UNRESOLVED:
+            return None
+        if item.get("kind") == "portal_exit":
             return None
         active = self._active_attempt(item)
         if active is not None:
@@ -896,6 +1066,10 @@ class PlaceWorkItemLedger:
                 # obligation.  Source-place cleanup must not consume it; only
                 # resolve_portal_entry() may close it after the crossing.
                 continue
+            if item.get("kind") == "portal_exit":
+                # The entered Place owns the reverse obligation.  Only
+                # resolve_place_exit() may close it after the reverse arrival.
+                continue
             attempt = self._active_attempt(item)
             if attempt is not None:
                 self._finish_active_attempt(item, ATTEMPT_SUSPENDED, now, reason)
@@ -930,6 +1104,10 @@ class PlaceWorkItemLedger:
                 continue
             if item.get("kind") == "portal_entry":
                 # Keep the semantic entry alive across a scoped arm close.
+                continue
+            if item.get("kind") == "portal_exit":
+                # The reverse obligation survives a scoped arm close; it is
+                # what lets the entered Place return to its parent.
                 continue
             in_selected_arm = (
                 not scoped or work_item_belongs_to_branch(item, branch_scope)
@@ -966,6 +1144,12 @@ class PlaceWorkItemLedger:
             int(item["id"]) for item in self._items.values()
             if int(item.get("place_id", -1)) == place_id
             and item.get("state") == WORK_UNRESOLVED
+            # A dormant exit obligation is not outstanding work.  Once the
+            # room is complete it becomes selectable and a real obligation.
+            and (
+                item.get("kind") != "portal_exit"
+                or item.get("exit_state") in (WORK_EXIT_READY, WORK_EXIT_RETURNING)
+            )
             and (not isinstance(branch_scope, dict)
                  or work_item_belongs_to_branch(item, branch_scope))
         )
@@ -983,6 +1167,9 @@ class PlaceWorkItemLedger:
             for item in self._items.values()
             if int(item["place_id"]) == int(place_id)
             and item["state"] == WORK_UNRESOLVED
+            # The door-owned exit obligation must not look like unfinished
+            # room progress to a covered-to-covered transit check.
+            and item.get("kind") != "portal_exit"
         )
 
     def unresolved_observation_count(self, place_id, portal_probe_ledger=None):
@@ -1009,6 +1196,10 @@ class PlaceWorkItemLedger:
                 int(item.get("place_id", -1)) != place_id
                 or item.get("state") != WORK_UNRESOLVED
             ):
+                continue
+            if item.get("kind") == "portal_exit":
+                # Leaving the room is not unfinished room coverage.  Counting
+                # it here would keep every entered Place permanently open.
                 continue
             if callable(probe_for_work) and probe_for_work(item.get("id")) is not None:
                 continue
@@ -1133,6 +1324,12 @@ class PlaceWorkItemLedger:
                     "place_id": int(item["place_id"]),
                     "kind": str(item.get("kind", "frontier_observation")),
                     "portal_id": item.get("portal_id"),
+                    "parent_place_id": item.get("parent_place_id"),
+                    "exit_state": item.get("exit_state"),
+                    "generation": item.get("generation"),
+                    "dispatch_count": item.get("dispatch_count"),
+                    "activated_at": item.get("activated_at"),
+                    "dispatched_at": item.get("dispatched_at"),
                     "priority": item.get("priority"),
                     "semantic_score": item.get("semantic_score"),
                     "state": str(item.get("state", WORK_UNRESOLVED)),

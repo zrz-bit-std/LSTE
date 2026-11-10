@@ -240,8 +240,206 @@ class GlobalFrontierPlanningSnapshotMixin:
         )
         self.clear_target_region_claim("no_executable_frontier_in_claimed_room")
 
+    def _place_exit_activation_ready(self, place_id):
+        """Return whether the entered Place has finished its own local work."""
+        items = getattr(self, "place_work_items", None)
+        if items is None:
+            return False
+        # Never walk away from an active target chase.
+        if getattr(self, "target_region_claim_active", False):
+            return False
+        if getattr(self, "target_observation_work_pending", False):
+            return False
+        auth = getattr(self, "active_portal_authentication", lambda: None)()
+        if auth is not None:
+            return False
+        task = getattr(self, "junction_portal_authentication", None)
+        if task is not None and str(getattr(task, "phase", "")) in (
+            "watching", "authenticating",
+        ):
+            return False
+        count = getattr(items, "unresolved_observation_count", None)
+        if callable(count):
+            try:
+                if int(count(
+                    place_id,
+                    portal_probe_ledger=getattr(
+                        self, "portal_probe_ledger", None,
+                    ),
+                )) > 0:
+                    return False
+            except TypeError:
+                if int(count(place_id)) > 0:
+                    return False
+        actionable = getattr(items, "actionable_frontier_observation_count", None)
+        if callable(actionable):
+            try:
+                if int(actionable(place_id)) > 0:
+                    return False
+            except TypeError:
+                pass
+        try:
+            pending_frontier = int(
+                getattr(
+                    self, "current_place_scope_pending_frontier_count", 0,
+                ) or 0
+            )
+        except (TypeError, ValueError):
+            pending_frontier = 0
+        if pending_frontier > 0:
+            return False
+        return True
+
+    def _activate_place_exit_if_ready(self):
+        """Promote the door-owned exit obligation once the room is complete.
+
+        This runs in the no-candidate reporting path, i.e. after ordinary
+        local work, probe fallback and durable egress were all attempted for
+        this cycle.  Activation therefore takes effect on the next cycle and
+        never pre-empts a normal observation action.
+        """
+        items = getattr(self, "place_work_items", None)
+        place_id = getattr(self, "current_physical_place_id", None)
+        getter = getattr(items, "place_exit_item", None)
+        if items is None or place_id is None or not callable(getter):
+            return False
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return False
+        item = getter(place_id)
+        if not isinstance(item, dict):
+            self._place_exit_ready_key = None
+            self._place_exit_ready_cycles = 0
+            return False
+        state = str(item.get("exit_state", ""))
+        now = now_for(self)
+        if state == "returning":
+            dispatched = item.get("dispatched_at")
+            try:
+                dispatched = (
+                    None if dispatched is None else float(dispatched)
+                )
+            except (TypeError, ValueError):
+                dispatched = None
+            timeout = float(
+                getattr(self, "place_exit_dispatch_timeout", 60.0) or 0.0
+            )
+            if dispatched is not None and now - dispatched >= timeout:
+                try:
+                    retries = int(item.get("dispatch_count", 0) or 0)
+                except (TypeError, ValueError):
+                    retries = 0
+                limit = int(
+                    getattr(self, "place_exit_max_dispatches", 3) or 3
+                )
+                if retries >= limit:
+                    block = getattr(items, "block_place_exit", None)
+                    if callable(block):
+                        block(
+                            int(item["id"]), now,
+                            "reverse_egress_dispatch_timeout",
+                        )
+                    self.publish_status(
+                        "place_exit_blocked",
+                        work_item_id=int(item["id"]),
+                        place_id=place_id,
+                        portal_id=item.get("portal_id"),
+                        dispatch_count=retries,
+                        reason="reverse_egress_dispatch_timeout",
+                    )
+                else:
+                    activate = getattr(items, "activate_place_exit", None)
+                    if callable(activate):
+                        activate(
+                            int(item["id"]), now,
+                            "reverse_egress_retry_after_timeout",
+                        )
+                    self.publish_status(
+                        "place_exit_retry",
+                        work_item_id=int(item["id"]),
+                        place_id=place_id,
+                        portal_id=item.get("portal_id"),
+                        dispatch_count=retries,
+                        reason="reverse_egress_retry_after_timeout",
+                    )
+            return False
+        if state != "dormant":
+            self._place_exit_ready_key = None
+            self._place_exit_ready_cycles = 0
+            if state == "ready":
+                activated = item.get("activated_at")
+                try:
+                    activated = (
+                        None if activated is None else float(activated)
+                    )
+                except (TypeError, ValueError):
+                    activated = None
+                ready_timeout = float(
+                    getattr(self, "place_exit_ready_timeout", 120.0) or 0.0
+                )
+                if (
+                    activated is not None
+                    and ready_timeout > 0.0
+                    and now - activated >= ready_timeout
+                ):
+                    block = getattr(items, "block_place_exit", None)
+                    if callable(block):
+                        block(
+                            int(item["id"]), now,
+                            "reverse_egress_not_materialized",
+                        )
+                    self.publish_status(
+                        "place_exit_blocked",
+                        work_item_id=int(item["id"]),
+                        place_id=place_id,
+                        portal_id=item.get("portal_id"),
+                        dispatch_count=int(
+                            item.get("dispatch_count", 0) or 0
+                        ),
+                        reason="reverse_egress_not_materialized",
+                    )
+            return False
+        if not self._place_exit_activation_ready(place_id):
+            self._place_exit_ready_key = None
+            self._place_exit_ready_cycles = 0
+            return False
+        key = (place_id, int(item.get("id", 0) or 0))
+        if getattr(self, "_place_exit_ready_key", None) != key:
+            self._place_exit_ready_key = key
+            self._place_exit_ready_cycles = 1
+            return False
+        self._place_exit_ready_cycles = int(
+            getattr(self, "_place_exit_ready_cycles", 0)
+        ) + 1
+        # Two consecutive cycles avoid promoting the exit on a one-sample
+        # frontier blip at the exact moment the room is being closed.
+        if self._place_exit_ready_cycles < 2:
+            return False
+        activate = getattr(items, "activate_place_exit", None)
+        if not callable(activate):
+            return False
+        activate(
+            int(item["id"]), now, "place_observation_complete",
+        )
+        self.publish_status(
+            "place_exit_ready",
+            work_item_id=int(item["id"]),
+            place_id=place_id,
+            portal_id=item.get("portal_id"),
+            parent_place_id=item.get("parent_place_id"),
+            reason="place_observation_complete",
+        )
+        return True
+
     def _report_no_frontier_selection(self):
         """Record why this cycle cannot create a new execution action."""
+        # A completed room with no local work and no frontier is the one point
+        # where the door-owned exit obligation becomes legal to dispatch.  The
+        # next planning cycle will offer it through durable Portal egress.
+        activate_exit = getattr(self, "_activate_place_exit_if_ready", None)
+        if callable(activate_exit):
+            activate_exit()
         if getattr(self, "gp_portal_assistance_enabled", False):
             tree = getattr(self, "gp_exploration_tree", None)
             pending = [] if tree is None else [

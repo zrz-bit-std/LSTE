@@ -218,7 +218,8 @@ class GlobalFrontierCandidateWorkItemMixin:
                 continue
             report["items_seen"] += 1
             audit = {"work_item_id": item_id}
-            if str(item.get("kind", "")).strip().lower() == "portal_entry":
+            item_kind = str(item.get("kind", "")).strip().lower()
+            if item_kind == "portal_entry":
                 # The doorway-entry obligation is executed by the Portal
                 # transition and settled when that crossing commits.  A local
                 # observation route here only reaches a gate-side viewpoint
@@ -228,6 +229,13 @@ class GlobalFrontierCandidateWorkItemMixin:
                 audit["reason"] = "portal_entry_owned_by_portal_transition"
                 report["item_audit"].append(audit)
                 reject("portal_entry_owned_by_portal_transition")
+                continue
+            if item_kind == "portal_exit":
+                # The reverse obligation is executed by the durable Portal
+                # egress, not by a local observation viewpoint.
+                audit["reason"] = "portal_exit_owned_by_portal_egress"
+                report["item_audit"].append(audit)
+                reject("portal_exit_owned_by_portal_egress")
                 continue
             if item.get("active_attempt_id") is not None:
                 audit["reason"] = "attempt_active"

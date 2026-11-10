@@ -91,6 +91,37 @@ class GlobalFrontierPortalArrivalCommitMixin:
         room_place_id = int(active_room.get("place_id", -1))
         branch_scope = None
         dfs = getattr(self, "place_dfs", None)
+        # The reverse arrival is the completion evidence for the door-owned
+        # exit obligation.  Close it before the return ledger computes
+        # unresolved work, otherwise it sees its own obligation and refuses
+        # to pop the DFS stack.
+        items = getattr(self, "place_work_items", None)
+        exit_getter = getattr(items, "place_exit_item", None)
+        exit_resolver = getattr(items, "resolve_place_exit", None)
+        if (
+            callable(exit_getter)
+            and callable(exit_resolver)
+            and room_place_id > 0
+        ):
+            exit_item = exit_getter(room_place_id)
+            if (
+                isinstance(exit_item, dict)
+                and str(exit_item.get("exit_state", ""))
+                in ("ready", "returning")
+            ):
+                exit_resolver(
+                    int(exit_item["id"]),
+                    now,
+                    reason="reverse_arrival_committed",
+                )
+                self.publish_status(
+                    "place_exit_completed",
+                    work_item_id=int(exit_item["id"]),
+                    place_id=room_place_id,
+                    parent_place_id=int(destination_place_id),
+                    portal_id=int(exit_item.get("portal_id", portal_id)),
+                    dispatch_count=int(exit_item.get("dispatch_count", 0)),
+                )
         unresolved_ids = (
             self.place_work_items.unresolved_ids(
                 room_place_id, branch_scope=branch_scope,
@@ -961,6 +992,33 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 if dfs is not None:
                     self.publish_status("place_dfs_entered", parent_place_id=int(arrival.source_region_id),
                         place_id=int(region['id']), portal_id=int(portal_id), place_dfs=dfs.snapshot())
+                # The crossing just succeeded, so the parent-owned entry
+                # obligation is closed.  Record the opposite obligation now:
+                # this Place owns a reverse exit through the same physical
+                # edge, dormant until its own observation work is finished.
+                items = getattr(self, "place_work_items", None)
+                ensure_exit = getattr(items, "ensure_place_exit", None)
+                if callable(ensure_exit):
+                    generation = int(region.get("visits", 0) or 0)
+                    exit_id = ensure_exit(
+                        int(region["id"]),
+                        int(portal_id),
+                        int(arrival.source_region_id),
+                        getattr(arrival, "portal_gate_xy", None),
+                        getattr(arrival, "goal_xy", None),
+                        now=now,
+                        generation=generation,
+                    )
+                    if exit_id is not None:
+                        portal_record["exit_work_item_id"] = int(exit_id)
+                        self.publish_status(
+                            "place_exit_created",
+                            work_item_id=int(exit_id),
+                            place_id=int(region["id"]),
+                            parent_place_id=int(arrival.source_region_id),
+                            portal_id=int(portal_id),
+                            generation=generation,
+                        )
         # The Place identity is now authoritative, but its local observation
         # ledger is still snapshot-local.  The next selection pass must first
         # reconcile one map projection for this Place before graph transit can

@@ -564,6 +564,13 @@ class GlobalFrontierReportingMixin:
             unresolved_work_items=unresolved_work,
             unresolved_portals=unresolved_portals,
         )
+        exit_item = None
+        exit_getter = getattr(work_items, "place_exit_item", None)
+        if callable(exit_getter) and place_id is not None:
+            try:
+                exit_item = exit_getter(place_id, include_resolved=True)
+            except TypeError:
+                exit_item = exit_getter(place_id)
         return {
             "place_id": progress.place_id,
             "phase": progress.phase,
@@ -576,6 +583,29 @@ class GlobalFrontierReportingMixin:
             ),
             "has_durable_progress": bool(progress.has_durable_progress),
             "reason": progress.reason,
+            # The child-owned reverse obligation.  Dormant/blocked exits are
+            # deliberately excluded from the unresolved counts above; this
+            # block is how the log still shows that the door duty exists.
+            "exit_work_item_id": (
+                None if not isinstance(exit_item, dict)
+                else int(exit_item.get("id", 0) or 0)
+            ),
+            "exit_state": (
+                None if not isinstance(exit_item, dict)
+                else exit_item.get("exit_state")
+            ),
+            "exit_portal_id": (
+                None if not isinstance(exit_item, dict)
+                else exit_item.get("portal_id")
+            ),
+            "exit_parent_place_id": (
+                None if not isinstance(exit_item, dict)
+                else exit_item.get("parent_place_id")
+            ),
+            "exit_dispatch_count": (
+                0 if not isinstance(exit_item, dict)
+                else int(exit_item.get("dispatch_count", 0) or 0)
+            ),
         }
 
     def publish_status(self, event, **fields):
