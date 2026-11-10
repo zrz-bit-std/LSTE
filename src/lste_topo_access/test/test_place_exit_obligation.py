@@ -96,6 +96,24 @@ class PlaceExitActivationTest(unittest.TestCase):
             probe.place_work_items.place_exit_item(2)["exit_state"], "dormant",
         )
 
+    def test_target_evidence_vetoes_the_exit(self):
+        probe = ExitActivationProbe()
+        probe.make_exit()
+
+        class Belief:
+            @staticmethod
+            def evidence(_place_id):
+                return {"state": "target_supported"}
+
+        probe.target_belief = Belief()
+        for _ in range(3):
+            probe.clock += 1.0
+            self.assertFalse(probe._activate_place_exit_if_ready())
+
+        self.assertEqual(
+            probe.place_work_items.place_exit_item(2)["exit_state"], "dormant",
+        )
+
     def test_pending_frontier_vetoes_the_exit(self):
         probe = ExitActivationProbe()
         probe.make_exit()

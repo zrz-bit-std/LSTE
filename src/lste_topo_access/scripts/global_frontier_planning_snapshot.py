@@ -250,6 +250,17 @@ class GlobalFrontierPlanningSnapshotMixin:
             return False
         if getattr(self, "target_observation_work_pending", False):
             return False
+        belief = getattr(self, "target_belief", None)
+        evidence = getattr(belief, "evidence", None)
+        if callable(evidence):
+            record = evidence(place_id)
+            if isinstance(record, dict) and str(record.get("state", "")) in (
+                "target_supported", "target_confirmed",
+            ):
+                # A weakly detected target is not a reason to abandon the room
+                # before LOCKED; leaving is only legal when the Place carries
+                # no task evidence at all.
+                return False
         auth = getattr(self, "active_portal_authentication", lambda: None)()
         if auth is not None:
             return False
