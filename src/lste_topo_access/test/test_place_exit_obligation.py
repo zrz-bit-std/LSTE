@@ -114,17 +114,19 @@ class PlaceExitActivationTest(unittest.TestCase):
             probe.place_work_items.place_exit_item(2)["exit_state"], "dormant",
         )
 
-    def test_pending_frontier_vetoes_the_exit(self):
+    def test_raw_pending_frontier_does_not_block_a_completed_exit(self):
         probe = ExitActivationProbe()
         probe.make_exit()
-        probe.current_place_scope_pending_frontier_count = 3
+        # A finished room can keep rejected SLAM frontier cells forever.
+        probe.current_place_scope_pending_frontier_count = 221
 
-        for _ in range(3):
-            probe.clock += 1.0
-            self.assertFalse(probe._activate_place_exit_if_ready())
+        probe.clock = 10.0
+        self.assertFalse(probe._activate_place_exit_if_ready())
+        probe.clock = 11.0
+        self.assertTrue(probe._activate_place_exit_if_ready())
 
         self.assertEqual(
-            probe.place_work_items.place_exit_item(2)["exit_state"], "dormant",
+            probe.place_work_items.place_exit_item(2)["exit_state"], "ready",
         )
 
     def test_stalled_dispatch_retries_then_blocks(self):

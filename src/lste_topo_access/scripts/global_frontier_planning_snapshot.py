@@ -289,16 +289,13 @@ class GlobalFrontierPlanningSnapshotMixin:
                     return False
             except TypeError:
                 pass
-        try:
-            pending_frontier = int(
-                getattr(
-                    self, "current_place_scope_pending_frontier_count", 0,
-                ) or 0
-            )
-        except (TypeError, ValueError):
-            pending_frontier = 0
-        if pending_frontier > 0:
-            return False
+        # Raw/pending SLAM frontier cells are deliberately not consulted here.
+        # They include cells the selector has already rejected (outside the
+        # Place mask, covered, unreachable) and can stay non-zero forever in a
+        # finished room: run 20261110_202831 ended with phase=exit,
+        # unresolved_work_items=0 and pending_frontier_count=221.  Activation
+        # only runs from the no-candidate path and needs two consecutive such
+        # cycles, so "no candidate" is the authoritative signal.
         return True
 
     def _activate_place_exit_if_ready(self):
