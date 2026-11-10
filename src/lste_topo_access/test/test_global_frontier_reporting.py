@@ -276,6 +276,47 @@ class GlobalFrontierReportingTest(unittest.TestCase):
             reporter.place_progress_report()["unresolved_portals"], 1
         )
 
+    def test_place_dfs_report_lists_uncommitted_destinations_with_reason(self):
+        from global_frontier_place_dfs import PlaceDfsTraversal
+        from global_frontier_portal_belief import PortalHypothesisLedger
+
+        ledger = PortalHypothesisLedger()
+        deferred, _ = ledger.certify(1, (2.0, 2.0), (5.0, 2.0), now=1.0)
+        ledger.bind_destination(deferred["id"], 4, now=1.0)
+        ledger.mark_deferred(
+            deferred["id"], "heading", now=7.0, heading_delta_deg=178.0,
+        )
+        entered, _ = ledger.certify(1, (2.0, 0.0), (5.0, 0.0), now=1.0)
+        ledger.select(entered["id"], now=2.0)
+        ledger.crossed(entered["id"], now=3.0)
+        ledger.bind_destination(entered["id"], 3, now=3.0)
+        pending, _ = ledger.certify(1, (2.0, 1.0), (5.0, 1.0), now=1.0)
+        ledger.bind_destination(pending["id"], 2, now=1.0)
+
+        dfs = PlaceDfsTraversal()
+        dfs.bootstrap(1)
+        dfs.enter(1, 3, entered["id"])
+
+        reporter = GlobalFrontierReportingMixin()
+        reporter.place_dfs = dfs
+        reporter.portal_hypothesis_ledger = ledger
+        report = reporter.place_dfs_report()
+
+        self.assertEqual(report["stack"], [1, 3])
+        self.assertEqual(
+            [node["place_id"] for node in report["nodes"]], [1, 3],
+        )
+        by_destination = {
+            row["destination_place_id"]: row
+            for row in report["observed"]
+        }
+        self.assertEqual(sorted(by_destination), [2, 4])
+        self.assertEqual(by_destination[2]["reason"], "not_selected")
+        self.assertEqual(by_destination[4]["reason"], "heading")
+        self.assertEqual(by_destination[4]["heading_delta_deg"], 178.0)
+        self.assertEqual(by_destination[4]["commit_state"], "observed")
+        self.assertNotIn(4, [node["place_id"] for node in report["nodes"]])
+
 
 if __name__ == "__main__":
     unittest.main()

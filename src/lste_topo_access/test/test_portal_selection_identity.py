@@ -39,6 +39,9 @@ class PortalSelectionFixture(GlobalFrontierPortalSelectionMixin):
         self.mutations += 1
         raise AssertionError("unrelated Portal must not be certified")
 
+    def publish_status(self, *_args, **_kwargs):
+        """Status emission is not part of the identity contract under test."""
+
 
 class PortalSelectionIdentityTest(unittest.TestCase):
     def test_preferred_graph_portal_filters_before_ledger_mutation(self):

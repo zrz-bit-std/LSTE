@@ -297,6 +297,19 @@ class GlobalFrontierReportingMixin:
                 ),
                 "rejected_map_epoch": record.get("rejected_map_epoch"),
                 "last_rejection_reason": record.get("last_rejection_reason", ""),
+                # Durable "why this doorway was not committed".  The Place
+                # tree only holds physically entered nodes; these fields keep
+                # an observed-but-unentered destination explainable.
+                "commit_state": record.get("commit_state", "observed"),
+                "defer_reason": record.get("defer_reason", ""),
+                "defer_ros": record.get("defer_ros"),
+                "defer_count": int(record.get("defer_count", 0) or 0),
+                "defer_heading_delta_deg": record.get(
+                    "defer_heading_delta_deg"
+                ),
+                "heading_override_count": int(
+                    record.get("heading_override_count", 0) or 0
+                ),
             })
         return {
             "active_id": int(getattr(self, "last_portal_hypothesis_id", 0) or 0),
@@ -417,6 +430,86 @@ class GlobalFrontierReportingMixin:
             "transit_edges": sum(1 for branch in snapshots if branch.transit),
             "reopens": sum(int(branch.reopen_count) for branch in snapshots),
         }
+
+    def place_dfs_report(self):
+        """Return the committed Place tree plus its uncommitted expectations.
+
+        ``nodes`` stays exactly the physical DFS tree.  ``observed`` is a
+        sibling list, never a node: adding a fake node would break the
+        enter/return invariants and the offline DFS audit.
+        """
+        dfs = getattr(self, "place_dfs", None)
+        if dfs is None:
+            return None
+        payload = dfs.snapshot()
+        payload["observed"] = self.observed_destination_report(
+            payload.get("nodes") or []
+        )
+        return payload
+
+    def observed_destination_report(self, nodes):
+        """List certified destinations that were observed but never entered."""
+        committed = set()
+        for node in nodes or ():
+            try:
+                committed.add(int(node.get("place_id")))
+            except (TypeError, ValueError):
+                continue
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        if ledger is None:
+            return []
+        try:
+            records = ledger.snapshot()
+        except Exception:
+            return []
+        observed = []
+        for record in records:
+            state = str(record.get("state", "")).strip().lower()
+            if state not in ("certified", "selected", "crossed"):
+                continue
+            destination = record.get("destination_place_id")
+            try:
+                destination = (
+                    None if destination is None else int(destination)
+                )
+            except (TypeError, ValueError):
+                destination = None
+            if destination is not None and destination in committed:
+                continue
+            selection_count = int(record.get("selection_count", 0) or 0)
+            reason = str(record.get("defer_reason") or "")
+            if not reason:
+                reason = (
+                    "not_selected"
+                    if selection_count == 0
+                    else "selected_not_entered"
+                )
+            observed.append({
+                "portal_id": int(record.get("id", 0) or 0),
+                "source_place_id": record.get("source_place_id"),
+                "destination_place_id": destination,
+                "commit_state": str(
+                    record.get("commit_state")
+                    or ("committed" if state == "crossed" else "observed")
+                ),
+                "reason": reason,
+                "defer_ros": record.get("defer_ros"),
+                "defer_count": int(record.get("defer_count", 0) or 0),
+                "heading_delta_deg": record.get("defer_heading_delta_deg"),
+                "semantic_score": record.get("semantic_score"),
+                "semantic_priority": record.get("semantic_priority"),
+                "selection_count": selection_count,
+                "gate": record.get("physical_gate"),
+                "destination": record.get("physical_destination"),
+            })
+        observed.sort(
+            key=lambda row: (
+                -1 if row["source_place_id"] is None
+                else int(row["source_place_id"]),
+                row["portal_id"],
+            )
+        )
+        return observed
 
     def place_progress_report(self):
         """Expose the durable Place phase used by graph action admission."""
@@ -709,8 +802,7 @@ class GlobalFrontierReportingMixin:
                 "entry_portal_id": getattr(self, "current_place_scope_entry_portal_id", None),
                 "projected_portals": getattr(self, "current_place_scope_projected_portals", []),
             },
-            "place_dfs": (None if getattr(self, "place_dfs", None) is None
-                          else self.place_dfs.snapshot()),
+            "place_dfs": self.place_dfs_report(),
             "active_semantic_room": getattr(self, "active_semantic_room", None),
             "active_semantic_rooms": list(getattr(self, "active_semantic_rooms", ()) or ()),
             "portal_probes": self.portal_probe_report(),

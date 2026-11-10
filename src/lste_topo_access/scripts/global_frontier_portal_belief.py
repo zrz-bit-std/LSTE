@@ -148,6 +148,24 @@ class PortalHypothesisLedger:
                 "selection_count": 0,
                 "crossing_count": 0,
                 "failure_count": 0,
+                # Epoch-scoped hard rejection (invalid edge) is separate from
+                # the descriptive deferral fields below.
+                "rejected_map_epoch": None,
+                "last_rejection_reason": "",
+                # Why this doorway has not been committed yet.  These fields
+                # are the durable answer to "the Place tree has no node here":
+                # they survive map updates and are re-read by the Place
+                # snapshot, so an observed-but-unentered room stays explainable.
+                "commit_state": "observed",
+                "defer_reason": "",
+                "defer_ros": None,
+                "defer_count": 0,
+                "defer_heading_delta_deg": None,
+                "defer_history": [],
+                # Bounded proof that a semantic heading override was already
+                # tried for this doorway, so a failed in-place turn cannot be
+                # retried forever.
+                "heading_override_count": 0,
                 "task_versions": set(),
                 "first_seen_at": float(now),
                 "last_seen_at": float(now),
@@ -199,6 +217,10 @@ class PortalHypothesisLedger:
         record["state"] = "selected"
         record["selection_count"] += 1
         record["last_selected_at"] = float(now)
+        # A selected doorway is no longer deferred; keep the history so the
+        # audit can still see why it was skipped before this decision.
+        record["defer_reason"] = ""
+        record["defer_ros"] = None
         return record
 
     def crossed(self, portal_id, now=0.0):
@@ -213,6 +235,9 @@ class PortalHypothesisLedger:
         record["state"] = "crossed"
         record["crossing_count"] += 1
         record["last_crossed_at"] = float(now)
+        record["commit_state"] = "committed"
+        record["defer_reason"] = ""
+        record["defer_ros"] = None
         return record
 
     def bind_destination(self, portal_id, destination_place_id, now=0.0):
@@ -254,6 +279,8 @@ class PortalHypothesisLedger:
             return None
         record["destination_place_id"] = destination_place_id
         record["last_crossed_at"] = float(now)
+        if str(record.get("commit_state", "")).strip().lower() != "committed":
+            record["commit_state"] = "observed"
         return record
 
     def crossed_reverse_for_destination(
@@ -484,6 +511,53 @@ class PortalHypothesisLedger:
         except (TypeError, ValueError):
             record["rejected_map_epoch"] = None
         record["last_rejection_reason"] = str(reason or "")
+        return record
+
+    def mark_deferred(
+        self, portal_id, reason, now=0.0, heading_delta_deg=None, detail=None,
+    ):
+        """Record why a certified doorway was not committed this cycle.
+
+        Unlike :meth:`mark_unbound_rejected` this never sets
+        ``rejected_map_epoch``.  A heading, priority, or turn deferral is
+        re-evaluated on the next decision, while a genuinely invalid edge
+        keeps its epoch-scoped suppression.  The record therefore stays
+        selectable *and* explainable at the same time.
+        """
+        record = self._by_id(portal_id)
+        if record is None:
+            return None
+        reason = str(reason or "").strip()
+        if not reason:
+            return record
+        try:
+            heading_delta_deg = (
+                None
+                if heading_delta_deg is None
+                else round(float(heading_delta_deg), 2)
+            )
+        except (TypeError, ValueError):
+            heading_delta_deg = None
+        record["defer_reason"] = reason
+        record["defer_ros"] = float(now)
+        record["defer_count"] = int(record.get("defer_count", 0)) + 1
+        record["defer_heading_delta_deg"] = heading_delta_deg
+        history = list(record.get("defer_history") or [])
+        entry = {
+            "ros": round(float(now), 3),
+            "reason": reason,
+            "heading_delta_deg": heading_delta_deg,
+        }
+        if detail:
+            entry["detail"] = str(detail)[:120]
+        history.append(entry)
+        record["defer_history"] = history[-8:]
+        if str(record.get("state", "")).strip().lower() != "crossed":
+            record["commit_state"] = (
+                "observed"
+                if record.get("destination_place_id") is not None
+                else "unbound"
+            )
         return record
 
     def refresh_projection(

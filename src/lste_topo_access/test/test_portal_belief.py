@@ -631,6 +631,48 @@ class PortalBeliefTest(unittest.TestCase):
         ledger.bind_destination(edge["id"], 9, now=3.0)
         self.assertEqual(ledger.unbound_for_source(4), [])
 
+    def test_deferred_portal_records_reason_without_epoch_suppression(self):
+        ledger = PortalHypothesisLedger()
+        edge, _created = ledger.certify(1, (2.0, 0.0), (4.0, 0.0), now=1.0)
+        ledger.bind_destination(edge["id"], 2, now=1.0)
+
+        ledger.mark_deferred(
+            edge["id"], "heading", now=5.0, heading_delta_deg=178.24,
+        )
+        record = ledger.get(edge["id"])
+
+        self.assertEqual(record["defer_reason"], "heading")
+        self.assertEqual(record["defer_count"], 1)
+        self.assertEqual(record["defer_heading_delta_deg"], 178.24)
+        self.assertEqual(record["commit_state"], "observed")
+        # A heading deferral must remain selectable next cycle.
+        self.assertIsNone(record["rejected_map_epoch"])
+        self.assertEqual(ledger.unbound_for_source(1), [])
+
+    def test_selection_and_crossing_clear_the_defer_reason(self):
+        ledger = PortalHypothesisLedger()
+        edge, _created = ledger.certify(1, (2.0, 0.0), (4.0, 0.0), now=1.0)
+        ledger.bind_destination(edge["id"], 2, now=1.0)
+        ledger.mark_deferred(edge["id"], "heading", now=5.0)
+
+        ledger.select(edge["id"], now=6.0)
+        self.assertEqual(ledger.get(edge["id"])["defer_reason"], "")
+        ledger.crossed(edge["id"], now=7.0)
+        record = ledger.get(edge["id"])
+        self.assertEqual(record["commit_state"], "committed")
+        self.assertEqual(record["crossing_count"], 1)
+
+    def test_defer_history_is_bounded(self):
+        ledger = PortalHypothesisLedger()
+        edge, _created = ledger.certify(1, (2.0, 0.0), (4.0, 0.0), now=1.0)
+        for step in range(12):
+            ledger.mark_deferred(edge["id"], "heading", now=float(step))
+
+        record = ledger.get(edge["id"])
+        self.assertEqual(len(record["defer_history"]), 8)
+        self.assertEqual(record["defer_count"], 12)
+        self.assertEqual(record["defer_history"][-1]["ros"], 11.0)
+
 
 if __name__ == "__main__":
     unittest.main()

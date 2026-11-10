@@ -31,6 +31,24 @@ def main():
     latest=events[-1][1];dfs=latest.get('place_dfs') or {}
     nodes={n['place_id']:n for n in dfs.get('nodes',[])}
     portals={p['id']:p for p in (latest.get('portal_hypotheses') or {}).get('records',[])}
+    # Destinations that were physically certified but never entered.  Newer
+    # logs carry the durable reason; older logs are reconstructed from the
+    # Portal ledger so the same figure still works on sealed runs.
+    observed_rows=list(dfs.get('observed') or [])
+    if not observed_rows:
+        for portal in portals.values():
+            destination=portal.get('destination_place_id')
+            try:destination=int(destination)
+            except (TypeError,ValueError):continue
+            if destination in nodes:continue
+            xy=portal.get('physical_destination') or portal.get('map_destination')
+            if xy is None:continue
+            observed_rows.append(dict(portal_id=portal.get('id'),
+                source_place_id=portal.get('source_place_id'),
+                destination_place_id=destination,reason='',
+                semantic_score=portal.get('semantic_score'),
+                heading_delta_deg=portal.get('defer_heading_delta_deg'),
+                gate=portal.get('physical_gate'),destination=xy))
     colors={p:COLORS[i%len(COLORS)] for i,p in enumerate(sorted(nodes))}
     dispatches=[];transitions=[]
     for event,d in events:
@@ -86,12 +104,11 @@ def main():
     # destination witness, so omitting them makes an observed room look
     # unexplored.  Draw them dashed and neutral, never as committed Places.
     observed_xy={}
-    for portal in portals.values():
-        destination=portal.get('destination_place_id')
-        try:destination=int(destination)
+    for row in observed_rows:
+        try:destination=int(row.get('destination_place_id'))
         except (TypeError,ValueError):continue
         if destination in nodes or destination in roots:continue
-        xy=portal.get('physical_destination') or portal.get('map_destination')
+        xy=row.get('destination')
         if xy is None:continue
         observed_xy[destination]=(float(xy[0]),float(xy[1]))
     for index,p in enumerate(sorted(observed_xy)):
@@ -128,6 +145,32 @@ def main():
         else:x=float(leaf[0]);leaf[0]+=1
         positions[place]=(x,-depth);return x
     roots=[p for p,n in nodes.items() if n.get('parent_id') is None]
+    observed_by_parent={}
+    for row in observed_rows:
+        try:destination=int(row.get('destination_place_id'))
+        except (TypeError,ValueError):continue
+        try:source=int(row.get('source_place_id'))
+        except (TypeError,ValueError):continue
+        if destination in nodes:continue
+        observed_by_parent.setdefault(source,[]).append((destination,row))
+    observed_positions={}
+    def position_observed(destination,depth):
+        # An observed destination is a leaf: it was never entered, so it owns
+        # no subtree.  Giving it the same depth as a committed child exposes
+        # the missed room instead of leaving it implicit.
+        if destination in observed_positions:return observed_positions[destination][0]
+        x=float(leaf[0]);leaf[0]+=1
+        observed_positions[destination]=(x,-depth)
+        return x
+    def position(place,depth=0):
+        children=list(nodes[place].get('children',[]))
+        extra=[destination for destination,_ in sorted(observed_by_parent.get(place,[]))]
+        if children or extra:
+            xs=[position(child,depth+1) for child in children]
+            xs+=[position_observed(destination,depth+1) for destination in extra]
+            x=float(np.mean(xs))
+        else:x=float(leaf[0]);leaf[0]+=1
+        positions[place]=(x,-depth);return x
     for p in roots:position(p)
     for p,n in nodes.items():
         x,y=positions[p];parent=n.get('parent_id')
@@ -141,8 +184,35 @@ def main():
         tree.scatter(x,y,s=850,facecolors=colors[p],edgecolors='black',marker='s' if n['state']=='completed' else 'o',zorder=3)
         tree.text(x,y,'P%s'%p,color='black',ha='center',va='center',fontsize=10,weight='bold')
         tree.text(x,y-.22,n['state'],ha='center',va='top',fontsize=8)
+    for source,rows in sorted(observed_by_parent.items()):
+        if source not in positions:continue
+        a,b=positions[source]
+        for destination,row in sorted(rows):
+            if destination not in observed_positions:continue
+            x,y=observed_positions[destination]
+            tree.annotate('',xy=(x,y+.12),xytext=(a,b-.12),
+                          arrowprops=dict(arrowstyle='->',color='#9AA0A6',
+                                          linestyle=(0,(2,2))))
+            label='G%s'%row.get('portal_id')
+            if row.get('semantic_score') is not None:label+=' / %.2f'%float(row['semantic_score'])
+            if row.get('reason'):label+='\n%s'%row['reason']
+            if row.get('heading_delta_deg') is not None:label+=' %.0f\u00b0'%float(row['heading_delta_deg'])
+            tree.text(x+.12,y+.22,label,fontsize=7,color='#6B7280',style='italic',
+                      ha='left',va='bottom')
+            tree.scatter(x,y,s=760,facecolors='white',edgecolors='#9AA0A6',marker='s',
+                         linewidths=1.6,zorder=3)
+            tree.text(x,y,'P%s\nobs'%destination,color='#6B7280',ha='center',
+                      va='center',fontsize=8,weight='bold')
     tree.set_xlim(-.6,max(leaf[0]-.4,.6));tree.set_ylim(min((v[1] for v in positions.values()),default=0)-.7,.65)
-    tree.set_title('Physically committed Place tree\nSquare = completed; circle = unfinished',fontsize=11);tree.axis('off')
+    tree.legend(handles=[plt.Line2D([],[],marker='s',linestyle='',markerfacecolor=COLORS[0],
+                                    markeredgecolor='black',markersize=8,label='Committed Place'),
+                         plt.Line2D([],[],marker='s',linestyle='',markerfacecolor='white',
+                                    markeredgecolor='#9AA0A6',markersize=8,
+                                    label='Observed, not committed')],
+                loc='lower left',fontsize=7,frameon=False)
+    tree.set_title('Physically committed Place tree\n'
+                   'Square = completed; circle = unfinished; grey = observed, not committed',
+                   fontsize=10);tree.axis('off')
     for p in sorted(nodes):
         rows=[d for d in dispatches if d['place']==p]
         timeline.scatter([d['time'] for d in rows],[p]*len(rows),marker='s',s=30,color=colors[p],label='P%s WI'%p)
@@ -161,8 +231,11 @@ def main():
     fig.savefig(args.output,dpi=160,facecolor='white');plt.close(fig)
     payload=dict(metrics=str(args.metrics),metrics_sha256=hashlib.sha256(args.metrics.read_bytes()).hexdigest(),
                  world=str(args.world),audit=result,dispatches=dispatches,transitions=transitions,
+                 observed=observed_rows,
                  transformations=['Pose samples joined only across gaps <=2s','No synthetic route between WI goals',
-                                  'Tree includes physically entered Places only','Odometry plotted over world geometry'],
+                                  'Tree nodes are physically entered Places only; grey nodes are observed destinations that were never committed',
+                                  'Uncommitted reasons come from the Portal ledger, not from post-hoc inference',
+                                  'Odometry plotted over world geometry'],
                  missing_models=missing,matplotlib=matplotlib.__version__)
     args.output.with_suffix('.json').write_text(json.dumps(payload,indent=2)+'\n')
     print(args.output)

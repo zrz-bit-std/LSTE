@@ -311,6 +311,63 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
             destination_xy,
         )
 
+    def _note_portal_deferral(
+        self, portal_id, reason, now=None, heading_delta_deg=None, detail=None,
+    ):
+        """Persist one non-commit reason and return the event note tuple.
+
+        The reason is written to the durable Portal ledger and mirrored onto
+        the GP observation branch that owns the same doorway, so an observed
+        room that was never committed keeps an explanation after the map and
+        the route that produced it are gone.  The caller still appends the
+        returned tuple to its per-cycle rejection list, so the status event and
+        the durable record can never disagree.
+        """
+        try:
+            portal_id = None if portal_id is None else int(portal_id)
+        except (TypeError, ValueError):
+            portal_id = None
+        reason = str(reason or "").strip()
+        if portal_id is not None and reason:
+            ledger = getattr(self, "portal_hypothesis_ledger", None)
+            mark = getattr(ledger, "mark_deferred", None)
+            if callable(mark):
+                mark(
+                    portal_id,
+                    reason,
+                    now=0.0 if now is None else now,
+                    heading_delta_deg=heading_delta_deg,
+                    detail=detail,
+                )
+            self._mirror_portal_deferral_to_branch(
+                portal_id, reason, now=now,
+                heading_delta_deg=heading_delta_deg,
+            )
+        return (portal_id, reason)
+
+    def _mirror_portal_deferral_to_branch(
+        self, portal_id, reason, now=None, heading_delta_deg=None,
+    ):
+        """Copy the deferral onto the GP branch that owns this Portal."""
+        tree = getattr(self, "gp_exploration_tree", None)
+        branches = getattr(tree, "branches", None)
+        if not branches:
+            return
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return
+        for branch in branches.values():
+            try:
+                if int(branch.get("canonical_portal_id", -1)) != portal_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            branch["defer_reason"] = reason
+            branch["defer_ros"] = 0.0 if now is None else float(now)
+            branch["defer_count"] = int(branch.get("defer_count", 0)) + 1
+            branch["defer_heading_delta_deg"] = heading_delta_deg
+
     def _select_context_portal_transition(
         self, request, context, portal_sources,
     ):
@@ -370,7 +427,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 except (TypeError, ValueError):
                     source_portal_id = None
                 if source_portal_id != preferred_portal_id:
-                    rejected_notes.append((source_portal_id, "not_preferred_portal"))
+                    rejected_notes.append(self._note_portal_deferral(
+                        source_portal_id, "not_preferred_portal", request.now,
+                    ))
                     continue
             frontier_row, frontier_col = source.frontier_row, source.frontier_col
             # Keep the labelled core for admission and place identity, while
@@ -389,15 +448,19 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 for old_x, old_y in request.excluded
             ):
                 self.last_portal_excluded += 1
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None), "excluded_radius")
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "excluded_radius",
+                    request.now,
+                ))
                 continue
             if self.frontier_is_rejected(portal_x, portal_y, request.now):
                 self.last_portal_rejected += 1
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None), "frontier_rejected")
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "frontier_rejected",
+                    request.now,
+                ))
                 continue
 
             costmap_distance = self.candidate_costmap_distance(
@@ -410,9 +473,11 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 # another portal. Keep this edge pending until a fresh map
                 # yields a valid certified endpoint instead.
                 self.last_portal_costmap_rejected += 1
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None), "costmap_unreachable")
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "costmap_unreachable",
+                    request.now,
+                ))
                 continue
 
             portal_gate_xy = self.cell_xy(
@@ -426,9 +491,11 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     map_to_physical_xy=request.map_to_physical_xy,
                 ) is not None
             ):
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None), "sealed_reentry")
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "sealed_reentry",
+                    request.now,
+                ))
                 continue
 
             path_distance = (
@@ -454,9 +521,12 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 and route_heading_delta > request.max_heading_delta
             ):
                 self.last_portal_heading_rejected += 1
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None), "heading")
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "heading",
+                    request.now,
+                    heading_delta_deg=math.degrees(route_heading_delta),
+                ))
                 continue
 
             information = self.frontier_information(
@@ -503,15 +573,18 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     # A different snapshot-local doorway is not an equivalent
                     # substitute; let the caller retain the plan and wait for
                     # that physical edge to be reprojected.
-                    rejected_notes.append(
-                        (getattr(source, "hypothesis_id", None),
-                         "preferred_identity_mismatch")
-                    )
+                    rejected_notes.append(self._note_portal_deferral(
+                        getattr(source, "hypothesis_id", None),
+                        "preferred_identity_mismatch",
+                        request.now,
+                    ))
                     continue
             if hypothesis is None and getattr(source, "hypothesis_id", None) is not None:
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None), "hypothesis_missing")
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "hypothesis_missing",
+                    request.now,
+                ))
                 continue
             if not self.portal_destination_is_admissible(
                 request,
@@ -521,10 +594,11 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 information,
                 hypothesis=hypothesis,
             ):
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None),
-                     "portal_destination_not_admissible")
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "portal_destination_not_admissible",
+                    request.now,
+                ))
                 continue
             if hypothesis is None:
                 hypothesis = self._refresh_or_certify_portal_hypothesis(
@@ -534,9 +608,11 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     (portal_x, portal_y),
                 )
                 if hypothesis is None:
-                    rejected_notes.append(
-                        (getattr(source, "hypothesis_id", None), "recertify_failed")
-                    )
+                    rejected_notes.append(self._note_portal_deferral(
+                        getattr(source, "hypothesis_id", None),
+                        "recertify_failed",
+                        request.now,
+                    ))
                     continue
             certify_probe = getattr(self, "certify_portal_probe", None)
             if certify_probe is not None and hypothesis is not None:
@@ -602,10 +678,11 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 self.last_graph_policy_rejections = int(
                     getattr(self, "last_graph_policy_rejections", 0)
                 ) + 1
-                rejected_notes.append(
-                    (getattr(source, "hypothesis_id", None),
-                     "graph_action:%s" % str(graph_action.reason))
-                )
+                rejected_notes.append(self._note_portal_deferral(
+                    getattr(source, "hypothesis_id", None),
+                    "graph_action:%s" % str(graph_action.reason),
+                    request.now,
+                ))
                 continue
             # This counter is deliberately incremented only after route,
             # costmap, portal identity, and graph-action checks. A structural
