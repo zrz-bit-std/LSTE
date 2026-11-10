@@ -141,6 +141,12 @@
   <!-- Prefetch candidates above this bearing change only when no connected
        alternative exists. Set 0 to disable the hard bound. -->
   <arg name="heading_hard_limit_deg" default="115.0"/>
+  <!-- A certified doorway whose destination room already matches the task may
+       exceed the heading bound and be entered after an in-place pre-route turn.
+       The score gate keeps low-value rooms behind the same bound. -->
+  <arg name="heading_semantic_override_enabled" default="true"/>
+  <arg name="heading_semantic_override_min_score" default="0.5"/>
+  <arg name="heading_semantic_override_max_attempts" default="2"/>
   <!-- Reuse the bridge's transition envelopes for successor selection. The
        selector first searches these tiers in order before accepting a branch
        that must wait for terminal reorientation. -->
@@ -255,6 +261,9 @@
     <param name="min_structure_cells" value="$(arg min_structure_cells)"/>
     <param name="heading_weight" value="$(arg heading_weight)"/>
     <param name="heading_hard_limit_deg" value="$(arg heading_hard_limit_deg)"/>
+    <param name="heading_semantic_override_enabled" value="$(arg heading_semantic_override_enabled)"/>
+    <param name="heading_semantic_override_min_score" value="$(arg heading_semantic_override_min_score)"/>
+    <param name="heading_semantic_override_max_attempts" value="$(arg heading_semantic_override_max_attempts)"/>
     <param name="successor_smooth_heading_limit_deg" value="$(arg successor_smooth_heading_limit_deg)"/>
     <param name="successor_curve_heading_limit_deg" value="$(arg successor_curve_heading_limit_deg)"/>
     <param name="turn_execution_mode" value="$(arg turn_execution_mode)"/>

@@ -368,6 +368,69 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
             branch["defer_count"] = int(branch.get("defer_count", 0)) + 1
             branch["defer_heading_delta_deg"] = heading_delta_deg
 
+    def _portal_semantic_heading_override(self, source, route_heading_delta):
+        """Authorize one high-value doorway to be entered after a turn.
+
+        The heading bound exists so the forward-only controller is never asked
+        to drive a route whose first tangent is behind the robot.  A doorway
+        whose destination room already matches the task is worth the in-place
+        turn that the turn supervisor performs for ``portal_transition``
+        actions anyway (``pre_route_alignment`` above 75 degrees).
+
+        Returns the durable Portal record when the override is authorized,
+        otherwise ``None``.  The per-doorway attempt counter keeps a failed
+        turn from being retried forever and is part of the audit record.
+        """
+        if not getattr(self, "heading_semantic_override_enabled", False):
+            return None
+        if not getattr(self, "task_semantic_value_enabled", False):
+            return None
+        try:
+            max_attempts = int(
+                getattr(self, "heading_semantic_override_max_attempts", 0)
+            )
+        except (TypeError, ValueError):
+            max_attempts = 0
+        if max_attempts <= 0:
+            return None
+        try:
+            delta = abs(float(route_heading_delta))
+        except (TypeError, ValueError):
+            return None
+        if delta > math.radians(180.5):
+            return None
+        portal_id = getattr(source, "hypothesis_id", None)
+        if portal_id is None:
+            return None
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        getter = getattr(ledger, "get", None)
+        if not callable(getter):
+            return None
+        record = getter(portal_id)
+        if not isinstance(record, dict):
+            return None
+        if record.get("destination_place_id") is None:
+            return None
+        try:
+            score = float(record.get("semantic_score"))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(score):
+            return None
+        try:
+            min_score = float(
+                getattr(self, "heading_semantic_override_min_score", 0.5)
+            )
+        except (TypeError, ValueError):
+            min_score = 0.5
+        if score < min_score:
+            return None
+        attempts = int(record.get("heading_override_count", 0) or 0)
+        if attempts >= max_attempts:
+            return None
+        record["heading_override_count"] = attempts + 1
+        return record
+
     def _select_context_portal_transition(
         self, request, context, portal_sources,
     ):
@@ -520,14 +583,41 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 and route_heading_delta is not None
                 and route_heading_delta > request.max_heading_delta
             ):
-                self.last_portal_heading_rejected += 1
-                rejected_notes.append(self._note_portal_deferral(
-                    getattr(source, "hypothesis_id", None),
-                    "heading",
-                    request.now,
-                    heading_delta_deg=math.degrees(route_heading_delta),
-                ))
-                continue
+                override = self._portal_semantic_heading_override(
+                    source, route_heading_delta,
+                )
+                if override is None:
+                    self.last_portal_heading_rejected += 1
+                    rejected_notes.append(self._note_portal_deferral(
+                        getattr(source, "hypothesis_id", None),
+                        "heading",
+                        request.now,
+                        heading_delta_deg=math.degrees(route_heading_delta),
+                    ))
+                    continue
+                self.last_portal_heading_overrides = int(
+                    getattr(self, "last_portal_heading_overrides", 0)
+                ) + 1
+                override_signature = (
+                    int(override.get("id", 0)),
+                    round(math.degrees(route_heading_delta), 1),
+                )
+                if override_signature != getattr(
+                    self, "_portal_heading_override_signature", None
+                ):
+                    self._portal_heading_override_signature = override_signature
+                    self.publish_status(
+                        "portal_heading_override",
+                        portal_id=int(override["id"]),
+                        source_place_id=override.get("source_place_id"),
+                        heading_delta_deg=round(
+                            math.degrees(route_heading_delta), 2
+                        ),
+                        semantic_score=float(override.get("semantic_score")),
+                        attempt=int(
+                            override.get("heading_override_count", 0) or 0
+                        ),
+                    )
 
             information = self.frontier_information(
                 request.unknown, frontier_row, frontier_col,
@@ -721,12 +811,38 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 self, "last_portal_destination_class", "new_place"
             )
             if use_evidence_decision:
+                # A room whose measured contents match the task is itself a
+                # target-relevant information action.  Without this term the
+                # evidence layer only sees the direction-to-target hint and a
+                # high-semantic doorway is downgraded to a plain new place,
+                # losing to a nearer but semantically empty room.
+                room_score = None
+                if isinstance(hypothesis, dict):
+                    try:
+                        room_score = float(hypothesis.get("semantic_score"))
+                    except (TypeError, ValueError):
+                        room_score = None
+                room_task_relevant = bool(
+                    room_score is not None
+                    and math.isfinite(room_score)
+                    and room_score
+                    >= float(
+                        getattr(
+                            self,
+                            "heading_semantic_override_min_score",
+                            0.5,
+                        )
+                    )
+                )
                 task_relevant = bool(
-                    getattr(request, "semantic_pursuit", False)
-                    and semantic_hint_is_forward(
-                        request.robot_map,
-                        request.semantic_hint,
-                        (portal_x, portal_y),
+                    room_task_relevant
+                    or (
+                        getattr(request, "semantic_pursuit", False)
+                        and semantic_hint_is_forward(
+                            request.robot_map,
+                            request.semantic_hint,
+                            (portal_x, portal_y),
+                        )
                     )
                 )
                 destination_unobserved = action_class == "new_place"

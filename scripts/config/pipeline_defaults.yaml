@@ -500,6 +500,16 @@ GLOBAL_FRONTIER_HEADING_WEIGHT: 2.5
 # During prefetch, prefer candidates within this bearing change when any
 # connected alternative exists. Set 0 to disable the hard bound.
 GLOBAL_FRONTIER_HEADING_HARD_LIMIT_DEG: 115.0
+# A certified doorway into a room whose measured contents already match the
+# task (semantic score >= threshold) may exceed the heading bound and be
+# entered after an in-place pre-route turn. Low-value doorways keep the bound,
+# so a merely unvisited room is never force-entered behind the robot.
+GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_ENABLED: true
+GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_SCORE: 0.5
+# Bounded retries: after this many turn-in-place attempts for the same Portal
+# the override is withdrawn for the rest of the run and the doorway keeps its
+# normal deferral. Set 0 to disable the override entirely.
+GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MAX_ATTEMPTS: 2
 # A locked visual target can lie behind a known wall. After Navfn rejects the
 # direct ray, the next replan softly favours a reachable frontier nearer that
 # direction, so search continues toward a doorway rather than waiting in place.

@@ -149,6 +149,24 @@ class GlobalFrontierExplorationConfigurationMixin:
         self.heading_hard_limit = math.radians(max(
             0.0, float(gp("~heading_hard_limit_deg", 115.0))
         ))
+        # A doorway into a room whose measured contents already match the task
+        # is a task-relevant information action, not merely "another unvisited
+        # room".  Such an edge may exceed the heading bound and be executed
+        # after TEB's in-place pre-route turn (the turn supervisor already
+        # rotates for any portal_transition above pre_route_turn_threshold).
+        # Low-value rooms keep the bound, so this never force-enters a room
+        # that merely happens to be behind the robot.
+        self.heading_semantic_override_enabled = str(
+            gp("~heading_semantic_override_enabled", True)
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.heading_semantic_override_min_score = max(
+            0.0, float(gp("~heading_semantic_override_min_score", 0.5))
+        )
+        # Bounded: a failed in-place turn must not be retried forever.  Zero
+        # attempts disables the override entirely.
+        self.heading_semantic_override_max_attempts = max(
+            0, int(gp("~heading_semantic_override_max_attempts", 2))
+        )
         # Successor selection is a route-transition decision, not merely a
         # weighted frontier score. Reuse the bridge's three execution
         # envelopes: first seek a smooth continuation, then a curve that TEB
