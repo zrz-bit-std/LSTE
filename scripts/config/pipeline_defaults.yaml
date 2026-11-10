@@ -53,12 +53,16 @@ STATE_SUBTYPE_SWITCH_MIN_HITS: 3
 # treats the follow action as done. Larger values reduce premature completion.
 FOLLOW_LOCKED_DONE_TIME: 4.0
 # Stable visual lock policy. A small target may score below 0.6 in one frame,
-# so LOCKED requires many target-positive frames instead of one very high score.
-# The current WeDetect-Large yellow-cup view produces target scores around 0.2.
+# and the detector can alternate target/no-target between adjacent frames, so
+# LOCKED requires repeated target-positive frames inside one window instead of
+# one very high score.  The previous 8-of-10 gate never latched on the
+# 20261110_215924 cup exposure (three positive frames, separated by zero
+# frames); 3-of-10 keeps the "repeated evidence" contract while tolerating the
+# observed flicker.  Exit stability is unchanged (15 unstable frames).
 TARGET_LOCK_TOTAL_MIN: 0.58
 TARGET_LOCK_SCORE_MIN: 0.20
 TARGET_LOCK_WINDOW: 10
-TARGET_LOCK_MIN_HITS: 8
+TARGET_LOCK_MIN_HITS: 3
 TARGET_LOCK_EXIT_TOTAL_MIN: 0.55
 TARGET_LOCK_EXIT_SCORE_MIN: 0.18
 TARGET_LOCK_EXIT_UNSTABLE_FRAMES: 15

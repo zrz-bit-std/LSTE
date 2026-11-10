@@ -40,7 +40,7 @@ WeDetect 后端推理常量（`utils/wedetect_backend.py`）：`score_threshold=
 
 - **promising（有希望）**：`S_total≥0.45` 或 `S_target≥0.60` 或 `S_env≥0.35` 或 `S_ctx≥0.35` 或 `detected`。
 - **进入 SUSPICIOUS**：近 10 帧窗口内有 ≥3 帧 promising；或已在 SUSPICIOUS 且未全低。全低（total<0.35 且 target<0.50 且 env<0.25 且 ctx<0.25）回 PASS。
-- **进入 LOCKED**：近 2 帧里 ≥2 帧满足 `S_total≥0.6 且 S_target≥0.6 且 detected`。退出：连续 5 帧不满足即解锁。
+- **进入 LOCKED**：最近 `TARGET_LOCK_WINDOW` 帧里至少 `TARGET_LOCK_MIN_HITS` 帧满足 `S_total≥TARGET_LOCK_TOTAL_MIN 且 S_target≥TARGET_LOCK_SCORE_MIN 且 detected`。当前 YAML 生效值为 **10 帧内 3 帧**（total≥0.58、target≥0.20），容忍检测器单帧闪烁。退出：连续 `TARGET_LOCK_EXIT_UNSTABLE_FRAMES`（15）帧不满足（total≥0.55、target≥0.18）即解锁。
 - **subtype**：`Sus-A`（目标框 score≥0.4）→ `Sus-B`（left+right 上下文都检出且是不同框）→ 其余 `Sus-C`；subtype 切换需连续 3 帧确认。
 
 ### 1.3 观望期（两种）
