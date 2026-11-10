@@ -392,6 +392,23 @@ class PlaceExitObligationTest(unittest.TestCase):
         self.assertEqual(first, again)
         self.assertNotEqual(first, next_visit)
 
+    def test_reentry_creates_a_new_exit_obligation_after_resolution(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        first = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=1.0, generation=1,
+        )
+        ledger.activate_place_exit(first, now=2.0)
+        ledger.resolve_place_exit(first, now=3.0)
+
+        second = ledger.ensure_place_exit(
+            2, 2, 1, (6.6, 1.9), (6.2, 3.0), now=4.0, generation=1,
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertEqual(
+            ledger.place_exit_item(2)["exit_state"], "dormant",
+        )
+
     def test_exit_outward_normal_points_from_inside_to_gate(self):
         ledger = PlaceWorkItemLedger(0.7)
         ledger.ensure_place_exit(

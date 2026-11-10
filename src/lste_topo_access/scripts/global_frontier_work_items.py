@@ -746,6 +746,7 @@ class PlaceWorkItemLedger:
                 and int(item.get("place_id", -1)) == place_id
                 and int(item.get("portal_id", -1)) == portal_id
                 and int(item.get("generation", -1)) == generation
+                and item.get("state") == WORK_UNRESOLVED
             ):
                 return int(item["id"])
         outward = (gate[0] - inside[0], gate[1] - inside[1])
