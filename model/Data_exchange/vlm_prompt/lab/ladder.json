@@ -1,0 +1,65 @@
+{
+  "task_parsed": {
+    "target": {
+      "name": "ladder",
+      "attributes": [
+        "metal",
+        "folding",
+        "A-frame",
+        "standing on the floor",
+        "leaning against a warehouse wall"
+      ],
+      "typical_locations": [
+        "warehouses",
+        "storage rooms",
+        "stockrooms",
+        "maintenance areas"
+      ]
+    },
+    "env": {
+      "env_type_prior": [
+        "warehouse",
+        "storage room",
+        "stockroom"
+      ],
+      "layout_prior": [
+        "metal shelving along the walls",
+        "stacks of cardboard boxes",
+        "pallets and crates",
+        "open loading floor"
+      ],
+      "related_structures": [
+        "cardboard box",
+        "shelf",
+        "pallet"
+      ]
+    },
+    "obj_related": {
+      "key_objects": [
+        "cardboard box",
+        "shelf",
+        "pallet",
+        "crate"
+      ],
+      "search_strategy": "enter the storage room, walk around the partition, and check the shelving aisle beside the boxes",
+      "negative_clues": [
+        "monitor",
+        "computer",
+        "laptop",
+        "office chair",
+        "desk",
+        "desk lamp",
+        "coffee machine",
+        "door",
+        "fire hydrant",
+        "fire extinguisher",
+        "construction cone",
+        "traffic cone"
+      ]
+    },
+    "target_ctx": {
+      "left": "cardboard box",
+      "right": "shelf"
+    }
+  }
+}
