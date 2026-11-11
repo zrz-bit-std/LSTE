@@ -70,43 +70,13 @@
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
-      <link name='wall_04'>
-        <pose>1.6500 -2.6000 1.250 0 -0 0</pose>
-        <collision name='collision'>
-          <geometry><box><size>3.3000 0.1500 2.50</size></box></geometry>
-        </collision>
-        <visual name='visual'>
-          <geometry><box><size>3.3000 0.1500 2.50</size></box></geometry>
-          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
-        </visual>
-      </link>
-      <link name='wall_05'>
-        <pose>9.5000 -2.6000 1.250 0 -0 0</pose>
-        <collision name='collision'>
-          <geometry><box><size>9.6000 0.1500 2.50</size></box></geometry>
-        </collision>
-        <visual name='visual'>
-          <geometry><box><size>9.6000 0.1500 2.50</size></box></geometry>
-          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
-        </visual>
-      </link>
-      <link name='wall_06'>
-        <pose>20.8500 -2.6000 1.250 0 -0 0</pose>
-        <collision name='collision'>
-          <geometry><box><size>10.3000 0.1500 2.50</size></box></geometry>
-        </collision>
-        <visual name='visual'>
-          <geometry><box><size>10.3000 0.1500 2.50</size></box></geometry>
-          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
-        </visual>
-      </link>
       <link name='wall_07'>
-        <pose>4.4000 -5.6000 1.250 0 -0 0</pose>
+        <pose>4.0000 -5.6000 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>8.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.0000 0.1500 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>8.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.0000 0.1500 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
@@ -121,12 +91,12 @@
         </visual>
       </link>
       <link name='wall_09'>
-        <pose>23.6000 -5.6000 1.250 0 -0 0</pose>
+        <pose>24.0000 -5.6000 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>4.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>4.0000 0.1500 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>4.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>4.0000 0.1500 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
@@ -151,22 +121,22 @@
         </visual>
       </link>
       <link name='wall_12'>
-        <pose>18.5000 -0.9000 1.250 0 -0 0</pose>
+        <pose>18.5000 -1.1000 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>0.1500 3.4000 2.50</size></box></geometry>
+          <geometry><box><size>0.1500 3.0000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>0.1500 3.4000 2.50</size></box></geometry>
+          <geometry><box><size>0.1500 3.0000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_13'>
-        <pose>18.5000 2.8000 1.250 0 -0 0</pose>
+        <pose>18.5000 3.0000 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>0.1500 1.2000 2.50</size></box></geometry>
+          <geometry><box><size>0.1500 0.8000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>0.1500 1.2000 2.50</size></box></geometry>
+          <geometry><box><size>0.1500 0.8000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
@@ -244,31 +214,31 @@
     <include>
       <uri>model://desk_brown</uri>
       <name>b1_desk</name>
-      <pose>5.0000 0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>6.4000 2.9000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b1_ch1</name>
-      <pose>4.0000 -0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>5.4000 2.2000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b1_ch2</name>
-      <pose>5.0000 -0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>6.2000 2.2000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b1_ch3</name>
-      <pose>6.0000 -0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>7.0000 2.2000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://monitor_3</uri>
       <name>b1_mon</name>
-      <pose>5.6000 0.6000 0.7500 0 -0 0.000000</pose>
+      <pose>6.9000 2.9000 0.7500 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
@@ -334,25 +304,25 @@
     <include>
       <uri>model://desk_brown</uri>
       <name>b3_desk</name>
-      <pose>22.0000 0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>21.0000 1.8000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b3_chair</name>
-      <pose>21.2000 1.6000 0.0000 0 -0 3.141593</pose>
+      <pose>20.4000 -0.2000 0.0000 0 -0 3.141593</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://bookshelf_large</uri>
       <name>b3_shelf</name>
-      <pose>21.0000 3.0500 0.0000 0 -0 0.000000</pose>
+      <pose>21.6000 3.0000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://plant_1</uri>
       <name>b3_target</name>
-      <pose>22.0000 -0.3000 0.0000 0 -0 0.000000</pose>
+      <pose>5.0000 1.5000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
@@ -376,19 +346,19 @@
     <include>
       <uri>model://fire_hydrant</uri>
       <name>n_hyd1</name>
-      <pose>11.9000 -3.0500 0.0000 0 -0 0.000000</pose>
+      <pose>0.6000 -2.9000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://fire_hydrant</uri>
       <name>n_hyd2</name>
-      <pose>22.6000 -5.1500 0.0000 0 -0 0.000000</pose>
+      <pose>25.0000 -7.8000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://construction_cone</uri>
       <name>n_cone1</name>
-      <pose>6.4000 -3.0500 0.0000 0 -0 0.000000</pose>
+      <pose>24.5000 -3.0000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <gui fullscreen='0'>
