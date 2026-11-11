@@ -42,6 +42,8 @@
       ],
       "search_strategy": "check floor areas behind desks and counters, then round the partition",
       "negative_clues": [
+        "file cabinet",
+        "cardboard box",
         "fire hydrant",
         "fire extinguisher",
         "door"

@@ -244,31 +244,31 @@
     <include>
       <uri>model://desk_brown</uri>
       <name>b1_desk</name>
-      <pose>5.0000 0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>2.1000 2.5500 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b1_ch1</name>
-      <pose>4.0000 -0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>1.1000 1.3500 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b1_ch2</name>
-      <pose>5.0000 -0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>2.1000 1.3500 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b1_ch3</name>
-      <pose>6.0000 -0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>3.1000 1.3500 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://monitor_3</uri>
       <name>b1_mon</name>
-      <pose>5.6000 0.6000 0.7500 0 -0 0.000000</pose>
+      <pose>2.7000 2.5500 0.7500 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
@@ -340,7 +340,7 @@
     <include>
       <uri>model://office_chair</uri>
       <name>b3_chair</name>
-      <pose>21.2000 1.6000 0.0000 0 -0 3.141593</pose>
+      <pose>24.0000 1.6000 0.0000 0 -0 3.141593</pose>
       <static>1</static>
     </include>
     <include>
