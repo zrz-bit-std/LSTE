@@ -18,7 +18,7 @@ from pathlib import Path
 # Ground-truth openings of env04_no_pro3.world (wall coordinates).
 GATES = {
     "A_nw_room": ((5.02, 2.17), (8.21, 2.17)),
-    "B_west_room": ((9.94, -8.45), (9.94, -5.45)),
+    "B_west_room": ((10.84, -7.45), (10.84, -5.45)),
     "C_corridor_south": ((10.52, -10.20), (13.71, -10.20)),
     "D_lobby_east": ((10.52, -2.10), (14.56, -2.10)),
     "E_office_west": ((14.56, -13.30), (14.56, -10.20)),
