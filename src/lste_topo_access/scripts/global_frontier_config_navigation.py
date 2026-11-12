@@ -119,6 +119,23 @@ class GlobalFrontierNavigationConfigurationMixin:
         )
         self.active_timeout = max(2.0, float(gp("~active_timeout", 18.0)))
         self.stall_timeout = max(2.0, float(gp("~stall_timeout", 8.0)))
+        # Bounded retry for a doorway attempt whose manoeuvre failed to execute
+        # (controller handoff, physical stall, unrecoverable return).  A verdict
+        # about the doorway itself is never retried.  Zero restores the old
+        # one-strike behaviour for A/B runs.
+        self.portal_authentication_retry_limit = max(
+            0, int(gp("~portal_authentication_retry_limit", 2))
+        )
+        # How long a freshly dispatched authentication route may wait for the
+        # controller to take it over before the *route* is failed (retryable)
+        # instead of the doorway.
+        self.portal_authentication_handoff_budget = max(
+            5.0, float(gp("~portal_authentication_handoff_budget", 30.0))
+        )
+        # Quiet window before the same doorway attempt is queued again.
+        self.portal_authentication_retry_cooldown = max(
+            0.0, float(gp("~portal_authentication_retry_cooldown", 5.0))
+        )
         # A selected endpoint that reveals zero new map information and whose
         # region has produced no gain for this long is a dead end.  The normal
         # no-gain dwell retains the active route until its terminal, but the

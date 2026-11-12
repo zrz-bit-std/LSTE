@@ -39,6 +39,9 @@ start_exploration_windows() {
       waypoint_release_radius:=$GLOBAL_FRONTIER_WAYPOINT_RELEASE_RADIUS \\
       early_handoff_distance:=$GLOBAL_FRONTIER_EARLY_HANDOFF_RADIUS \\
       active_timeout:=$GLOBAL_FRONTIER_ACTIVE_TIMEOUT stall_timeout:=$GLOBAL_FRONTIER_STALL_TIMEOUT \\
+      portal_authentication_retry_limit:=${GLOBAL_FRONTIER_AUTH_RETRY_LIMIT:-2} \\
+      portal_authentication_handoff_budget:=${GLOBAL_FRONTIER_AUTH_HANDOFF_BUDGET:-30.0} \\
+      portal_authentication_retry_cooldown:=${GLOBAL_FRONTIER_AUTH_RETRY_COOLDOWN:-5.0} \\
       post_turn_stall_timeout:=$GLOBAL_FRONTIER_POST_TURN_STALL_TIMEOUT \\
       unreachable_grace:=$GLOBAL_FRONTIER_UNREACHABLE_GRACE rejected_timeout:=$GLOBAL_FRONTIER_REJECTED_TIMEOUT \\
       completed_radius:=$GLOBAL_FRONTIER_COMPLETED_RADIUS \\

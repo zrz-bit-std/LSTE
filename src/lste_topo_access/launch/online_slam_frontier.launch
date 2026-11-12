@@ -90,6 +90,9 @@
   <arg name="early_handoff_distance" default="2.0"/>
   <arg name="active_timeout" default="45.0"/>
   <arg name="stall_timeout" default="12.0"/>
+  <arg name="portal_authentication_retry_limit" default="2"/>
+  <arg name="portal_authentication_handoff_budget" default="30.0"/>
+  <arg name="portal_authentication_retry_cooldown" default="5.0"/>
   <!-- A zero-information endpoint that stays gainless this long is a dead
        end; fail its region and force a different obligation instead of
        retaining the route until a terminal that may never arrive. -->
@@ -247,6 +250,9 @@
     <param name="early_handoff_distance" value="$(arg early_handoff_distance)"/>
     <param name="active_timeout" value="$(arg active_timeout)"/>
     <param name="stall_timeout" value="$(arg stall_timeout)"/>
+    <param name="portal_authentication_retry_limit" value="$(arg portal_authentication_retry_limit)"/>
+    <param name="portal_authentication_handoff_budget" value="$(arg portal_authentication_handoff_budget)"/>
+    <param name="portal_authentication_retry_cooldown" value="$(arg portal_authentication_retry_cooldown)"/>
     <param name="zero_info_dead_end_timeout" value="$(arg zero_info_dead_end_timeout)"/>
     <param name="post_turn_stall_timeout" value="$(arg post_turn_stall_timeout)"/>
     <param name="odom_novel_cell_size" value="$(arg odom_novel_cell_size)"/>

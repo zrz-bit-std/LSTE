@@ -1027,6 +1027,41 @@ class GPBranchFrontierMixin:
         self.active_portal_authentication_phase = phase
         return phase
 
+    def portal_authentication_action_running(self, auth, now):
+        """Return whether the controller has taken over the current phase.
+
+        ``turning`` is owned by the turn supervisor, so it only counts once the
+        supervisor reports TURNING from a fresh heartbeat.  ``entering`` and
+        ``returning`` are driven directly by TEB, so bridge adoption of the
+        route (a positive action generation on the dispatch contract) is the
+        evidence that the manoeuvre is actually being executed.
+        """
+        state = str(getattr(auth, "state", "") or "")
+        if state == "turning":
+            try:
+                stamp = float(
+                    getattr(self, "turn_supervisor_status_monotonic", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                stamp = 0.0
+            if stamp <= 0.0:
+                # No turn supervisor reports in this configuration: keep the
+                # legacy motion-based judgement instead of inventing a handoff.
+                return True
+            if (float(now) - stamp) >= 2.0:
+                return False
+            return str(getattr(self, "turn_supervisor_state", "")) == "TURNING"
+        if state in ("entering", "returning"):
+            contract = getattr(self, "active_route_dispatch_contract", None)
+            if not isinstance(contract, dict):
+                # No dispatch contract was ever recorded (unit fixture, or a
+                # runtime without bridge status): judge by motion as before.
+                return True
+            try:
+                return int(contract.get("action_generation", 0) or 0) > 0
+            except (TypeError, ValueError):
+                return False
+        return True
+
     def portal_authentication_physical_budget_due(self, now):
         """Let expensive proposal loops yield without mutating authentication."""
         auth = self.active_portal_authentication()
@@ -1256,6 +1291,40 @@ class GPBranchFrontierMixin:
                 self.settle_unrecoverable_portal_authentication(
                     auth, now, "source_side_recovery_budget_exhausted")
                 return True
+        # A phase whose action was never taken over by the controller must not
+        # spend the doorway's verdict.  Keep the motion window open while the
+        # handoff is pending, and classify a handoff that never completes as a
+        # route failure (retryable) instead of a fake doorway.
+        action_running = self.portal_authentication_action_running(auth, now)
+        auth.note_action_running(action_running, now)
+        if not action_running:
+            handoff_since = getattr(auth, "_phase_handoff_since", None)
+            budget = float(
+                getattr(self, "portal_authentication_handoff_budget", 30.0) or 0.0)
+            if handoff_since is None or (now - float(handoff_since)) < budget:
+                auth.rearm_physical_progress((pose.x, pose.y), pose.theta, now)
+                return False
+            handoff_reason = "authentication_handoff_stall:%s" % auth.state
+            auth.request_failure_return(handoff_reason, pose_xy=(pose.x, pose.y))
+            self.sync_portal_authentication_phase(auth)
+            self.publish_status(
+                "portal_authentication_controller_handoff",
+                node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+                phase=str(auth.state), reason=handoff_reason,
+                waited_seconds=round(float(now) - float(handoff_since), 1),
+                budget_seconds=budget,
+                turn_supervisor_state=str(
+                    getattr(self, "turn_supervisor_state", "")),
+                route_id=int(getattr(self, "active_route_id", 0) or 0),
+                route_kind=str(getattr(self, "active_route_kind", "")),
+            )
+            self.release_active_frontier(
+                discard_prefetch=True, queue_successor=False,
+                await_controller_release_ack=True,
+                preserve_place_departure=bool(getattr(
+                    getattr(self, "place_departure", None), "active", False)),
+            )
+            return True
         if auth.physical_progress_expired(
                 (pose.x, pose.y), pose.theta, now,
                 portal_authentication_retry_budget(getattr(self, "active_timeout", 20.0))):

@@ -445,6 +445,18 @@ GLOBAL_FRONTIER_WAYPOINT_RELEASE_RADIUS: 1.20
 # STALL_TIMEOUT is intentionally longer than a single turn.
 GLOBAL_FRONTIER_ACTIVE_TIMEOUT: 60.0
 GLOBAL_FRONTIER_STALL_TIMEOUT: 20.0
+# A doorway authentication manoeuvre (enter -> inspect -> turn -> return) that
+# failed to *execute* keeps its doorway identity and is retried this many times
+# with a quiet cooldown.  A verdict about the doorway itself (nothing inside,
+# not passable, known space on the far side) is never retried.  Set 0 to
+# restore the previous one-strike behaviour.
+GLOBAL_FRONTIER_AUTH_RETRY_LIMIT: 2
+# A freshly dispatched authentication route may wait this long for the
+# controller to take it over before the route (not the doorway) is failed and
+# retried.  env04 20261112_231045 stalled 24 s in PASS_THROUGH and lost the
+# east doorway that way.
+GLOBAL_FRONTIER_AUTH_HANDOFF_BUDGET: 30.0
+GLOBAL_FRONTIER_AUTH_RETRY_COOLDOWN: 5.0
 # After a TEB pre-route turn completes, this is the time allowed for the base
 # to physically launch. It uses odometry translation (not SLAM-map distance),
 # then hands the route back to the normal 20-second stall watchdog. This avoids

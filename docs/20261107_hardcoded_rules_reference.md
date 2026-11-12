@@ -215,6 +215,9 @@ move_base 层：`controller_frequency=20Hz`、`planner_frequency=0`（事件驱�
 | portal_crossing_evidence | source_signed<0 且 terminal_signed≥0（或双侧预观察） | 动作终止 | 物理穿越证据 |
 | portal_match_radius | 0.30（复用×2） | 投影漂移复用 | 门漂 ≤2×match 才复用 |
 | authentication_retry_budget | clamp(0.5×active_timeout, 8, 12) s | 认证故障重试 | 有界重试 |
+| portal_authentication_retry_limit | 2（YAML `GLOBAL_FRONTIER_AUTH_RETRY_LIMIT`，0 = 关闭） | 认证动作失败 | 仅「执行失败」重试该门；门本身的判定（门内无未知区/不可通行/已知空间）仍一次判死 |
+| portal_authentication_handoff_budget | 30.0 s（`GLOBAL_FRONTIER_AUTH_HANDOFF_BUDGET`） | 认证 phase 已下发但控制器未接管 | 冻结物理进度窗口；超时按 `authentication_handoff_stall:<phase>` 释放路线并重试，不判门 |
+| portal_authentication_retry_cooldown | 5.0 s（`GLOBAL_FRONTIER_AUTH_RETRY_COOLDOWN`） | 同一门重试前静默 | 防止同一秒反复派发；与 `expire_unstartable`(30 s) 共同限界 |
 | return_recovery 阶段1 / 阶段2 | retry≥3 且 ≥45s / retry≥6 且 ≥140s | 回程停滞 | return_recovery_blocked / final_blocked |
 | return 控制器失败上限 | ≥4 次 | 连续失败 | 直接 final_blocked |
 | settle_seconds | 1.0 s | 新 branch 后 | 静默稳定窗口 |

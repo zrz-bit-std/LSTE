@@ -133,6 +133,77 @@ class DoorwayAuthentication:
         self.gate_geometry=(width,points)
         return True
 
+    def note_action_running(self, running, now):
+        """Record whether the controller has actually taken over this phase.
+
+        The physical-progress window must not judge a doorway while the
+        manoeuvre has not started: a route-boundary handoff can hold a freshly
+        dispatched route for tens of seconds with the robot stationary, and the
+        same manoeuvre still succeeds afterwards (env04 20261112_231045
+        branch 15: the turn supervisor stayed PASS_THROUGH for 28 s and the
+        doorway was condemned 24 s in).
+        """
+        key = str(self.state)
+        if getattr(self, "_action_phase", None) != key:
+            self._action_phase = key
+            self._phase_action_running = False
+            self._phase_handoff_since = None
+        running = bool(running)
+        if running and not getattr(self, "_phase_action_running", False):
+            self._event("doorway_action_started", phase=key)
+        self._phase_action_running = running
+        if running:
+            self._phase_handoff_since = None
+        elif getattr(self, "_phase_handoff_since", None) is None:
+            self._phase_handoff_since = float(now)
+        return running
+
+    def rearm_physical_progress(self, pose_xy, yaw, now):
+        """Restart the motion window without writing a phase verdict."""
+        pose = _xy(pose_xy)
+        if pose is None:
+            return False
+        self._progress_pose = pose
+        self._progress_yaw = float(yaw)
+        self._progress_at = float(now)
+        return True
+
+    def reset_for_retry(self, now, cooldown=0.0):
+        """Return one attempt to ``pending`` without losing its identity.
+
+        Only the per-attempt state machine is cleared; the measured gate
+        section and the durable branch identity stay untouched so a retry is
+        the same physical doorway, not a new one.
+        """
+        self.state = "pending"
+        self.failure_reason = None
+        self.source_xy = None
+        self.inside_xy = None
+        self.initial_yaw = None
+        self.target_yaw = None
+        self.chosen_turn_side = None
+        self.turn_direction = ""
+        self.turn_stable_samples = 0
+        self.rotation_ready = False
+        self.frontier_count_left = 0
+        self.frontier_count_right = 0
+        self.return_gate_cleared = False
+        self.return_retry_count = 0
+        self.return_recovery_started = None
+        self.return_recovery_blocked = False
+        self.return_recovery_blocked_at = None
+        self.return_recovery_final_blocked = False
+        self._progress_phase = None
+        self._progress_pose = None
+        self._progress_at = 0.0
+        self._action_phase = None
+        self._phase_action_running = False
+        self._phase_handoff_since = None
+        self.retry_not_before = float(now) + max(0.0, float(cooldown))
+        self._event("doorway_authentication_retry", now=float(now),
+                    cooldown=float(cooldown))
+        return True
+
     def _event(self, name, **data):
         event = {"event": name, "branch_id": self.branch_id,
                  "node_id": self.node_id}
@@ -694,15 +765,23 @@ class JunctionDoorwayAuthentication:
             self.phase = "complete" if self.all_finished() else "watching"
         return True
 
-    def next_pending(self):
-        return next((self.branches[key] for key in sorted(self.branches)
-                     if self.branches[key].state == "pending"), None)
+    def next_pending(self, now=None):
+        for key in sorted(self.branches):
+            branch = self.branches[key]
+            if branch.state != "pending":
+                continue
+            if (now is not None
+                    and float(getattr(branch, "retry_not_before", 0.0) or 0.0)
+                    > float(now)):
+                continue
+            return branch
+        return None
 
     def start_next(self, source_xy, now=0.0, force=False):
         if not force and float(now) - self.signature_since < self.settle_seconds:
             self.phase = "watching"
             return None
-        branch = self.next_pending()
+        branch = self.next_pending(now)
         if branch is None:
             self.active_branch_id = None
             self.phase = "complete" if self.all_finished() else "watching"
@@ -719,6 +798,23 @@ class JunctionDoorwayAuthentication:
             return None
         self.active_branch_id = None
         self.phase = "watching"
+        return self.start_next(source_xy, now=now)
+
+    def retry_active(self, source_xy, now=0.0, cooldown=0.0):
+        """Return the active attempt to ``pending`` instead of settling it.
+
+        The junction observation period stays open, so a retried doorway is
+        re-attempted before any room ranking is committed.
+        """
+        branch = self.branches.get(self.active_branch_id)
+        if branch is None:
+            return None
+        self.active_branch_id = None
+        branch.reset_for_retry(now, cooldown)
+        self.signature = tuple(sorted(self.branches))
+        self.signature_since = float(now)
+        self.phase = "watching"
+        self.watching_since = None
         return self.start_next(source_xy, now=now)
 
     def all_finished(self):
@@ -774,6 +870,39 @@ def resolve_certified_probe_work_items(probe_ledger, work_item_ledger, portal_id
 class GlobalFrontierPortalAuthenticationMixin:
     """Runtime adapter joining the authentication ledger to explorer events."""
 
+    # Only execution failures are retryable. A verdict about the doorway
+    # itself (nothing inside, not passable, known space on the far side) stays
+    # a permanent rejection so a fake doorway is never re-flown.
+    AUTH_RETRYABLE_REASONS = (
+        "authentication_physical_stall:",
+        "authentication_handoff_stall:",
+        "return_unrecoverable",
+        "zero_information_dead_end",
+    )
+
+    def portal_authentication_retry_reason(self, branch, tree_branch=None):
+        """Return the reason when one doorway attempt may be retried."""
+        reason = str(getattr(branch, "failure_reason", "") or "")
+        if not reason:
+            return None
+        if not any(reason.startswith(prefix)
+                   for prefix in self.AUTH_RETRYABLE_REASONS):
+            return None
+        try:
+            limit = int(getattr(self, "portal_authentication_retry_limit", 0) or 0)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit <= 0:
+            return None
+        attempts = 0
+        if isinstance(tree_branch, dict):
+            try:
+                attempts = int(
+                    tree_branch.get("authentication_retry_count", 0) or 0)
+            except (TypeError, ValueError):
+                attempts = 0
+        return reason if attempts < limit else None
+
     def initialize_portal_authentication(self):
         self.junction_portal_authentication = None
         self.portal_authentication_by_node = {}
@@ -825,6 +954,7 @@ class GlobalFrontierPortalAuthenticationMixin:
         self.portal_authentication_history.append(result)
         tree = getattr(self, "gp_exploration_tree", None)
         tree_branch = None if tree is None else tree.branches.get(branch.branch_id)
+        retry_failure = None
         if tree_branch is not None:
             tree_branch["authentication_state"] = branch.state
             tree_branch["authentication_failure_reason"] = branch.failure_reason
@@ -899,8 +1029,21 @@ class GlobalFrontierPortalAuthenticationMixin:
                     tree_branch["room_gp_space_id"] = tree_branch.get("destination_space_id")
                     tree_branch["room_labels"] = list(room.get("labels", []))
             if branch.state == "failed":
-                tree.reject_branch_authentication(branch.branch_id,
-                                                  branch.failure_reason)
+                # A manoeuvre that failed to *execute* keeps its doorway
+                # identity and is retried a bounded number of times.  A verdict
+                # about the doorway itself is rejected immediately.
+                retry_failure = self.portal_authentication_retry_reason(
+                    branch, tree_branch)
+                if retry_failure is None:
+                    tree.reject_branch_authentication(branch.branch_id,
+                                                      branch.failure_reason)
+                else:
+                    try:
+                        tree_branch["authentication_retry_count"] = int(
+                            tree_branch.get("authentication_retry_count", 0)
+                            or 0) + 1
+                    except (TypeError, ValueError):
+                        tree_branch["authentication_retry_count"] = 1
             elif branch.state == "completed":
                 tree_branch["state"] = "authenticated"
                 tree_branch["authentication_state"] = "completed"
@@ -909,7 +1052,30 @@ class GlobalFrontierPortalAuthenticationMixin:
             tree.current_node_id = task.node_id
         source_xy = (node.get("physical_xy") if node is not None
                      else branch.source_xy)
-        next_branch = task.finish_active(source_xy, now=now)
+        if retry_failure is not None:
+            next_branch = task.retry_active(
+                source_xy, now=now,
+                cooldown=float(getattr(
+                    self, "portal_authentication_retry_cooldown", 5.0) or 0.0),
+            )
+            if tree_branch is not None:
+                tree_branch["state"] = "retry"
+                tree_branch["authentication_state"] = "retry"
+                tree_branch["authentication_failure_reason"] = retry_failure
+            self.publish_status(
+                "portal_authentication_branch_retry",
+                node_id=int(task.node_id),
+                branch_id=int(branch.branch_id),
+                reason=str(retry_failure),
+                attempt=int(tree_branch.get("authentication_retry_count", 0) or 0)
+                if tree_branch is not None else 0,
+                limit=int(getattr(
+                    self, "portal_authentication_retry_limit", 2) or 0),
+                cooldown_seconds=round(float(getattr(
+                    self, "portal_authentication_retry_cooldown", 5.0) or 0.0), 2),
+            )
+        else:
+            next_branch = task.finish_active(source_xy, now=now)
         observation_tree = getattr(self, "gp_observation_tree", None)
         if next_branch is None and task.all_finished() and observation_tree is not None:
             ranked = observation_tree.finish_junction(task.node_id)
