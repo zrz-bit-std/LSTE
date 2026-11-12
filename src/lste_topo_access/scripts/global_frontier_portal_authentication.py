@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 import math
+import time
 
 from global_frontier_portal_crossing import portal_signed_distance, portal_section_destination
 
@@ -282,6 +283,12 @@ class DoorwayAuthentication:
             if return_recovery_should_block(
                     retry_count, recovery_elapsed, 3,
                     float(getattr(self, "return_recovery_min_seconds", 45.0))):
+                if getattr(self, "return_recovery_blocked", False) is not True:
+                    # Wall-clock start of the blocked window.  The owner uses
+                    # it to settle a return that can never be dispatched
+                    # instead of waiting for the 140 s budget, which the 300 s
+                    # stationary watchdog can pre-empt (env04 south corridor).
+                    self.return_recovery_blocked_at = time.monotonic()
                 self.return_recovery_blocked = True
                 self._event("doorway_failure_return_recovery_blocked",
                             retry_count=retry_count,

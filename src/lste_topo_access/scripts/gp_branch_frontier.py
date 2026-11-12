@@ -1,5 +1,7 @@
 """GP branch discovery and tree adapter for the existing Navfn/TEB executor."""
 import math
+import time
+
 import numpy as np
 import rospy
 from gp_branch_discovery import PolarGaussianProcess, entrance_geometry, angle_delta, map_ranges, junction_anchor, has_local_fork, has_confirmed_three_way_fan
@@ -1163,6 +1165,51 @@ class GPBranchFrontierMixin:
             )
         return True
 
+    def settle_unrecoverable_portal_authentication(self, auth, now, reason):
+        """Close a doorway branch whose source-side return cannot progress.
+
+        The branch is recorded as failed and the return obligation stays an
+        explicit fact in the ledger and the exploration tree, but the
+        observation period advances so the junction stops owning navigation.
+        """
+        if getattr(auth, "return_unrecoverable_reported", False):
+            return True
+        auth.return_unrecoverable_reported = True
+        self.publish_status(
+            "portal_authentication_return_unrecoverable",
+            node_id=int(auth.node_id), branch_id=int(auth.branch_id),
+            execution_failed=True, return_obligation_pending=True,
+            reason=str(reason),
+            snapshot=auth.snapshot(),
+        )
+        # Close the branch as failed and advance the observation period.  The
+        # obligation stays explicit (the ledger entry and the tree branch both
+        # keep ``return_obligation_pending``), but it no longer freezes a
+        # mission that has other doorways to authenticate.
+        fail = getattr(auth, "fail", None)
+        if callable(fail):
+            fail("return_unrecoverable")
+        tree = getattr(self, "gp_exploration_tree", None)
+        tree_branch = None
+        if tree is not None:
+            tree_branch = tree.branches.get(int(auth.branch_id))
+            if tree_branch is not None:
+                tree_branch["authentication_state"] = "failed"
+                tree_branch["authentication_failure_reason"] = "return_unrecoverable"
+                tree_branch["return_obligation_pending"] = True
+        retire = getattr(self, "retire_unrecoverable_portal_entry", None)
+        if callable(retire):
+            retire(auth, tree_branch, now)
+        self.release_active_frontier(
+            discard_prefetch=True,
+            preserve_place_departure=bool(getattr(
+                getattr(self, "place_departure", None), "active", False)),
+        )
+        finish = getattr(self, "finish_portal_authentication_branch", None)
+        if callable(finish):
+            finish(now=now)
+        return True
+
     def check_portal_authentication_physical_progress(self, now):
         """Check the same physical budget even when no map plan is rebuilt."""
         # A pinned observation period with no active branch must be concluded
@@ -1185,52 +1232,29 @@ class GPBranchFrontierMixin:
         if auth is None or pose is None:
             return False
         self.sync_portal_authentication_phase(auth)
+        blocked_at = getattr(auth, "return_recovery_blocked_at", None)
+        if (blocked_at is not None
+                and time.monotonic() - float(blocked_at) >= float(
+                    getattr(self, "portal_authentication_stale_route_grace", 15.0) or 15.0)
+                and str(getattr(auth, "state", "")) in ("entering", "turning", "returning")
+                and bool(getattr(auth, "return_recovery_blocked", False))):
+            # The branch exhausted its source-side return retries and has
+            # stayed blocked since then: no return goal is being dispatched,
+            # so waiting for the long recovery budget only burns the
+            # stationary watchdog window. Settle the branch instead
+            # of holding the junction, the observation period and the whole
+            # exploration policy until the 300 s stationary watchdog.
+            self.settle_unrecoverable_portal_authentication(
+                auth, now, "route_identity_stale_rejected")
+            return True
         if auth.state == "returning" and getattr(auth, "return_recovery_final_blocked", False):
             # A final recovery failure is an explicit failed execution, never
             # a settled doorway or permission to dispatch the next branch.
             # Let a real last-moment return win before reporting it.
             auth.update_return((pose.x, pose.y))
             if auth.state == "returning":
-                if not getattr(auth, "return_unrecoverable_reported", False):
-                    auth.return_unrecoverable_reported = True
-                    self.publish_status(
-                        "portal_authentication_return_unrecoverable",
-                        node_id=int(auth.node_id), branch_id=int(auth.branch_id),
-                        execution_failed=True, return_obligation_pending=True,
-                        reason="source_side_recovery_budget_exhausted",
-                        snapshot=auth.snapshot(),
-                    )
-                    # Close the branch as failed and advance the observation
-                    # period.  The obligation stays explicit (the ledger entry
-                    # and the tree branch both keep ``return_obligation_pending``),
-                    # but it no longer freezes a mission that has other
-                    # doorways to authenticate.
-                    fail = getattr(auth, "fail", None)
-                    if callable(fail):
-                        fail("return_unrecoverable")
-                    tree = getattr(self, "gp_exploration_tree", None)
-                    tree_branch = None
-                    if tree is not None:
-                        tree_branch = tree.branches.get(int(auth.branch_id))
-                        if tree_branch is not None:
-                            tree_branch["authentication_state"] = "failed"
-                            tree_branch["authentication_failure_reason"] = (
-                                "return_unrecoverable")
-                            tree_branch["return_obligation_pending"] = True
-                    retire = getattr(
-                        self, "retire_unrecoverable_portal_entry", None
-                    )
-                    if callable(retire):
-                        retire(auth, tree_branch, now)
-                    self.release_active_frontier(
-                        discard_prefetch=True,
-                        preserve_place_departure=bool(getattr(
-                            getattr(self, "place_departure", None), "active", False)),
-                    )
-                    finish = getattr(
-                        self, "finish_portal_authentication_branch", None)
-                    if callable(finish):
-                        finish(now=now)
+                self.settle_unrecoverable_portal_authentication(
+                    auth, now, "source_side_recovery_budget_exhausted")
                 return True
         if auth.physical_progress_expired(
                 (pose.x, pose.y), pose.theta, now,

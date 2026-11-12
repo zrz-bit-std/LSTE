@@ -128,6 +128,12 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.zero_info_dead_end_timeout = max(
             5.0, float(gp("~zero_info_dead_end_timeout", 30.0))
         )
+        # A route the GoalManager keeps discarding as stale can never move;
+        # settle its doorway branch after this long instead of waiting for the
+        # stationary watchdog (env04 south-corridor 300 s stall).
+        self.portal_authentication_stale_route_grace = max(
+            5.0, float(gp("~portal_authentication_stale_route_grace", 15.0))
+        )
         # Consecutive stagnations of the same goal before it is abandoned.
         self.goal_stagnation_limit = max(
             1, int(gp("~goal_stagnation_limit", 3))
