@@ -113,6 +113,13 @@ class GlobalFrontierExecutionWatchdogMixin:
             active_component,
             active_information,
         )
+        dead_end_check = getattr(self, "_zero_information_dead_end", None)
+        zero_info_dead_end = (
+            dead_end_check(x, y, now, active_component, active_information,
+                           region_stagnant)
+            if callable(dead_end_check)
+            else False
+        )
         # Observation stagnation describes a place-level fact, not an action
         # failure. In particular, it must not terminate or replace the
         # still-active move_base transaction. The terminal lifecycle closes
@@ -201,7 +208,7 @@ class GlobalFrontierExecutionWatchdogMixin:
                 getattr(self, "controller_terminal_wait_seconds", 12.0) or 0.0
             ),
         )
-        expired = lease_decision.release
+        expired = lease_decision.release or zero_info_dead_end
         if (
             bool(getattr(self, "controller_owned_route_failure", False))
             and stalled
@@ -424,6 +431,8 @@ class GlobalFrontierExecutionWatchdogMixin:
         the active action has emitted its matching terminal. Terminal-time
         observation handling owns the eventual place closure.
         """
+        self.active_region_no_gain_seconds = 0.0
+        self.active_stagnant_region = None
         if (
             portal_transition
             or turn_phase_active
@@ -446,6 +455,10 @@ class GlobalFrontierExecutionWatchdogMixin:
         )
         if region is None:
             return False
+        self.active_region_no_gain_seconds = max(
+            0.0, float(now) - float(region["last_gain"])
+        )
+        self.active_stagnant_region = region
         rospy.loginfo_throttle(
             5.0,
             "Global frontier observed no information gain for %.1fs in "
@@ -453,6 +466,111 @@ class GlobalFrontierExecutionWatchdogMixin:
             now - region["last_gain"],
             region["id"],
             self.active_route_id,
+        )
+        return True
+
+    def _zero_information_dead_end(
+        self, x, y, now, active_component, active_information, region_stagnant,
+    ):
+        """Abandon an active endpoint that can never gain information.
+
+        ``active_region_is_stagnant`` is deliberately read-only: it retains the
+        active route until its terminal.  When the selected endpoint reveals
+        zero new map information, that terminal can never arrive because the
+        route command is discarded upstream as stale (its graph transaction id
+        is below the high-water mark), so no action is dispatched.  After
+        ``zero_info_dead_end_timeout`` of zero-gain dwell, fail the region so
+        the selector must pick a different obligation and release the route.
+        Returns True when an abandonment was performed this tick.
+        """
+        if not region_stagnant:
+            return False
+        if float(active_information or 0.0) > 0.0:
+            return False
+        no_gain = float(
+            getattr(self, "active_region_no_gain_seconds", 0.0) or 0.0
+        )
+        if no_gain <= float(
+            getattr(self, "zero_info_dead_end_timeout", 30.0) or 30.0
+        ):
+            return False
+        route_id = int(getattr(self, "active_route_id", 0) or 0)
+        if int(getattr(self, "last_zero_info_abandon_route_id", 0) or 0) == route_id:
+            return False
+        self.last_zero_info_abandon_route_id = route_id
+        region_id = int(getattr(self, "active_frontier_region_id", 0) or 0)
+        # ``FrontierRegionMemory.fail`` intentionally keeps the Place open: it
+        # only counts a failed ViewpointAttempt.  Retaining an open, covered,
+        # zero-information Place lets the selector choose the same dead
+        # endpoint again on the next tick.  Retire the Place explicitly here so
+        # the selector must pick a different obligation.
+        region = getattr(self, "active_stagnant_region", None)
+        memory = getattr(self, "region_memory", None)
+        retired = False
+        if memory is not None and region is not None:
+            dormant = getattr(memory, "dormant", None)
+            if callable(dormant):
+                retired = bool(dormant(region, now, "zero_information_dead_end"))
+        if retired:
+            publish = getattr(self, "publish_status", None)
+            if callable(publish):
+                publish(
+                    "frontier_region_dormant",
+                    reason="zero_information_dead_end",
+                    region_id=region_id,
+                    region_visits=int(region.get("visits", 0) or 0),
+                    region_failures=int(region.get("failures", 0) or 0),
+                    goal=[round(float(x), 3), round(float(y), 3)],
+                )
+        else:
+            record = getattr(self, "record_failed_frontier_region", None)
+            if callable(record):
+                try:
+                    record(x, y, now, "zero_information_dead_end", active_component)
+                except TypeError:
+                    record(x, y, now, "zero_information_dead_end")
+        # Retiring the region does not stop an in-flight portal authentication:
+        # a branch stuck in "entering"/"returning" keeps re-selecting
+        # source-side-return goals regardless of the region state.  Fail the
+        # active branch and finish it so the next planning tick can choose a
+        # fresh obligation.
+        auth_aborted = False
+        auth = getattr(self, "active_portal_authentication", lambda: None)()
+        if auth is not None:
+            state = str(getattr(auth, "state", "") or "")
+            if state in ("entering", "turning", "returning"):
+                fail = getattr(auth, "fail", None)
+                if callable(fail):
+                    try:
+                        fail("zero_information_dead_end")
+                        finisher = getattr(
+                            self, "finish_portal_authentication_branch", None
+                        )
+                        if callable(finisher):
+                            finisher(now=now)
+                        auth_aborted = True
+                    except Exception:
+                        pass
+        self.active_portal_authentication_phase = ""
+        self.active_portal_authentication_entry_approach = False
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "zero_information_dead_end_abandoned",
+                route_id=route_id,
+                region_id=region_id,
+                retired=bool(retired),
+                auth_aborted=bool(auth_aborted),
+                no_gain_seconds=round(no_gain, 1),
+                information=round(float(active_information or 0.0), 3),
+            )
+        rospy.logwarn(
+            "Global frontier abandoning zero-information dead end route_id=%d "
+            "region id=%d after %.1fs with information=%.3f",
+            route_id,
+            region_id,
+            no_gain,
+            float(active_information or 0.0),
         )
         return True
 

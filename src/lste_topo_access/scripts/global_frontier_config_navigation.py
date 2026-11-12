@@ -119,6 +119,15 @@ class GlobalFrontierNavigationConfigurationMixin:
         )
         self.active_timeout = max(2.0, float(gp("~active_timeout", 18.0)))
         self.stall_timeout = max(2.0, float(gp("~stall_timeout", 8.0)))
+        # A selected endpoint that reveals zero new map information and whose
+        # region has produced no gain for this long is a dead end.  The normal
+        # no-gain dwell retains the active route until its terminal, but the
+        # stale-route handshake can reject the command forever so no terminal
+        # ever arrives (env04 south-corridor 300 s stall).  After this timeout
+        # the planner fails the region and forces a different obligation.
+        self.zero_info_dead_end_timeout = max(
+            5.0, float(gp("~zero_info_dead_end_timeout", 30.0))
+        )
         # Consecutive stagnations of the same goal before it is abandoned.
         self.goal_stagnation_limit = max(
             1, int(gp("~goal_stagnation_limit", 3))
