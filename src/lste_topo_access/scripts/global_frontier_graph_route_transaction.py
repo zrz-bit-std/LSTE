@@ -100,10 +100,18 @@ class GraphRouteActionTransaction:
         }
 
 
-def next_graph_route_transaction_id(sequence, released_graph_transaction_id=0):
-    """Allocate above both planner-local and controller-visible graph IDs."""
+def next_graph_route_transaction_id(
+    sequence, released_graph_transaction_id=0, floor=0,
+):
+    """Allocate above the planner-local, released and controller-visible IDs.
+
+    ``floor`` carries the highest graph identity this node has seen accepted
+    (dispatch/release/bridge status).  The controller rejects anything below
+    its own high-water mark, and that mark is advanced by every accepted route,
+    so allocating only above the local counters can be born stale.
+    """
     values = []
-    for value in (sequence, released_graph_transaction_id):
+    for value in (sequence, released_graph_transaction_id, floor):
         try:
             values.append(max(0, int(value or 0)))
         except (TypeError, ValueError):
@@ -112,7 +120,7 @@ def next_graph_route_transaction_id(sequence, released_graph_transaction_id=0):
 
 
 def route_graph_transaction_identity(selection, transaction, sequence,
-                                     released_graph_transaction_id=0):
+                                     released_graph_transaction_id=0, floor=0):
     """Keep controller graph IDs monotonic for non-durable GP auth routes.
 
     The GP observation route temporarily bypasses the durable graph planner,
@@ -132,7 +140,7 @@ def route_graph_transaction_identity(selection, transaction, sequence,
     if not str(getattr(selection, "authentication_phase", "") or ""):
         return 0, sequence_id
     allocated = next_graph_route_transaction_id(
-        sequence_id, released_graph_transaction_id,
+        sequence_id, released_graph_transaction_id, floor,
     )
     return allocated, allocated
 

@@ -770,6 +770,14 @@ class GlobalFrontierEventCallbacksMixin:
         previous = contracts.get(contract["route_id"])
         if previous is None or contract["action_generation"] >= previous["action_generation"]:
             contracts[contract["route_id"]] = contract
+        raise_floor = getattr(self, "_raise_graph_identity_floor", None)
+        if callable(raise_floor):
+            # The bridge reports the canonical high water it knows about; keep
+            # it as an advisory floor so the next allocation clears it.
+            raise_floor(
+                contract.get("graph_transaction_id"),
+                payload.get("canonical_graph_high_water"),
+            )
         if int(getattr(self, "active_route_id", 0) or 0) == contract["route_id"]:
             # Complete the activation-time predecessor record with the
             # mission transaction and action generation assigned downstream.

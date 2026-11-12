@@ -452,6 +452,8 @@ class GraphRouteTransactionTest(unittest.TestCase):
     def test_graph_transaction_id_advances_past_released_route_high_water(self):
         self.assertEqual(next_graph_route_transaction_id(3, 11), 12)
         self.assertEqual(next_graph_route_transaction_id(12, 11), 13)
+        self.assertEqual(next_graph_route_transaction_id(3, 11, 40), 41)
+        self.assertEqual(next_graph_route_transaction_id(12, 11, 5), 13)
 
     def test_portal_authentication_route_gets_monotonic_graph_identity(self):
         selection = SimpleNamespace(authentication_phase="entering")
@@ -471,6 +473,18 @@ class GraphRouteTransactionTest(unittest.TestCase):
             selection, committed, 106, 104,
         )
         self.assertEqual((graph_id, sequence), (42, 106))
+
+    def test_authentication_allocation_clears_the_controller_floor(self):
+        selection = SimpleNamespace(authentication_phase="entering")
+        graph_id, sequence = route_graph_transaction_identity(
+            selection, None, 12, 0, floor=40,
+        )
+        self.assertEqual((graph_id, sequence), (41, 41))
+
+        graph_id, sequence = route_graph_transaction_identity(
+            selection, None, 50, 0, floor=40,
+        )
+        self.assertEqual((graph_id, sequence), (51, 51))
 
     def test_semantic_room_keeps_selected_work_item_identity_during_materialization(self):
         harness = type("Harness", (), {})()

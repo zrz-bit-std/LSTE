@@ -210,9 +210,19 @@ class GlobalFrontierTerminalValidationMixin:
         self.last_released_route_action_generation = release_contract[
             "action_generation"
         ]
-        self.last_released_route_graph_transaction_id = release_contract[
-            "graph_transaction_id"
-        ]
+        released_graph_transaction_id = int(
+            release_contract.get("graph_transaction_id", 0) or 0
+        )
+        # Never let a graph-zero observation route erase the highest released
+        # identity: it is the only local clue for the controller high water
+        # (env04 20261112_220714 lost route 41 this way).
+        self.last_released_route_graph_transaction_id = max(
+            int(getattr(self, "last_released_route_graph_transaction_id", 0) or 0),
+            released_graph_transaction_id,
+        )
+        raise_floor = getattr(self, "_raise_graph_identity_floor", None)
+        if callable(raise_floor):
+            raise_floor(released_graph_transaction_id)
         self.last_released_route_map_epoch = release_contract["map_epoch"]
         self.last_released_route_origin_epoch = release_contract["origin_epoch"]
         self.last_released_route_projection_epoch = release_contract[
@@ -352,6 +362,33 @@ class GlobalFrontierTerminalValidationMixin:
             replayed += 1
         return replayed
 
+    def _expected_terminal_graph_transaction_id(self, route_id):
+        """Return the graph identity this terminal must carry.
+
+        Prefer the immutable dispatch snapshot captured when the bridge
+        admitted the route.  ``graph_route_action_transaction`` is mutable and
+        can move on (or belong to another obligation) by the time a terminal
+        arrives, which turned every terminal into a mismatch whenever a route
+        was dispatched under a newer identity than the transaction object.
+        """
+        dispatch = getattr(self, "_bridge_dispatch_contracts", {}).get(
+            int(route_id or 0)
+        )
+        if isinstance(dispatch, dict):
+            try:
+                expected = int(dispatch.get("graph_transaction_id", 0) or 0)
+            except (TypeError, ValueError):
+                expected = 0
+            if expected > 0:
+                return expected
+        graph_transaction = getattr(
+            self, "graph_route_action_transaction", None
+        )
+        try:
+            return int(getattr(graph_transaction, "graph_transaction_id", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
     def matching_execution_terminal(self, message):
         """Return a completion only for this exact route transaction.
 
@@ -422,11 +459,10 @@ class GlobalFrontierTerminalValidationMixin:
                     )
             except (TypeError, ValueError):
                 return self._reject_terminal(message, "active_map_epoch_invalid")
-        graph_transaction = getattr(
-            self, "graph_route_action_transaction", None
-        )
-        expected_graph_transaction_id = int(
-            getattr(graph_transaction, "graph_transaction_id", 0) or 0
+        expected_graph_transaction_id = (
+            self._expected_terminal_graph_transaction_id(
+                int(getattr(self, "active_route_id", 0) or 0)
+            )
         )
         terminal_graph_transaction_id = identity["graph_transaction_id"]
         if expected_graph_transaction_id > 0 and (

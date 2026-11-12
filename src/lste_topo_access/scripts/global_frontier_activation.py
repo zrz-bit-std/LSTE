@@ -19,6 +19,25 @@ from global_frontier_graph_route_transaction import route_graph_transaction_iden
 
 
 class GlobalFrontierActivationMixin:
+    def _raise_graph_identity_floor(self, *values):
+        """Keep a monotonic floor for the graph transaction IDs we allocate.
+
+        The GoalManager rejects any route below the highest graph ID it has
+        accepted.  That high-water mark is raised by every accepted route,
+        including portal crossings, so a freshly allocated authentication ID
+        can be born stale (env04 20261112_220714: IDs 29..39 were all rejected
+        while the high water was 40).  Absorbing every ID this node has seen
+        keeps the next allocation above it without a cross-process round trip.
+        """
+        floor = int(getattr(self, "graph_route_identity_floor", 0) or 0)
+        for value in values:
+            try:
+                floor = max(floor, int(value or 0))
+            except (TypeError, ValueError):
+                continue
+        self.graph_route_identity_floor = floor
+        return floor
+
     @staticmethod
     def selected_frontier_from_cell(active_cell):
         """Convert the positional candidate tuple into named route facts."""
@@ -347,12 +366,18 @@ class GlobalFrontierActivationMixin:
         self.active_portal_retry = False
         self.active_terminal_received = False
         self.active_terminal_contract = None
+        graph_identity_floor = self._raise_graph_identity_floor(
+            getattr(self, "graph_route_action_transaction_sequence", 0),
+            getattr(self, "last_released_route_graph_transaction_id", 0),
+        )
         graph_transaction_id, graph_sequence = route_graph_transaction_identity(
             selection,
             graph_transaction,
             getattr(self, "graph_route_action_transaction_sequence", 0),
             getattr(self, "last_released_route_graph_transaction_id", 0),
+            floor=graph_identity_floor,
         )
+        self._raise_graph_identity_floor(graph_transaction_id)
         if graph_sequence > int(
             getattr(self, "graph_route_action_transaction_sequence", 0) or 0
         ):

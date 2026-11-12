@@ -373,6 +373,7 @@ class GlobalFrontierRuntimeStateMixin:
         # transaction/action generation are filled when Bridge adoption is
         # observed; route/lifecycle/epoch identity is available at activation.
         self.active_route_dispatch_contract = None
+        self.graph_route_identity_floor = 0
         # A graph materialization failure can be observed after the physical
         # predecessor has already released its controller lease. Preserve the
         # exact predecessor contract until the next route is activated so the
