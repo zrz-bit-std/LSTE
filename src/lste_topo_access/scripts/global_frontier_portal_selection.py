@@ -399,6 +399,140 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         except (TypeError, ValueError):
             return True
 
+    def _portal_forward_alternatives(self, request, portal_sources):
+        """Return ``(straight_available, positive_available)`` for this pass.
+
+        The turn-evidence gate is relative: a negative doorway is skipped only
+        when a better alternative exists at the same junction, either
+
+        * another doorway that can be taken without a large turn (the corridor
+          ahead is still usable), or
+        * another doorway whose room already has positive environment evidence
+          (env04 lower junction: east lab 0.182 vs west hydrant -0.69, both
+          ~90 deg, so the straight rule alone would still enter the west room).
+
+        When neither holds the gate yields.  Corridors themselves often score
+        negative (a nearby door or fire hydrant), and refusing the last way
+        forward parks the robot (run 20261113_181729 stopped at y=-3.98 with
+        the only south doorway at -0.538).
+        """
+        try:
+            soft_limit = math.radians(float(
+                getattr(self, "room_turn_soft_limit_deg", 60.0) or 0.0))
+        except (TypeError, ValueError):
+            soft_limit = math.radians(60.0)
+        try:
+            min_score = float(getattr(
+                self, "heading_semantic_override_min_score", 0.15) or 0.0)
+        except (TypeError, ValueError):
+            min_score = 0.15
+        straight = False
+        positive = False
+        for source in portal_sources.values():
+            try:
+                endpoint_row = source.endpoint_row
+                endpoint_col = source.endpoint_col
+                portal_x, portal_y = self.cell_xy(
+                    request.message, endpoint_row, endpoint_col,
+                )
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if portal_x is None or portal_y is None:
+                continue
+            if request.excluded and any(
+                    math.hypot(portal_x - old_x, portal_y - old_y)
+                    < self.completed_radius
+                    for old_x, old_y in request.excluded):
+                continue
+            try:
+                if self.frontier_is_rejected(portal_x, portal_y, request.now):
+                    continue
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if request.validation is not None:
+                try:
+                    if self.candidate_costmap_distance(
+                            request.validation, portal_x, portal_y) is None:
+                        continue
+                except (AttributeError, TypeError, ValueError):
+                    continue
+            if not positive:
+                ledger = getattr(self, "portal_hypothesis_ledger", None)
+                hypothesis_key = getattr(source, "hypothesis_id", None)
+                if ledger is not None and hypothesis_key is not None:
+                    record = ledger.get(hypothesis_key) or {}
+                    try:
+                        score = float(record.get("semantic_score"))
+                    except (TypeError, ValueError):
+                        score = None
+                    if (score is not None and math.isfinite(score)
+                            and score >= min_score
+                            and not record.get("exploration_suppressed")):
+                        positive = True
+            if not straight:
+                try:
+                    delta, _penalty = self._route_heading_penalty(
+                        request,
+                        (endpoint_row, endpoint_col),
+                        (portal_x, portal_y),
+                    )
+                    delta = abs(float(delta))
+                except (AttributeError, TypeError, ValueError):
+                    delta = None
+                if delta is not None and delta <= soft_limit:
+                    straight = True
+            if straight and positive:
+                break
+        return straight, positive
+
+    def _retire_negative_room_entry(self, record, portal_id, room_score, now):
+        """Retire a doorway that was inspected and still looks negative.
+
+        Deferring is enough while the inside of the room is still unknown: the
+        approach window may still reveal a chair or desk that turns the score
+        positive.  Once the doorway authentication completed (the robot stood
+        inside the doorway and looked around) and the score is still below the
+        turn floor, the doorway is a deliberate policy skip.  Leaving its
+        Portal-entry WorkItem unresolved would make the source Place look
+        unfinished forever, so the DFS suspends and re-enters that Place in a
+        loop (run 20261113_180426: place 3 every ~9 s, 160 identical notes).
+        """
+        if not isinstance(record, dict):
+            return None
+        if str(record.get("gp_authentication_state", "")).strip().lower() != (
+                "completed"):
+            return None
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return None
+        record["exploration_suppressed"] = True
+        record["policy_skip_reason"] = "negative_room_turn"
+        record["policy_skip_ros"] = float(now)
+        work = getattr(self, "place_work_items", None)
+        abandon = getattr(work, "abandon_portal_entry", None)
+        retired = None
+        if callable(abandon):
+            retired = abandon(
+                portal_id, now, "negative_room_turn",
+                resolution="policy_skipped_negative_room",
+                item_id=record.get("semantic_entry_work_item_id"),
+            )
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "portal_entry_policy_skipped",
+                portal_id=portal_id,
+                semantic_score=(
+                    None if room_score is None else round(float(room_score), 4)
+                ),
+                entry_work_item_id=(
+                    None if retired is None else retired.get("id")
+                ),
+                reason="negative_room_turn",
+            )
+        return retired
+
     def _portal_room_score_ranking(self, source_place_id):
         """Return the two highest certified room scores of one source Place."""
         ledger = getattr(self, "portal_hypothesis_ledger", None)
@@ -588,6 +722,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         self.last_portal_hard_rejected = 0
 
         rejected_notes = []
+        # Lazily computed: (straight, positive) alternatives among the other
+        # candidates.  A negative side room is only skipped when one exists.
+        forward_alternatives = None
         # Same-junction score ranking, used by the "clearly better" heading
         # override.  A room that only wins a tie is not worth a U-turn.
         room_best, room_second = self._portal_room_score_ranking(
@@ -715,15 +852,33 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     room_score = None
             if self.portal_turn_needs_positive_room(
                     route_heading_delta, room_score):
-                # Going straight needs no evidence; turning into a room does.
-                self.last_portal_negative_turn_rejected = int(
-                    getattr(self, "last_portal_negative_turn_rejected", 0)) + 1
-                rejected_notes.append(self._note_portal_deferral(
-                    hypothesis_key, "negative_room_turn", request.now,
-                    heading_delta_deg=math.degrees(route_heading_delta),
-                    semantic_score=room_score,
-                ))
-                continue
+                if forward_alternatives is None:
+                    forward_alternatives = self._portal_forward_alternatives(
+                        request, portal_sources)
+                straight_available, positive_available = forward_alternatives
+                if straight_available or positive_available:
+                    # Going straight needs no evidence; turning into a room
+                    # does, but only while the corridor ahead is still usable.
+                    self.last_portal_negative_turn_rejected = int(
+                        getattr(self, "last_portal_negative_turn_rejected", 0)
+                    ) + 1
+                    rejected_notes.append(self._note_portal_deferral(
+                        hypothesis_key, "negative_room_turn", request.now,
+                        heading_delta_deg=math.degrees(route_heading_delta),
+                        detail={"semantic_score": room_score},
+                    ))
+                    self._retire_negative_room_entry(
+                        record, hypothesis_key, room_score, request.now,
+                    )
+                    continue
+                # Every candidate needs a large turn, so refusing this one
+                # would park the robot at the end of a corridor.  Corridors
+                # often score negative themselves (a door or fire hydrant is
+                # nearby), so evidence may only demote a side room, never
+                # block the last way forward.
+                self.last_portal_negative_turn_last_resort = int(
+                    getattr(self, "last_portal_negative_turn_last_resort", 0)
+                ) + 1
             if (
                 request.max_heading_delta is not None
                 and route_heading_delta is not None
