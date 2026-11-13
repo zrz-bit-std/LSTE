@@ -20,7 +20,30 @@ class GlobalFrontierObservationDepartureMixin:
         downgrade = getattr(transaction, "allow_map_evidence_fallback", None)
         if not callable(downgrade):
             return False
-        return bool(downgrade(reason))
+        if not bool(downgrade(reason)):
+            return False
+        source = getattr(transaction, "anchor_map", None)
+        try:
+            source = [
+                round(float(source[0]), 3),
+                round(float(source[1]), 3),
+            ]
+        except (TypeError, ValueError, IndexError):
+            source = None
+        # A downgrade is an audit fact, not only transaction state: without
+        # this event a run that silently falls back looks identical to one
+        # that waited out the certificate, so the rescue path cannot be
+        # counted from logs.  allow_map_evidence_fallback() clears the
+        # requirement, so a repeated call cannot emit a duplicate.
+        self.publish_status(
+            "frontier_place_departure_gate_downgraded",
+            region_id=int(getattr(transaction, "region_id", 0) or 0),
+            route_id=int(getattr(self, "active_route_id", 0) or 0),
+            departure_basis=str(getattr(transaction, "basis", "") or ""),
+            reason=str(reason or "portal_route_lost"),
+            source=source,
+        )
+        return True
 
     def sync_departure_gate_requirement(self, selection):
         """Arm the gate proof only while the selected route is a Portal edge.

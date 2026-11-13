@@ -160,6 +160,40 @@ class SyncGateRequirementTest(unittest.TestCase):
         self.assertEqual(
             transaction.map_fallback_reason, "departure_route_not_portal")
 
+    def test_route_replacement_publishes_an_audit_event(self):
+        transaction = _transaction()
+        host = _Host(transaction, _mask(True), False)
+        host.sync_departure_gate_requirement(
+            SimpleNamespace(route_kind="frontier_endpoint"))
+        downgraded = [
+            fields for name, fields in host.events
+            if name == "frontier_place_departure_gate_downgraded"
+        ]
+        self.assertEqual(len(downgraded), 1)
+        fields = downgraded[0]
+        self.assertEqual(fields["reason"], "departure_route_not_portal")
+        self.assertEqual(fields["region_id"], 4)
+        self.assertEqual(fields["route_id"], 19)
+        self.assertEqual(fields["departure_basis"], "structural_transition")
+        self.assertEqual(fields["source"], [3.4, 4.9])
+
+    def test_repeated_downgrade_publishes_once(self):
+        transaction = _transaction()
+        host = _Host(transaction, _mask(True), False)
+        self.assertTrue(host.downgrade_departure_gate_requirement("aborted"))
+        self.assertFalse(host.downgrade_departure_gate_requirement("aborted"))
+        names = [name for name, _fields in host.events]
+        self.assertEqual(
+            names.count("frontier_place_departure_gate_downgraded"), 1)
+
+    def test_confirmed_crossing_publishes_no_downgrade_event(self):
+        transaction = _transaction(confirmed=True)
+        host = _Host(transaction, _mask(True), False)
+        self.assertFalse(host.downgrade_departure_gate_requirement("aborted"))
+        self.assertNotIn(
+            "frontier_place_departure_gate_downgraded",
+            [name for name, _fields in host.events])
+
     def test_no_pending_departure_is_a_noop(self):
         host = _Host(PlaceDepartureTransaction(), _mask(True), False)
         self.assertFalse(host.sync_departure_gate_requirement(
