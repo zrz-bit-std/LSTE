@@ -152,6 +152,12 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.room_view_min_depth = float(
             gp("~room_view_min_depth", -0.3)
         )
+        # Dwell at the inside point before the U-turn: the camera faces the
+        # room, so a short stationary window gives the detector stable frames.
+        # Kept well below the 8-12 s authentication progress budget.
+        self.room_view_settle_seconds = max(
+            0.0, min(5.0, float(gp("~room_view_settle_seconds", 1.0)))
+        )
         # A selected endpoint that reveals zero new map information and whose
         # region has produced no gain for this long is a dead end.  The normal
         # no-gain dwell retains the active route until its terminal, but the

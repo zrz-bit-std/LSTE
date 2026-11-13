@@ -99,6 +99,9 @@ class DoorwayAuthentication:
     entry_goal_margin: float = 0.60
     # Provisional while pending; immutable measured section once entry begins.
     gate_geometry: tuple = None
+    # Stamped by the frontier when the robot reaches the inside point; the
+    # room-view dwell is measured from here.
+    inside_since: float = None
 
     def __post_init__(self):
         self.branch_id = int(self.branch_id)
@@ -196,6 +199,7 @@ class DoorwayAuthentication:
         self._progress_phase = None
         self._progress_pose = None
         self._progress_at = 0.0
+        self.inside_since = None
         self._action_phase = None
         self._phase_action_running = False
         self._phase_handoff_since = None

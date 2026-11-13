@@ -221,6 +221,10 @@ move_base 层：`controller_frequency=20Hz`、`planner_frequency=0`（事件驱�
 | room_view_core_deg | 45°（`GLOBAL_FRONTIER_ROOM_VIEW_CORE_DEG`） | 房间语义采样 | 相机与门内法线夹角 ≤ 此值才计入（`entering`/`inside`/`turning` 通用） |
 | room_view_arc_deg | 90°（`GLOBAL_FRONTIER_ROOM_VIEW_ARC_DEG`） | 房间语义采样 | 只朝「被选中的掉头方向」延伸到此角度：0–90° 是扫房间，>90° 已转过门平面、在看走廊 |
 | room_view_min_depth | −0.3 m（`GLOBAL_FRONTIER_ROOM_VIEW_MIN_DEPTH`） | `entering` 阶段 | 车未到门平面时不计语义，避免在路口隔门乱认 |
+| room_turn_soft_limit_deg | 60°（`GLOBAL_FRONTIER_ROOM_TURN_SOFT_LIMIT_DEG`） | 门洞选择 | 直行（航向差 ≤ 此值）不需要语义证据；超过它就想拐进屋时，房间必须有正向证据，否则记 `negative_room_turn` 并跳过（中部丁字口的负分西屋因此不再进入） |
+| heading_semantic_override_min_score | 0.15（`GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_SCORE`） | 航向豁免 | 4 词表命中 1 个即 0.182；0.15 = “至少一个正向环境词” |
+| heading_semantic_override_min_margin | 0.40（`GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_MARGIN`） | 航向豁免 | 还必须比同路口第二名高 0.40；实测平局差值 ≈0、明确赢家最小 0.549，0.40 落在空档 |
+| room_view_settle_seconds | 1.0 s（`GLOBAL_FRONTIER_ROOM_VIEW_SETTLE_SECONDS`） | `inside` 状态 | 到门内点后先停住 1 s 再掉头，使相机在正对屋内时采到稳定帧；须远小于物理进度预算 8–12 s |
 | `returning` 阶段 | 永不采样 | 房间语义采样 | 回程镜头对着走廊，是 20261113_035731 东西房标签互换的来源 |
 | return_recovery 阶段1 / 阶段2 | retry≥3 且 ≥45s / retry≥6 且 ≥140s | 回程停滞 | return_recovery_blocked / final_blocked |
 | return 控制器失败上限 | ≥4 次 | 连续失败 | 直接 final_blocked |

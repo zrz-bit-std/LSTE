@@ -368,8 +368,75 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
             branch["defer_count"] = int(branch.get("defer_count", 0)) + 1
             branch["defer_heading_delta_deg"] = heading_delta_deg
 
+    def portal_turn_needs_positive_room(self, route_heading_delta, room_score):
+        """Return True when a turn into a doorway lacks the evidence for it.
+
+        Driving straight needs no evidence.  Turning beyond the soft limit into
+        a room does: a negative or unknown doorway is skipped so the corridor
+        ahead keeps being explored (env04 mid junction), while a room with at
+        least one positive environment term may still be turned into.
+        """
+        try:
+            delta = abs(float(route_heading_delta))
+        except (TypeError, ValueError):
+            return False
+        try:
+            soft_limit = math.radians(float(
+                getattr(self, "room_turn_soft_limit_deg", 60.0) or 0.0))
+        except (TypeError, ValueError):
+            soft_limit = math.radians(60.0)
+        if delta <= soft_limit:
+            return False
+        try:
+            min_score = float(
+                getattr(self, "heading_semantic_override_min_score", 0.15) or 0.0)
+        except (TypeError, ValueError):
+            min_score = 0.15
+        if room_score is None:
+            return True
+        try:
+            return float(room_score) < min_score
+        except (TypeError, ValueError):
+            return True
+
+    def _portal_room_score_ranking(self, source_place_id):
+        """Return the two highest certified room scores of one source Place."""
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        if ledger is None or source_place_id is None:
+            return None, None
+        try:
+            source_place_id = int(source_place_id)
+        except (TypeError, ValueError):
+            return None, None
+        snapshot = getattr(ledger, "snapshot", None)
+        if not callable(snapshot):
+            return None, None
+        scores = []
+        for record in snapshot():
+            if not isinstance(record, dict):
+                continue
+            try:
+                if int(record.get("source_place_id", -1) or -1) != source_place_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if record.get("destination_place_id") is None:
+                continue
+            if record.get("exploration_suppressed"):
+                continue
+            try:
+                score = float(record.get("semantic_score"))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(score):
+                scores.append(score)
+        scores.sort(reverse=True)
+        if not scores:
+            return None, None
+        return scores[0], (scores[1] if len(scores) > 1 else None)
+
     def _portal_semantic_heading_override(
-        self, source, route_heading_delta, now=0.0,
+        self, source, route_heading_delta, now=0.0, runner_up_score=None,
     ):
         """Authorize one high-value doorway to be entered after a turn.
 
@@ -421,12 +488,35 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
             return None
         try:
             min_score = float(
-                getattr(self, "heading_semantic_override_min_score", 0.5)
+                getattr(self, "heading_semantic_override_min_score", 0.15)
             )
         except (TypeError, ValueError):
-            min_score = 0.5
+            min_score = 0.15
         if score < min_score:
             return None
+        try:
+            min_margin = float(
+                getattr(self, "heading_semantic_override_min_margin", 0.40)
+            )
+        except (TypeError, ValueError):
+            min_margin = 0.40
+        try:
+            runner_up = -1.0 if runner_up_score is None else float(runner_up_score)
+        except (TypeError, ValueError):
+            runner_up = -1.0
+        if score - runner_up < min_margin:
+            return None
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "portal_heading_margin",
+                portal_id=int(portal_id),
+                score=round(score, 4),
+                runner_up=round(runner_up, 4),
+                margin=round(score - runner_up, 4),
+                required=round(min_margin, 4),
+                attempt=int(record.get("heading_override_count", 0) or 0),
+            )
         attempts = int(record.get("heading_override_count", 0) or 0)
         # One authorized turn needs several decision passes to materialize a
         # route (fresh map/TF, Navfn, graph transaction).  Counting every pass
@@ -498,6 +588,10 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         self.last_portal_hard_rejected = 0
 
         rejected_notes = []
+        # Same-junction score ranking, used by the "clearly better" heading
+        # override.  A room that only wins a tie is not worth a U-turn.
+        room_best, room_second = self._portal_room_score_ranking(
+            getattr(self, "current_physical_place_id", None))
         preferred_portal_id = getattr(self, "graph_route_portal_id", None)
         try:
             preferred_portal_id = (
@@ -610,13 +704,40 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 (endpoint_row, endpoint_col),
                 (portal_x, portal_y),
             )
+            room_score = None
+            ledger = getattr(self, "portal_hypothesis_ledger", None)
+            hypothesis_key = getattr(source, "hypothesis_id", None)
+            if ledger is not None and hypothesis_key is not None:
+                record = ledger.get(hypothesis_key) or {}
+                try:
+                    room_score = float(record.get("semantic_score"))
+                except (TypeError, ValueError):
+                    room_score = None
+            if self.portal_turn_needs_positive_room(
+                    route_heading_delta, room_score):
+                # Going straight needs no evidence; turning into a room does.
+                self.last_portal_negative_turn_rejected = int(
+                    getattr(self, "last_portal_negative_turn_rejected", 0)) + 1
+                rejected_notes.append(self._note_portal_deferral(
+                    hypothesis_key, "negative_room_turn", request.now,
+                    heading_delta_deg=math.degrees(route_heading_delta),
+                    semantic_score=room_score,
+                ))
+                continue
             if (
                 request.max_heading_delta is not None
                 and route_heading_delta is not None
                 and route_heading_delta > request.max_heading_delta
             ):
+                runner_up = None
+                if room_score is not None and room_best is not None:
+                    runner_up = (
+                        room_second
+                        if abs(room_score - room_best) < 1e-9 else room_best
+                    )
                 override = self._portal_semantic_heading_override(
                     source, route_heading_delta, request.now,
+                    runner_up_score=runner_up,
                 )
                 if override is None:
                     self.last_portal_heading_rejected += 1

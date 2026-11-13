@@ -1353,6 +1353,29 @@ class GPBranchFrontierMixin:
             return True
         return False
 
+    def portal_authentication_inside_settled(self, auth, now):
+        """Return True once the robot dwelled at the inside point long enough.
+
+        The dwell is stationary and faces into the room, so detections are
+        stable and inside the room-view core.  Zero disables it.
+        """
+        try:
+            settle = float(getattr(self, "room_view_settle_seconds", 1.0) or 0.0)
+        except (TypeError, ValueError):
+            settle = 1.0
+        if settle <= 0.0:
+            return True
+        try:
+            since = getattr(auth, "inside_since", None)
+            if since is None:
+                # An inside state without a stamp is a resumed/legacy probe;
+                # do not stall it.  A fresh arrival stamps inside_since in the
+                # state transition below.
+                return True
+            return (float(now) - float(since)) >= settle
+        except (TypeError, ValueError):
+            return True
+
     def _update_portal_authentication_from_map(
         self, tree, message, map_context, frontier_proposals, map_yaw, now,
     ):
@@ -1369,7 +1392,11 @@ class GPBranchFrontierMixin:
         if auth.state in ("entering", "inside"):
             if auth.state == "entering":
                 auth.update_entry((pose.x, pose.y))
+                if auth.state == "inside":
+                    auth.inside_since = float(now)
             if auth.state == "inside":
+                if not self.portal_authentication_inside_settled(auth, now):
+                    return
                 from global_frontier_grid import frontier_mask
                 grid_frontiers = frontier_mask(
                     map_context.known_free, map_context.unknown,

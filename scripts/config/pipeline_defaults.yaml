@@ -533,7 +533,21 @@ GLOBAL_FRONTIER_HEADING_HARD_LIMIT_DEG: 115.0
 # entered after an in-place pre-route turn. Low-value doorways keep the bound,
 # so a merely unvisited room is never force-entered behind the robot.
 GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_ENABLED: true
-GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_SCORE: 0.5
+# Going straight needs no evidence.  Turning into a doorway beyond this angle
+# requires positive room evidence (>= MIN_SCORE), so a negative side room is
+# skipped while the corridor ahead keeps being explored (env04 mid junction:
+# west room is hydrant/negative, south is the corridor).
+GLOBAL_FRONTIER_ROOM_TURN_SOFT_LIMIT_DEG: 60.0
+# One positive environment term of the 4-term room vocabulary scores 0.182, so
+# 0.15 means "at least one positive term" (the lab room often only reveals a
+# chair from the doorway).  Absolute value alone is not enough: the best
+# doorway must also beat the runner-up by MIN_MARGIN, otherwise a tie buys a
+# turn.
+GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_SCORE: 0.15
+GLOBAL_FRONTIER_HEADING_SEMANTIC_OVERRIDE_MIN_MARGIN: 0.40
+# Dwell at the inside point before the U-turn so the detector sees the room
+# from a stable, inward-facing pose.  Kept below the 8-12 s auth budget.
+GLOBAL_FRONTIER_ROOM_SETTLE_SECONDS: 1.0
 # Bounded retries: after this many turn-in-place attempts for the same Portal
 # the override is withdrawn for the rest of the run and the doorway keeps its
 # normal deferral. Set 0 to disable the override entirely.

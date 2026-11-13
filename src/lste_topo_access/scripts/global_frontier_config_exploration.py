@@ -160,7 +160,18 @@ class GlobalFrontierExplorationConfigurationMixin:
             gp("~heading_semantic_override_enabled", True)
         ).strip().lower() in ("1", "true", "yes", "on")
         self.heading_semantic_override_min_score = max(
-            0.0, float(gp("~heading_semantic_override_min_score", 0.5))
+            0.0, float(gp("~heading_semantic_override_min_score", 0.15))
+        )
+        # Relative arm: the best doorway must also beat the runner-up by this
+        # margin, so a tie (or a merely-less-negative room) never buys a turn.
+        self.heading_semantic_override_min_margin = max(
+            0.0, float(gp("~heading_semantic_override_min_margin", 0.40))
+        )
+        # Going straight needs no evidence. Turning into a room beyond this
+        # angle requires the same positive room score, so a negative side room
+        # is skipped while the corridor ahead is still explored.
+        self.room_turn_soft_limit_deg = max(
+            0.0, min(115.0, float(gp("~room_turn_soft_limit_deg", 60.0)))
         )
         # Bounded: a failed in-place turn must not be retried forever.  Zero
         # attempts disables the override entirely.

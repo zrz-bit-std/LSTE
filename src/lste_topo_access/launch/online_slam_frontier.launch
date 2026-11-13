@@ -155,7 +155,10 @@
        exceed the heading bound and be entered after an in-place pre-route turn.
        The score gate keeps low-value rooms behind the same bound. -->
   <arg name="heading_semantic_override_enabled" default="true"/>
-  <arg name="heading_semantic_override_min_score" default="0.5"/>
+  <arg name="heading_semantic_override_min_score" default="0.15"/>
+  <arg name="heading_semantic_override_min_margin" default="0.40"/>
+  <arg name="room_turn_soft_limit_deg" default="60.0"/>
+  <arg name="room_view_settle_seconds" default="1.0"/>
   <arg name="heading_semantic_override_max_attempts" default="2"/>
   <arg name="heading_semantic_override_hold_seconds" default="8.0"/>
   <!-- Reuse the bridge's transition envelopes for successor selection. The
@@ -281,6 +284,9 @@
     <param name="heading_hard_limit_deg" value="$(arg heading_hard_limit_deg)"/>
     <param name="heading_semantic_override_enabled" value="$(arg heading_semantic_override_enabled)"/>
     <param name="heading_semantic_override_min_score" value="$(arg heading_semantic_override_min_score)"/>
+    <param name="heading_semantic_override_min_margin" value="$(arg heading_semantic_override_min_margin)"/>
+    <param name="room_turn_soft_limit_deg" value="$(arg room_turn_soft_limit_deg)"/>
+    <param name="room_view_settle_seconds" value="$(arg room_view_settle_seconds)"/>
     <param name="heading_semantic_override_max_attempts" value="$(arg heading_semantic_override_max_attempts)"/>
     <param name="heading_semantic_override_hold_seconds" value="$(arg heading_semantic_override_hold_seconds)"/>
     <param name="successor_smooth_heading_limit_deg" value="$(arg successor_smooth_heading_limit_deg)"/>
