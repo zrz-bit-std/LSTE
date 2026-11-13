@@ -5,6 +5,7 @@ are kept together so the state transition is auditable and easy to change.
 """
 
 import math
+import time
 
 import numpy as np
 
@@ -12,6 +13,33 @@ from clock_provider import now_for
 
 
 class GlobalFrontierObservationDepartureMixin:
+
+    def downgrade_departure_gate_requirement(self, reason):
+        """Let a pending departure fall back when its portal route is gone."""
+        transaction = getattr(self, "place_departure", None)
+        downgrade = getattr(transaction, "allow_map_evidence_fallback", None)
+        if not callable(downgrade):
+            return False
+        return bool(downgrade(reason))
+
+    def sync_departure_gate_requirement(self, selection):
+        """Arm the gate proof only while the selected route is a Portal edge.
+
+        The transaction describes the route that is actually executing.  A
+        selection that is no longer a portal transition must not leave a
+        pending departure waiting for a crossing proof that route cannot
+        produce.
+        """
+        transaction = getattr(self, "place_departure", None)
+        if transaction is None or not getattr(transaction, "active", False):
+            return False
+        if str(getattr(selection, "route_kind", "") or "") == (
+                "portal_transition"):
+            require = getattr(
+                transaction, "require_physical_gate_crossing", None)
+            return bool(require()) if callable(require) else False
+        return self.downgrade_departure_gate_requirement(
+            "departure_route_not_portal")
 
     def prepare_place_departure(
         self, message, components, known_free, robot_map, place_hops,
@@ -259,20 +287,56 @@ class GlobalFrontierObservationDepartureMixin:
             getattr(transaction, "requires_physical_gate_crossing", False)
             and not getattr(transaction, "physical_gate_crossing_confirmed", False)
         ):
-            if not getattr(transaction, "gate_crossing_wait_reported", False):
-                transaction.gate_crossing_wait_reported = True
+            now_wall = time.monotonic()
+            started = getattr(transaction, "gate_wait_started_wall", None)
+            if started is None:
+                transaction.gate_wait_started_wall = now_wall
+                started = now_wall
+            try:
+                timeout = max(0.0, float(getattr(
+                    self, "place_departure_gate_wait_timeout", 8.0,
+                ) or 0.0))
+            except (TypeError, ValueError):
+                timeout = 8.0
+            elapsed = now_wall - float(started)
+            portal_transaction = getattr(self, "portal_transaction", None)
+            portal_active = bool(
+                portal_transaction is not None
+                and getattr(portal_transaction, "active", False))
+            # While a portal transaction is executing it can still produce the
+            # certificate; a normal approach routinely takes longer than this
+            # budget.  Only a proof that has no owner left may be bypassed
+            # (the abort/replacement paths downgrade the requirement first).
+            if timeout <= 0.0 or elapsed < timeout or portal_active:
+                if not getattr(transaction, "gate_crossing_wait_reported", False):
+                    transaction.gate_crossing_wait_reported = True
+                    self.publish_status(
+                        "frontier_place_departure_waiting",
+                        region_id=int(source_region["id"]),
+                        route_id=int(self.active_route_id),
+                        departure_basis=transaction.basis,
+                        reason="waiting_for_physical_portal_crossing",
+                        source=[
+                            round(float(transaction.anchor_map[0]), 3),
+                            round(float(transaction.anchor_map[1]), 3),
+                        ],
+                    )
+                return None
+            # The certificate never arrived: the portal route that armed this
+            # transaction is gone.  Fall through to the same map evidence
+            # ordinary departures use; the commit still requires the robot to
+            # be outside the source Place, so a slow real crossing is safe.
+            if not getattr(transaction, "gate_fallback_reported", False):
+                transaction.gate_fallback_reported = True
                 self.publish_status(
-                    "frontier_place_departure_waiting",
+                    "frontier_place_departure_gate_fallback",
                     region_id=int(source_region["id"]),
                     route_id=int(self.active_route_id),
                     departure_basis=transaction.basis,
-                    reason="waiting_for_physical_portal_crossing",
-                    source=[
-                        round(float(transaction.anchor_map[0]), 3),
-                        round(float(transaction.anchor_map[1]), 3),
-                    ],
+                    waited_seconds=round(elapsed, 2),
+                    timeout_seconds=timeout,
+                    reason="physical_gate_crossing_timeout",
                 )
-            return None
         if transit_only:
             # The physical gate proof is sufficient for a closed room.  Its
             # observation footprint is intentionally irrelevant: transit is
@@ -312,6 +376,44 @@ class GlobalFrontierObservationDepartureMixin:
             snapshot.robot_map[0],
             snapshot.robot_map[1],
         )
+        robot_outside_mask = False
+        mask = getattr(self, "current_place_scope_mask", None)
+        if (robot_cell is not None
+                and mask is not None
+                and getattr(self, "current_place_scope_valid", False)
+                and getattr(self, "current_place_scope_id", None)
+                == int(transaction.region_id)):
+            try:
+                robot_outside_mask = not bool(mask[robot_cell])
+            except (IndexError, TypeError):
+                robot_outside_mask = False
+        # A robot that merely stands in the doorway can fall outside the mask
+        # edge.  Require real translation away from the departure anchor so a
+        # gate standstill is never closed early.
+        mask_escape = max(0.75, float(getattr(
+            self, "place_departure_mask_escape_distance", 0.75) or 0.0))
+        if robot_outside_mask and travel_distance >= mask_escape:
+            # Ownership is already inconsistent: the robot stands outside the
+            # source Place mask, so every local route would leak at its first
+            # point.  This is the same physical fact as leaving the footprint.
+            self.publish_status(
+                "frontier_place_boundary_crossed",
+                region_id=int(source_region["id"]),
+                route_id=int(self.active_route_id),
+                departure_basis=transaction.basis,
+                source=[
+                    round(float(transaction.anchor_map[0]), 3),
+                    round(float(transaction.anchor_map[1]), 3),
+                ],
+                travel_distance=round(travel_distance, 3),
+                required_travel_distance=round(required_travel, 3),
+                robot=[
+                    round(float(snapshot.robot_map[0]), 3),
+                    round(float(snapshot.robot_map[1]), 3),
+                ],
+                evidence="outside_place_scope_mask",
+            )
+            return self.commit_active_place_departure()
         if not anchor_cells or robot_cell is None:
             return None
         footprint = self.observation_footprint_from_anchors(

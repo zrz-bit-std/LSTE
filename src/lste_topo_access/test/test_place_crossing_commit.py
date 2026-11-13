@@ -3,6 +3,7 @@
 
 import ast
 import math
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -26,7 +27,7 @@ def load_crossing_commit():
         if isinstance(node, ast.FunctionDef)
         and node.name == "commit_departed_place_after_boundary_crossing"
     )
-    namespace = {"math": math}
+    namespace = {"math": math, "time": time}
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(SOURCE), "exec"), namespace)
     return namespace["commit_departed_place_after_boundary_crossing"]
 

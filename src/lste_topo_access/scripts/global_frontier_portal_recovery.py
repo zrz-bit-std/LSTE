@@ -72,6 +72,10 @@ class GlobalFrontierPortalRecoveryMixin:
                     reason=transition.last_reason,
                 )
                 transaction.finish("portal_transaction_aborted")
+                downgrade = getattr(
+                    self, "downgrade_departure_gate_requirement", None)
+                if callable(downgrade):
+                    downgrade("portal_transaction_aborted")
         self.publish_status(
             "portal_transition_recovery_abandoned",
             failed_route_id=int(retry.failed_route_id),

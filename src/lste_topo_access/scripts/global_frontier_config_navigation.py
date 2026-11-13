@@ -170,6 +170,12 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.planning_preempt_max_stale_seconds = max(
             0.0, float(gp("~planning_preempt_max_stale_seconds", 5.0))
         )
+        # A departure waits for a certified physical gate crossing only while
+        # the portal route that armed it is still executing.  After this wall
+        # budget the ordinary map evidence may decide instead.
+        self.place_departure_gate_wait_timeout = max(
+            0.0, float(gp("~place_departure_gate_wait_timeout", 8.0))
+        )
         # A selected endpoint that reveals zero new map information and whose
         # region has produced no gain for this long is a dead end.  The normal
         # no-gain dwell retains the active route until its terminal, but the

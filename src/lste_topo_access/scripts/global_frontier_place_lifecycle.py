@@ -45,6 +45,9 @@ class PlaceDepartureTransaction:
         self.requires_physical_gate_crossing = False
         self.physical_gate_crossing_confirmed = False
         self.gate_crossing_wait_reported = False
+        self.gate_wait_started_wall = None
+        self.gate_fallback_reported = False
+        self.map_fallback_reason = ""
         # A completed place may be crossed as a graph corridor on the way to
         # an unexplored branch.  That is transit, not a second observation
         # lifecycle, so its commit must never call ``memory.close`` again.
@@ -58,6 +61,27 @@ class PlaceDepartureTransaction:
         if not self.active:
             return False
         self.requires_physical_gate_crossing = True
+        return True
+
+    def allow_map_evidence_fallback(self, reason="portal_route_lost"):
+        """Downgrade a pending gate proof to the ordinary map evidence.
+
+        A departure can outlive the portal route that armed its physical
+        gate-crossing proof: the transaction is aborted at the destination
+        standoff, or the route is replaced by an ordinary frontier.  Waiting
+        for a proof that can no longer arrive freezes the source Place, and
+        every local route then starts outside its mask (env04 runs
+        20261113_193744, 20261112_003850, ...).  Keep the same transaction and
+        let the footprint / mask evidence decide instead.
+        """
+        if not self.active or self.physical_gate_crossing_confirmed:
+            return False
+        if not self.requires_physical_gate_crossing:
+            return False
+        self.requires_physical_gate_crossing = False
+        self.gate_crossing_wait_reported = False
+        self.gate_wait_started_wall = None
+        self.map_fallback_reason = str(reason or "portal_route_lost")
         return True
 
     def suspend_local_work_on_commit(self):

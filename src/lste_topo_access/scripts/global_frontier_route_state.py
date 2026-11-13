@@ -722,6 +722,10 @@ class GlobalFrontierRouteStateMixin:
                         reason=transition.last_reason,
                     )
                     transaction.finish("portal_transaction_aborted")
+                    downgrade = getattr(
+                        self, "downgrade_departure_gate_requirement", None)
+                    if callable(downgrade):
+                        downgrade("portal_transaction_aborted")
                     self.portal_transaction_route_rebind_pending = False
             elif transaction.state == "destination_standoff":
                 # A standoff that never proved the destination side is not a
@@ -742,6 +746,10 @@ class GlobalFrontierRouteStateMixin:
                     finished = transaction.finish(
                         "portal_transaction_closed_before_retry"
                     )
+                    downgrade = getattr(
+                        self, "downgrade_departure_gate_requirement", None)
+                    if callable(downgrade):
+                        downgrade("portal_transaction_closed_before_retry")
                     if finished is not None:
                         self.publish_status(
                             "portal_transaction_finished",

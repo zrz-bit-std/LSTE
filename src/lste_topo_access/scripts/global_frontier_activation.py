@@ -96,13 +96,25 @@ class GlobalFrontierActivationMixin:
             departed_place is not None
             and selection.route_kind == "portal_transition"
         ):
-            self.place_departure.require_physical_gate_crossing()
+            sync_gate = getattr(
+                self, "sync_departure_gate_requirement", None)
+            if callable(sync_gate):
+                sync_gate(selection)
+            else:
+                self.place_departure.require_physical_gate_crossing()
             if (
                 getattr(self, "branch_first_enabled", False)
                 and getattr(selection, "graph_action_reason", "")
                 == "certified_portal_branch_to_unobserved_place"
             ):
                 self.place_departure.suspend_local_work_on_commit()
+        elif selection.route_kind != "portal_transition":
+            # A pending departure must not keep a gate proof that the route
+            # now being executed can never produce.
+            sync_gate = getattr(
+                self, "sync_departure_gate_requirement", None)
+            if callable(sync_gate):
+                sync_gate(selection)
         region = None
         if (
             selection.route_kind != "portal_transition"
