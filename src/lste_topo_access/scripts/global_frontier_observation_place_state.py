@@ -1,6 +1,7 @@
 """Persistent place and direct-target claim state derived from one map snapshot."""
 
 import math
+import time
 
 import numpy as np
 
@@ -142,6 +143,8 @@ class GlobalFrontierObservationPlaceStateMixin:
         self.target_region_claim_request_id = 0
         self.target_region_claim_waiting_reported = False
         self.target_region_claim_bound_reported = False
+        self.target_region_claim_wait_since_wall = None
+        self.target_region_claim_bound_wall = None
         self.target_reinspection_pending = False
         self.publish_status(
             "target_region_claim_released",
@@ -154,6 +157,70 @@ class GlobalFrontierObservationPlaceStateMixin:
                 }
             ),
         )
+
+    def expire_stale_target_observation_work(self, now):
+        """Release target work whose track died without a completion event.
+
+        Called once per planning snapshot, before the region claim refresh, so
+        a stale obligation cannot keep the claim (and the Place) alive.
+        """
+        work = getattr(self, "target_observation_work", None)
+        if work is None:
+            return []
+        try:
+            timeout = float(
+                getattr(self, "target_observation_timeout", 30.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            timeout = 30.0
+        if timeout <= 0.0:
+            return []
+        belief = getattr(self, "target_belief", None)
+        evidence = getattr(belief, "evidence", None)
+        released = []
+        for place_id in work.pending_place_ids():
+            live = ()
+            if callable(evidence):
+                record = evidence(place_id)
+                if isinstance(record, dict):
+                    live = tuple(record.get("track_ids") or ())
+            released.extend(work.expire_unobserved(
+                work.task_version, place_id, now=now, timeout=timeout,
+                live_track_ids=live,
+            ))
+        publish = getattr(self, "publish_status", None)
+        for record in released:
+            if not callable(publish):
+                continue
+            publish(
+                "target_observation_work_released",
+                place_id=int(record["place_id"]),
+                target_track_id=record.get("latest_track_id") or None,
+                target_hits=int(record.get("target_hits", 0) or 0),
+                last_observed_at=record.get("last_observed_at"),
+                reason=record.get("completion_reason"),
+                work=record,
+            )
+        return released
+
+    def _target_region_claim_wall_expired(self, now_wall=None):
+        """Return whether the target-room claim outlived its wall budget."""
+        if not getattr(self, "target_region_claim_active", False):
+            return False
+        bound = getattr(self, "target_region_claim_bound_wall", None)
+        if bound is None:
+            return False
+        try:
+            timeout = max(15.0, float(
+                getattr(self, "target_region_claim_wall_timeout", 60.0) or 60.0
+            ))
+        except (TypeError, ValueError):
+            timeout = 60.0
+        now_wall = time.monotonic() if now_wall is None else float(now_wall)
+        try:
+            return (now_wall - float(bound)) >= timeout
+        except (TypeError, ValueError):
+            return False
 
     def refresh_target_region_claim(
         self, message, components, known_free, robot_map,
@@ -186,6 +253,10 @@ class GlobalFrontierObservationPlaceStateMixin:
             return False
         previous = self.target_region_claim_component
         self.target_region_claim_component = copy_component_evidence(component)
+        if getattr(self, "target_region_claim_bound_wall", None) is None:
+            # Stamp at bind time.  The wait clock used to be armed only inside
+            # the release helper, which every early selector wait skips.
+            self.target_region_claim_bound_wall = time.monotonic()
         # Component labels belong to the current SLAM snapshot.  A changed
         # label is therefore a re-projection of the same physical claim, not
         # a new semantic event.  Emit one acquisition event per claim and keep

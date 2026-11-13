@@ -70,6 +70,12 @@ class GlobalFrontierTerminalValidationMixin:
             identity["route_id"],
             reason,
         )
+        # The callback already flipped the cooperative preempt flag for this
+        # terminal.  A rejected terminal never reaches the lifecycle clear, so
+        # release the flag here or every future snapshot aborts in bfs().
+        clear_preempt = getattr(self, "clear_planning_preempt", None)
+        if callable(clear_preempt):
+            clear_preempt()
         return None
 
     @staticmethod

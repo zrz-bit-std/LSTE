@@ -158,6 +158,18 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.room_view_settle_seconds = max(
             0.0, min(5.0, float(gp("~room_view_settle_seconds", 1.0)))
         )
+        # A target observation obligation must expire once its visual track
+        # dies, otherwise it owns the Place forever (env04 east-lab parking:
+        # one hit at sim 2660, then 340 s of silence with no live track).
+        self.target_observation_timeout = max(
+            0.0, float(gp("~target_observation_timeout", 30.0))
+        )
+        # A cooperative preempt only invalidates one in-flight pass.  A flag
+        # whose terminal never reached the lifecycle must not silence the
+        # planner (runs 20261112_220714 / 20261113_154448 / 183353).
+        self.planning_preempt_max_stale_seconds = max(
+            0.0, float(gp("~planning_preempt_max_stale_seconds", 5.0))
+        )
         # A selected endpoint that reveals zero new map information and whose
         # region has produced no gain for this long is a dead end.  The normal
         # no-gain dwell retains the active route until its terminal, but the

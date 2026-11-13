@@ -101,5 +101,83 @@ class TargetObservationWorkTest(unittest.TestCase):
         self.assertEqual(ledger.snapshot(), [])
 
 
+class UnobservedWorkExpiryTest(unittest.TestCase):
+    """A dead track must not own the Place forever (env04 east-lab parking)."""
+
+    def test_work_expires_only_after_the_timeout(self):
+        ledger = TargetObservationWorkLedger("task-v1")
+        ledger.observe_target(
+            "task-v1", 4, labels=("cup",), track_id="track-a", now=10.0,
+        )
+        self.assertEqual(
+            ledger.expire_unobserved("task-v1", now=39.9, timeout=30.0), []
+        )
+        self.assertTrue(ledger.has_pending(4))
+        released = ledger.expire_unobserved(
+            "task-v1", now=40.0, timeout=30.0)
+        self.assertEqual([item["place_id"] for item in released], [4])
+        self.assertEqual(ledger.evidence(4)["state"], WORK_RELEASED)
+        self.assertEqual(
+            ledger.evidence(4)["completion_reason"], "observation_timeout")
+        self.assertFalse(ledger.has_pending(4))
+
+    def test_a_live_track_never_expires(self):
+        ledger = TargetObservationWorkLedger("task-v1")
+        ledger.observe_target(
+            "task-v1", 4, labels=("cup",), track_id="track-a", now=10.0,
+        )
+        self.assertEqual(
+            ledger.expire_unobserved(
+                "task-v1", now=999.0, timeout=30.0,
+                live_track_ids=("track-a",),
+            ),
+            [],
+        )
+        self.assertTrue(ledger.has_pending(4))
+
+    def test_expiry_releases_only_the_places_without_a_live_track(self):
+        ledger = TargetObservationWorkLedger("task-v1")
+        ledger.observe_target(
+            "task-v1", 4, labels=("cup",), track_id="track-a", now=10.0,
+        )
+        ledger.observe_target(
+            "task-v1", 5, labels=("cup",), track_id="track-b", now=10.0,
+        )
+        released = ledger.expire_unobserved(
+            "task-v1", now=100.0, timeout=30.0,
+            live_track_ids=("track-b",),
+        )
+        self.assertEqual([item["place_id"] for item in released], [4])
+        self.assertTrue(ledger.has_pending(5))
+
+    def test_expired_work_reopens_on_new_target_evidence(self):
+        ledger = TargetObservationWorkLedger("task-v1")
+        ledger.observe_target(
+            "task-v1", 4, labels=("cup",), track_id="track-a", now=1.0,
+        )
+        ledger.expire_unobserved("task-v1", now=100.0, timeout=30.0)
+        reopened = ledger.observe_target(
+            "task-v1", 4, labels=("cup",), track_id="track-b", now=101.0,
+        )
+        self.assertEqual(reopened["state"], WORK_UNRESOLVED)
+        self.assertTrue(ledger.has_pending(4))
+
+    def test_zero_timeout_disables_expiry(self):
+        ledger = TargetObservationWorkLedger("task-v1")
+        ledger.observe_target("task-v1", 4, labels=("cup",), now=1.0)
+        self.assertEqual(
+            ledger.expire_unobserved("task-v1", now=999.0, timeout=0.0), []
+        )
+        self.assertTrue(ledger.has_pending(4))
+
+    def test_expiry_respects_the_task_epoch(self):
+        ledger = TargetObservationWorkLedger("task-v1")
+        ledger.observe_target("task-v1", 4, labels=("cup",), now=1.0)
+        self.assertEqual(
+            ledger.expire_unobserved("task-v2", now=999.0, timeout=30.0), []
+        )
+        self.assertTrue(ledger.has_pending(4))
+
+
 if __name__ == "__main__":
     unittest.main()

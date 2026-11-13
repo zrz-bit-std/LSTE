@@ -104,12 +104,57 @@ class GlobalFrontierPlanningRuntimeMixin:
         cooperative checkpoint.
         """
         self.planning_preempt_requested = True
+        self.planning_preempt_requested_wall = time.monotonic()
         self.planning_preempt_reason = str(reason or "execution_boundary")
 
     def clear_planning_preempt(self):
         """Clear a callback invalidation after its queued fact is applied."""
         self.planning_preempt_requested = False
+        self.planning_preempt_requested_wall = None
         self.planning_preempt_reason = ""
+
+    def expire_stale_planning_preempt(self, now_wall=None):
+        """Clear a preempt whose terminal never reached the lifecycle owner.
+
+        ``request_planning_preempt`` only flips a flag; the lifecycle tick
+        clears it after applying the terminal.  If that terminal is dropped the
+        flag stays set, ``bfs`` aborts every snapshot and the planner goes
+        silent (runs 20261112_220714, 20261113_154448, 20261113_183353 kept
+        ``preempt_requested=true`` for 11-35 min).  A preempt only has to
+        invalidate the pass that was running when the terminal arrived.
+        """
+        if not getattr(self, "planning_preempt_requested", False):
+            return False
+        started = getattr(self, "planning_preempt_requested_wall", None)
+        if started is None:
+            self.planning_preempt_requested_wall = time.monotonic()
+            return False
+        try:
+            timeout = float(
+                getattr(self, "planning_preempt_max_stale_seconds", 5.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            timeout = 5.0
+        if timeout <= 0.0:
+            return False
+        now_wall = time.monotonic() if now_wall is None else float(now_wall)
+        try:
+            age = now_wall - float(started)
+        except (TypeError, ValueError):
+            return False
+        if age < timeout:
+            return False
+        reason = str(getattr(self, "planning_preempt_reason", "") or "")
+        self.clear_planning_preempt()
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "planning_preempt_expired",
+                reason=reason,
+                age_seconds=round(age, 2),
+                timeout_seconds=timeout,
+            )
+        return True
 
     def _clear_planning_preempt_if_drained(self):
         """Clear terminal invalidation only after its ingress batch is drained."""
@@ -173,6 +218,10 @@ class GlobalFrontierPlanningRuntimeMixin:
             if drain_terminals is not None:
                 drain_terminals()
             self._clear_planning_preempt_if_drained()
+            expire_preempt = getattr(
+                self, "expire_stale_planning_preempt", None)
+            if callable(expire_preempt):
+                expire_preempt()
             # A pending predecessor ACK gates every successor cycle and no
             # policy timer reaches it. Bound that wait in wall time before the
             # block below is evaluated.

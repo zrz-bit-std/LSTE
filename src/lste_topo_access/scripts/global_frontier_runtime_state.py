@@ -462,6 +462,8 @@ class GlobalFrontierRuntimeStateMixin:
         self.target_region_claim_request_id = 0
         self.target_region_claim_waiting_reported = False
         self.target_region_claim_bound_reported = False
+        self.target_region_claim_wait_since_wall = None
+        self.target_region_claim_bound_wall = None
         self.target_region_claim_cross_region_skips = 0
         # A target reinspection request is an event-level graph obligation.
         # Keep it independent from detector timing and from whether the
@@ -592,6 +594,7 @@ class GlobalFrontierRuntimeStateMixin:
         # is still running. The callback only flips this atomic fact; the
         # planner consumes it at safe enumeration boundaries.
         self.planning_preempt_requested = False
+        self.planning_preempt_requested_wall = None
         self.planning_preempt_reason = ""
         self.rejected_frontiers = collections.deque(maxlen=24)
         self.completed_frontiers = collections.deque(maxlen=self.completed_limit)

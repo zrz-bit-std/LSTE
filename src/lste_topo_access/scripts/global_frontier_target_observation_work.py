@@ -160,6 +160,64 @@ class TargetObservationWorkLedger:
             released.append(self._view(record))
         return released
 
+    def expire_unobserved(
+        self, task_version, place_id=None, *, now=0.0, timeout=30.0,
+        live_track_ids=(), reason="observation_timeout",
+    ):
+        """Release an obligation whose target has not been seen for ``timeout``.
+
+        A detector gap never *completes* the work, but a dead track must not
+        pin the Place forever.  env04 runs 20261113_183353 / 20261112_220714
+        parked in the target room with ``track_ids == []`` while this work
+        stayed unresolved, and every Place exit and cross-room candidate was
+        blocked by it.  The work is released (not completed), so a later
+        observation reopens it through ``observe_target``.
+        """
+        if str(task_version or "") != self._task_version:
+            return []
+        try:
+            timeout = float(timeout)
+        except (TypeError, ValueError):
+            return []
+        if timeout <= 0.0:
+            return []
+        live = {
+            str(track or "").strip()
+            for track in (live_track_ids or ())
+            if str(track or "").strip()
+        }
+        ids = (
+            [self._place_id(place_id)]
+            if place_id is not None
+            else sorted(self._records)
+        )
+        released = []
+        for current_id in ids:
+            record = self._records.get(current_id)
+            if record is None or record["state"] != WORK_UNRESOLVED:
+                continue
+            known = set(record["track_ids"])
+            latest = str(record.get("latest_track_id") or "")
+            if live and (live & known or latest in live):
+                # A live track is an active chase, never a stale obligation.
+                continue
+            last = record["last_observed_at"]
+            if last is None:
+                last = record["first_observed_at"]
+            if last is None:
+                continue
+            try:
+                age = float(now) - float(last)
+            except (TypeError, ValueError):
+                continue
+            if age < timeout:
+                continue
+            record["state"] = WORK_RELEASED
+            record["completed_at"] = float(now)
+            record["completion_reason"] = str(reason or "observation_timeout")
+            released.append(self._view(record))
+        return released
+
     def has_pending(self, place_id):
         """Return whether this Place still owns unresolved target work."""
         place_id = self._place_id(place_id)

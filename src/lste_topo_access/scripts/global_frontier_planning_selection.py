@@ -375,6 +375,17 @@ class GlobalFrontierPlanningSelectionMixin:
 
     def select_next_active_frontier(self, snapshot):
         """Choose a terminal successor after resolving cache and claim policy."""
+        # A held target-room claim filters out every candidate outside the
+        # claimed component.  Bound its wall clock here, before any early
+        # "wait for validation/materialization" return can skip the release.
+        if getattr(self, "target_region_claim_active", False):
+            wall_expired = getattr(
+                self, "_target_region_claim_wall_expired", None)
+            release_claim = getattr(
+                self, "_release_exhausted_target_region_claim", None)
+            if (callable(wall_expired) and callable(release_claim)
+                    and wall_expired()):
+                release_claim()
         snapshot_epoch = getattr(
             getattr(getattr(snapshot, "map_context", None), "components", None),
             "epoch",

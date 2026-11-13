@@ -185,6 +185,14 @@ class GlobalFrontierPlanningSnapshotMixin:
             wait_since = getattr(
                 self, "target_region_claim_wait_since_wall", None
             )
+            if wait_since is None:
+                # The clock starts at bind time, not at the first call that
+                # happens to reach this helper: every early selector wait
+                # (graph rehydration, Navfn, GP authentication) returns before
+                # this point and used to freeze the wait forever.
+                wait_since = getattr(
+                    self, "target_region_claim_bound_wall", None
+                )
             try:
                 wait_timeout = max(
                     15.0,
@@ -240,7 +248,7 @@ class GlobalFrontierPlanningSnapshotMixin:
         )
         self.clear_target_region_claim("no_executable_frontier_in_claimed_room")
 
-    def _place_exit_activation_ready(self, place_id):
+    def _place_exit_activation_ready(self, place_id, now=None):
         """Return whether the entered Place has finished its own local work."""
         items = getattr(self, "place_work_items", None)
         if items is None:
@@ -254,12 +262,15 @@ class GlobalFrontierPlanningSnapshotMixin:
         evidence = getattr(belief, "evidence", None)
         if callable(evidence):
             record = evidence(place_id)
-            if isinstance(record, dict) and str(record.get("state", "")) in (
-                "target_supported", "target_confirmed",
-            ):
+            if (isinstance(record, dict)
+                    and str(record.get("state", "")) in (
+                        "target_supported", "target_confirmed",
+                    )
+                    and self._target_belief_is_live(place_id, record, now)):
                 # A weakly detected target is not a reason to abandon the room
-                # before LOCKED; leaving is only legal when the Place carries
-                # no task evidence at all.
+                # before LOCKED, but only while the sighting is still alive.
+                # env04 run 20261113_183353 kept one 340 s old hit with no
+                # track, and that stale belief pinned the robot in the room.
                 return False
         auth = getattr(self, "active_portal_authentication", lambda: None)()
         if auth is not None:
@@ -297,6 +308,31 @@ class GlobalFrontierPlanningSnapshotMixin:
         # only runs from the no-candidate path and needs two consecutive such
         # cycles, so "no candidate" is the authoritative signal.
         return True
+
+    def _target_belief_is_live(self, place_id, record, now=None):
+        """Return whether target evidence still belongs to an active chase."""
+        if not isinstance(record, dict):
+            return False
+        if tuple(record.get("track_ids") or ()):
+            return True
+        try:
+            timeout = float(
+                getattr(self, "target_observation_timeout", 30.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            timeout = 30.0
+        if timeout <= 0.0:
+            return True
+        last = record.get("last_observed_at")
+        if last is None:
+            # Without a timestamp we cannot prove the sighting is stale, so
+            # keep the historical veto (synthetic/older belief records).
+            return True
+        try:
+            now = now_for(self) if now is None else float(now)
+            return (now - float(last)) < timeout
+        except (TypeError, ValueError):
+            return False
 
     def _activate_place_exit_if_ready(self):
         """Promote the door-owned exit obligation once the room is complete.
@@ -408,7 +444,7 @@ class GlobalFrontierPlanningSnapshotMixin:
                         reason="reverse_egress_not_materialized",
                     )
             return False
-        if not self._place_exit_activation_ready(place_id):
+        if not self._place_exit_activation_ready(place_id, now):
             self._place_exit_ready_key = None
             self._place_exit_ready_cycles = 0
             return False
@@ -1044,6 +1080,13 @@ class GlobalFrontierPlanningSnapshotMixin:
         ):
             return None
         self.record_current_place_visit(robot_map, now)
+        # A target track can die without a completion event.  Release that
+        # obligation before the claim refresh, otherwise it keeps the room
+        # claim alive forever (runs 20261113_183353 / 20261112_220714).
+        expire_target_work = getattr(
+            self, "expire_stale_target_observation_work", None)
+        if callable(expire_target_work):
+            expire_target_work(now)
         # A visual target is a higher-level mission fact than an individual
         # frontier route. Do not select unrestricted exploration until its
         # current map-derived room identity is available.
