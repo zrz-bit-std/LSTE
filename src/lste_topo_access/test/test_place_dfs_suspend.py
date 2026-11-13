@@ -140,5 +140,63 @@ class IncompleteReturnTest(unittest.TestCase):
         self.assertNotIn("place_dfs_suspended_incomplete", names)
 
 
+class RejectedReturnTest(unittest.TestCase):
+    """env04 20261113_154448: the room was done but the DFS was not "returning".
+
+    The physical return arrived 10 s after entry, before the door-owned exit was
+    dispatched, so ``return_to_parent`` refused (node state "exploring") and the
+    cursor stayed on the child.  The east doorway afterwards could not be
+    committed and became another "observed, not committed" Place.
+    """
+
+    def _fixture(self):
+        host = IncompleteReturnHarness()
+        host.place_dfs.bootstrap(1)
+        self.assertTrue(host.place_dfs.enter(1, 2, 2))
+        room = {
+            "node_id": 7, "branch_id": 4, "portal_id": 2,
+            "place_id": 2, "source_place_id": 1,
+        }
+        host.active_semantic_rooms = [room]
+        host.active_semantic_room = room
+        return host, room
+
+    def test_rejected_return_still_moves_the_cursor(self):
+        host, room = self._fixture()
+        self.assertEqual(host.place_dfs.nodes[2]["state"], "exploring")
+        host._commit_semantic_room_return(
+            room, 2, 1, 5.0, None, None, host.active_semantic_rooms,
+        )
+        self.assertEqual(host.place_dfs.stack, [1])
+        self.assertEqual(host.place_dfs.nodes[2]["state"], "suspended")
+        self.assertEqual(host.active_semantic_rooms, [])
+        self.assertIsNone(host.active_semantic_room)
+        names = [name for name, _fields in host.events]
+        self.assertIn("place_dfs_suspended_return_rejected", names)
+        self.assertNotIn("place_dfs_return_rejected", names)
+        self.assertNotIn("semantic_room_closed", names)
+
+    def test_wrong_edge_is_still_rejected(self):
+        host, room = self._fixture()
+        host._commit_semantic_room_return(
+            room, 99, 1, 5.0, None, None, host.active_semantic_rooms,
+        )
+        self.assertEqual(host.place_dfs.stack, [1, 2])
+        self.assertEqual(host.active_semantic_rooms, [room])
+        self.assertIs(host.active_semantic_room, room)
+        names = [name for name, _fields in host.events]
+        self.assertIn("place_dfs_return_rejected", names)
+        self.assertNotIn("place_dfs_suspended_return_rejected", names)
+
+    def test_next_doorway_commits_after_the_repair(self):
+        host, room = self._fixture()
+        host._commit_semantic_room_return(
+            room, 2, 1, 5.0, None, None, host.active_semantic_rooms,
+        )
+        # 20261113_154448: portal 7 into the east room was crossed 10 s later.
+        self.assertTrue(host.place_dfs.enter(1, 3, 7))
+        self.assertEqual(host.place_dfs.stack, [1, 3])
+
+
 if __name__ == "__main__":
     unittest.main()

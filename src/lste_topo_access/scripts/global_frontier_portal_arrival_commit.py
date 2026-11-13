@@ -210,9 +210,27 @@ class GlobalFrontierPortalArrivalCommitMixin:
             return
 
         if dfs is not None and not dfs.return_to_parent(room_place_id, destination_place_id, portal_id):
-            self.publish_status("place_dfs_return_rejected", place_id=room_place_id,
-                parent_place_id=int(destination_place_id), portal_id=int(portal_id),
-                reason="subtree_not_complete_or_wrong_return_edge", place_dfs=dfs.snapshot())
+            # The robot is physically back in the parent, but the DFS node never
+            # entered "returning" (its door-owned exit was not dispatched), so
+            # return_to_parent refuses.  Move the cursor with the same guarded
+            # suspend(); a genuinely wrong edge is still rejected below.
+            suspend = getattr(dfs, "suspend", None)
+            if not (callable(suspend) and suspend(
+                    room_place_id, destination_place_id, portal_id)):
+                self.publish_status("place_dfs_return_rejected", place_id=room_place_id,
+                    parent_place_id=int(destination_place_id), portal_id=int(portal_id),
+                    reason="subtree_not_complete_or_wrong_return_edge", place_dfs=dfs.snapshot())
+                return
+            if room_stack:
+                room_stack.pop()
+            self.active_semantic_room = room_stack[-1] if room_stack else None
+            self.publish_status(
+                "place_dfs_suspended_return_rejected",
+                place_id=room_place_id,
+                parent_place_id=int(destination_place_id),
+                portal_id=int(portal_id),
+                place_dfs=dfs.snapshot(),
+            )
             return
         self._settle_place_exit_on_return(
             exit_item, room_place_id, destination_place_id, portal_id, now,
