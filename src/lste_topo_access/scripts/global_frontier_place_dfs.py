@@ -14,6 +14,30 @@ class PlaceDfsTraversal:
                 portal_id=None, children=[], state="exploring"))
         return self.stack[-1] == place_id
 
+    def suspend(self, place_id, destination_id=None, portal_id=None):
+        """Follow a physical return without claiming the room is finished.
+
+        A reverse arrival can happen while the room still owns unresolved
+        WorkItems (env04 20261113_024720: Place 2 returned with WI 14 open).
+        The room must stay unfinished, but the DFS cursor has to follow the
+        robot back to its parent: otherwise every later ``enter()`` is rejected
+        by ``stack[-1] != source`` and no further Place can ever be committed.
+        """
+        place_id = int(place_id)
+        if not self.stack or self.stack[-1] != place_id:
+            return False
+        node = self.nodes.get(place_id)
+        if node is None:
+            return False
+        if destination_id is not None and int(node.get("parent_id") or 0) != int(destination_id):
+            return False
+        if portal_id is not None and int(node.get("portal_id") or 0) != int(portal_id):
+            return False
+        node["state"] = "suspended"
+        node["physical_exit"] = "incomplete_return"
+        self.stack.pop()
+        return True
+
     def enter(self, source_id, destination_id, portal_id):
         source_id, destination_id, portal_id = map(int, (source_id, destination_id, portal_id))
         if not self.bootstrap(source_id) or destination_id in self.stack:

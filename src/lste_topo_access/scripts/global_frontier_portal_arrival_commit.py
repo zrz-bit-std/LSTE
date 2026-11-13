@@ -188,6 +188,25 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 ],
                 resume_required=True,
             )
+            # The robot is physically back in the parent.  Move the DFS cursor
+            # with it, but keep the room unfinished: its WorkItems, the pending
+            # resume and the Portal stay untouched, so it can be entered again
+            # to finish the work.  Leaving the cursor on the child froze every
+            # later enter() at ``stack[-1] != source``.
+            suspend = getattr(dfs, "suspend", None)
+            if callable(suspend) and suspend(
+                    room_place_id, destination_place_id, portal_id):
+                if room_stack:
+                    room_stack.pop()
+                self.active_semantic_room = room_stack[-1] if room_stack else None
+                self.publish_status(
+                    "place_dfs_suspended_incomplete",
+                    place_id=room_place_id,
+                    parent_place_id=int(destination_place_id),
+                    portal_id=int(portal_id),
+                    unresolved_work_item_ids=unresolved_ids,
+                    place_dfs=dfs.snapshot(),
+                )
             return
 
         if dfs is not None and not dfs.return_to_parent(room_place_id, destination_place_id, portal_id):
