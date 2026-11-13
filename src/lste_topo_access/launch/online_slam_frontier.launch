@@ -93,6 +93,9 @@
   <arg name="portal_authentication_retry_limit" default="2"/>
   <arg name="portal_authentication_handoff_budget" default="30.0"/>
   <arg name="portal_authentication_retry_cooldown" default="5.0"/>
+  <arg name="room_view_core_deg" default="45.0"/>
+  <arg name="room_view_arc_deg" default="90.0"/>
+  <arg name="room_view_min_depth" default="-0.3"/>
   <!-- A zero-information endpoint that stays gainless this long is a dead
        end; fail its region and force a different obligation instead of
        retaining the route until a terminal that may never arrive. -->
@@ -253,6 +256,9 @@
     <param name="portal_authentication_retry_limit" value="$(arg portal_authentication_retry_limit)"/>
     <param name="portal_authentication_handoff_budget" value="$(arg portal_authentication_handoff_budget)"/>
     <param name="portal_authentication_retry_cooldown" value="$(arg portal_authentication_retry_cooldown)"/>
+    <param name="room_view_core_deg" value="$(arg room_view_core_deg)"/>
+    <param name="room_view_arc_deg" value="$(arg room_view_arc_deg)"/>
+    <param name="room_view_min_depth" value="$(arg room_view_min_depth)"/>
     <param name="zero_info_dead_end_timeout" value="$(arg zero_info_dead_end_timeout)"/>
     <param name="post_turn_stall_timeout" value="$(arg post_turn_stall_timeout)"/>
     <param name="odom_novel_cell_size" value="$(arg odom_novel_cell_size)"/>

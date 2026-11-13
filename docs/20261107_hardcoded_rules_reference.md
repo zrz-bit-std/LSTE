@@ -218,6 +218,10 @@ move_base 层：`controller_frequency=20Hz`、`planner_frequency=0`（事件驱�
 | portal_authentication_retry_limit | 2（YAML `GLOBAL_FRONTIER_AUTH_RETRY_LIMIT`，0 = 关闭） | 认证动作失败 | 仅「执行失败」重试该门；门本身的判定（门内无未知区/不可通行/已知空间）仍一次判死 |
 | portal_authentication_handoff_budget | 30.0 s（`GLOBAL_FRONTIER_AUTH_HANDOFF_BUDGET`） | 认证 phase 已下发但控制器未接管 | 冻结物理进度窗口；超时按 `authentication_handoff_stall:<phase>` 释放路线并重试，不判门 |
 | portal_authentication_retry_cooldown | 5.0 s（`GLOBAL_FRONTIER_AUTH_RETRY_COOLDOWN`） | 同一门重试前静默 | 防止同一秒反复派发；与 `expire_unstartable`(30 s) 共同限界 |
+| room_view_core_deg | 45°（`GLOBAL_FRONTIER_ROOM_VIEW_CORE_DEG`） | 房间语义采样 | 相机与门内法线夹角 ≤ 此值才计入（`entering`/`inside`/`turning` 通用） |
+| room_view_arc_deg | 90°（`GLOBAL_FRONTIER_ROOM_VIEW_ARC_DEG`） | 房间语义采样 | 只朝「被选中的掉头方向」延伸到此角度：0–90° 是扫房间，>90° 已转过门平面、在看走廊 |
+| room_view_min_depth | −0.3 m（`GLOBAL_FRONTIER_ROOM_VIEW_MIN_DEPTH`） | `entering` 阶段 | 车未到门平面时不计语义，避免在路口隔门乱认 |
+| `returning` 阶段 | 永不采样 | 房间语义采样 | 回程镜头对着走廊，是 20261113_035731 东西房标签互换的来源 |
 | return_recovery 阶段1 / 阶段2 | retry≥3 且 ≥45s / retry≥6 且 ≥140s | 回程停滞 | return_recovery_blocked / final_blocked |
 | return 控制器失败上限 | ≥4 次 | 连续失败 | 直接 final_blocked |
 | settle_seconds | 1.0 s | 新 branch 后 | 静默稳定窗口 |

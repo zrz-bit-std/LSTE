@@ -136,6 +136,22 @@ class GlobalFrontierNavigationConfigurationMixin:
         self.portal_authentication_retry_cooldown = max(
             0.0, float(gp("~portal_authentication_retry_cooldown", 5.0))
         )
+        # Room semantics are attributed only while the camera still looks into
+        # the doorway's room.  The U-turn direction follows the inside-frontier
+        # split, so the sweep up to ``room_view_arc_deg`` on that side is real
+        # room content; past it the camera crosses the door plane and starts
+        # looking back down the corridor.
+        self.room_view_core_deg = max(
+            0.0, float(gp("~room_view_core_deg", 45.0))
+        )
+        self.room_view_arc_deg = max(
+            self.room_view_core_deg, float(gp("~room_view_arc_deg", 90.0))
+        )
+        # During ``entering`` only sample once the robot has reached the gate
+        # plane (signed depth along the doorway normal).
+        self.room_view_min_depth = float(
+            gp("~room_view_min_depth", -0.3)
+        )
         # A selected endpoint that reveals zero new map information and whose
         # region has produced no gain for this long is a dead end.  The normal
         # no-gain dwell retains the active route until its terminal, but the

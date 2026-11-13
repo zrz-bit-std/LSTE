@@ -204,6 +204,42 @@ class DoorwayAuthentication:
                     cooldown=float(cooldown))
         return True
 
+    def observes_room(self, yaw, core_deg=45.0, arc_deg=90.0):
+        """Return whether the camera still looks into this doorway's room.
+
+        The authentication U-turn direction is chosen from the inside-frontier
+        split, so the sweep from the room normal out to ~90 deg on that side is
+        genuine room content and must be kept.  Past 90 deg the camera crosses
+        the door plane and starts looking back down the corridor, where the
+        opposite room can be mistaken for this one (env04 20261113_035731: the
+        west room absorbed the east room's chairs and the east room absorbed the
+        west room's fire hydrant).
+        """
+        state = str(self.state or "")
+        if state not in ("entering", "inside", "turning"):
+            return False
+        try:
+            core = max(0.0, float(core_deg))
+            arc = max(core, float(arc_deg))
+        except (TypeError, ValueError):
+            core, arc = 45.0, 90.0
+        heading = self._entry_heading()
+        if heading is None or yaw is None:
+            # No measured section (or no pose yet): only the pre-turn states can
+            # be trusted to look into the doorway.
+            return state in ("entering", "inside")
+        try:
+            delta = math.degrees(_angle_delta(float(yaw), heading))
+        except (TypeError, ValueError):
+            return state in ("entering", "inside")
+        if abs(delta) <= core:
+            return True
+        if str(self.turn_direction) == "counterclockwise":
+            return core < delta <= arc
+        if str(self.turn_direction) == "clockwise":
+            return -arc <= delta < -core
+        return False
+
     def _event(self, name, **data):
         event = {"event": name, "branch_id": self.branch_id,
                  "node_id": self.node_id}

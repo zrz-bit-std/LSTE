@@ -281,18 +281,64 @@ class GlobalFrontierEventCallbacksMixin:
                     self.current_task_version, place_id, track_id,
                 )
 
+    def portal_room_observation_context(self, branch):
+        """Return the room-observation identity for one detection frame.
+
+        A frame belongs to a doorway only while the camera still looks into
+        that doorway's room.  ``returning`` and the second half of the U-turn
+        look back down the corridor, so attributing them let one room absorb
+        the opposite room's furniture (env04 20261113_035731).
+        """
+        if branch is None:
+            return None
+        identity = {
+            "node_id": int(getattr(branch, "node_id", 0) or 0),
+            "branch_id": int(getattr(branch, "branch_id", 0) or 0),
+            "state": str(getattr(branch, "state", "") or ""),
+        }
+        observes = getattr(branch, "observes_room", None)
+        if not callable(observes):
+            # Legacy or degenerate fixture: keep the historical capture rule.
+            return (identity
+                    if identity["state"] in ("turning", "returning") else None)
+        pose = getattr(self, "pose_odom", None)
+        try:
+            yaw = None if pose is None else float(pose.theta)
+        except (TypeError, ValueError):
+            yaw = None
+        try:
+            observed = bool(observes(
+                yaw,
+                float(getattr(self, "room_view_core_deg", 45.0)),
+                float(getattr(self, "room_view_arc_deg", 90.0)),
+            ))
+        except (TypeError, ValueError):
+            observed = identity["state"] in ("turning", "returning")
+        if not observed:
+            return None
+        if identity["state"] == "entering" and pose is not None:
+            # Do not sample the approach from the source side of the gate: the
+            # doorway is only a room view once the robot has reached it.
+            depth = None
+            try:
+                depth = branch.signed_depth((pose.x, pose.y))
+            except (AttributeError, TypeError, ValueError):
+                depth = None
+            if depth is not None:
+                try:
+                    if float(depth) < float(
+                            getattr(self, "room_view_min_depth", -0.3)):
+                        return None
+                except (TypeError, ValueError):
+                    pass
+        return identity
+
     def gather_detections(self, message):
         # Capture the Portal observation transaction at ROS ingress. Lifecycle
         # processing may occur after a branch boundary, which can misattribute
         # the frame if the active branch is looked up later.
         branch = getattr(self, "active_portal_authentication", lambda: None)()
-        context = None
-        if branch is not None and branch.state in ("turning", "returning"):
-            context = {
-                "node_id": int(branch.node_id),
-                "branch_id": int(branch.branch_id),
-                "state": str(branch.state),
-            }
+        context = self.portal_room_observation_context(branch)
         enqueue = getattr(self, "_enqueue_lifecycle_event", None)
         payload = (message, context)
         if callable(enqueue):
@@ -309,8 +355,8 @@ class GlobalFrontierEventCallbacksMixin:
         auth = getattr(self, "active_portal_authentication", lambda: None)()
         observation_tree = getattr(self, "gp_observation_tree", None)
         context = portal_observation_context
-        if context is None and auth is not None and auth.state in ("turning", "returning"):
-            context = {"node_id": auth.node_id, "branch_id": auth.branch_id, "state": auth.state}
+        if context is None:
+            context = self.portal_room_observation_context(auth)
         if context is not None and observation_tree is not None:
             detections = list(getattr(message, "target_dets", []) or []) + list(getattr(message, "env_dets", []) or [])
             observation_tree.observe(

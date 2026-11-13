@@ -42,6 +42,9 @@ start_exploration_windows() {
       portal_authentication_retry_limit:=${GLOBAL_FRONTIER_AUTH_RETRY_LIMIT:-2} \\
       portal_authentication_handoff_budget:=${GLOBAL_FRONTIER_AUTH_HANDOFF_BUDGET:-30.0} \\
       portal_authentication_retry_cooldown:=${GLOBAL_FRONTIER_AUTH_RETRY_COOLDOWN:-5.0} \\
+      room_view_core_deg:=${GLOBAL_FRONTIER_ROOM_VIEW_CORE_DEG:-45.0} \\
+      room_view_arc_deg:=${GLOBAL_FRONTIER_ROOM_VIEW_ARC_DEG:-90.0} \\
+      room_view_min_depth:=${GLOBAL_FRONTIER_ROOM_VIEW_MIN_DEPTH:--0.3} \\
       post_turn_stall_timeout:=$GLOBAL_FRONTIER_POST_TURN_STALL_TIMEOUT \\
       unreachable_grace:=$GLOBAL_FRONTIER_UNREACHABLE_GRACE rejected_timeout:=$GLOBAL_FRONTIER_REJECTED_TIMEOUT \\
       completed_radius:=$GLOBAL_FRONTIER_COMPLETED_RADIUS \\

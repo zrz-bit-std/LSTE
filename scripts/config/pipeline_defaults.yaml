@@ -457,6 +457,18 @@ GLOBAL_FRONTIER_AUTH_RETRY_LIMIT: 2
 # east doorway that way.
 GLOBAL_FRONTIER_AUTH_HANDOFF_BUDGET: 30.0
 GLOBAL_FRONTIER_AUTH_RETRY_COOLDOWN: 5.0
+# Room semantics are attributed only while the camera still looks into the
+# doorway's room.  The authentication U-turn direction follows the
+# inside-frontier split, so the sweep out to ARC degrees on that side is real
+# room content; past it the camera crosses the door plane and looks back down
+# the corridor (env04 20261113_035731 swapped two rooms' labels that way).
+# CORE degrees stay sampled on both sides because the entry pose may be off the
+# door normal by a few degrees.
+GLOBAL_FRONTIER_ROOM_VIEW_CORE_DEG: 45.0
+GLOBAL_FRONTIER_ROOM_VIEW_ARC_DEG: 90.0
+# During ``entering`` sample only once the robot reached this signed depth along
+# the doorway normal (negative = still on the source side).
+GLOBAL_FRONTIER_ROOM_VIEW_MIN_DEPTH: -0.3
 # After a TEB pre-route turn completes, this is the time allowed for the base
 # to physically launch. It uses odometry translation (not SLAM-map distance),
 # then hands the route back to the normal 20-second stall watchdog. This avoids
