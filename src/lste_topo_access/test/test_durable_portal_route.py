@@ -13,6 +13,10 @@ from global_frontier_durable_portal_route import (  # noqa: E402
     crossing_goal,
     project_record,
 )
+from global_frontier_portal_crossing import (  # noqa: E402
+    portal_crossing_endpoint_verified,
+    portal_required_direction_depth,
+)
 
 
 class DurablePortalRouteTest(unittest.TestCase):
@@ -65,6 +69,80 @@ class DurablePortalRouteTest(unittest.TestCase):
         )
 
         self.assertEqual(crossing_goal(projection, 0.6), (0.6, 0.0))
+
+
+class PortalGoalDepthPolicyTest(unittest.TestCase):
+    def test_straight_section_adds_teb_tolerance_and_margin(self):
+        record = {
+            "gp_authentication_state": "completed",
+            "gp_authentication_required_depth": 1.3,
+            "physical_gate": [0.0, 0.0],
+            "physical_destination": [0.0, 2.0],
+            "physical_bounds": [[-1.0, 0.0], [1.0, 0.0]],
+        }
+
+        depth = portal_required_direction_depth(
+            0.52, record, teb_goal_tolerance=0.5, margin=0.1,
+        )
+
+        self.assertAlmostEqual(depth, 1.9, places=6)
+
+    def test_diagonal_section_compensates_for_normal_angle(self):
+        record = {
+            "gp_authentication_state": "completed",
+            "gp_authentication_required_depth": 1.3,
+            "physical_gate": [12.555, -1.196],
+            "physical_destination": [12.4395, -2.9854],
+            "physical_bounds": [
+                [11.3499, -1.9086],
+                [13.7604, -0.4841],
+            ],
+        }
+
+        depth = portal_required_direction_depth(
+            0.52, record, teb_goal_tolerance=0.5, margin=0.1,
+        )
+
+        self.assertAlmostEqual(depth, 2.17, places=2)
+        self.assertGreater(depth, 1.9)
+
+    def test_goal_depth_without_section_bounds_stays_conservative(self):
+        record = {
+            "gp_authentication_state": "completed",
+            "gp_authentication_required_depth": 1.3,
+            "physical_gate": [0.0, 0.0],
+            "physical_destination": [0.0, 2.0],
+        }
+
+        depth = portal_required_direction_depth(
+            0.52, record, teb_goal_tolerance=0.5, margin=0.1,
+        )
+
+        self.assertAlmostEqual(depth, 1.9, places=6)
+
+    def test_non_portal_route_is_always_endpoint_eligible(self):
+        self.assertTrue(portal_crossing_endpoint_verified(
+            "frontier_endpoint", "destination_standoff",
+        ))
+
+    def test_portal_standoff_without_crossing_evidence_is_rejected(self):
+        self.assertFalse(portal_crossing_endpoint_verified(
+            "portal_transition", "destination_standoff",
+            crossing_observed=False,
+            evidence_verified=False,
+        ))
+
+    def test_portal_crossing_observed_or_verified_is_eligible(self):
+        self.assertTrue(portal_crossing_endpoint_verified(
+            "portal_transition", "destination_standoff",
+            crossing_observed=True,
+        ))
+        self.assertTrue(portal_crossing_endpoint_verified(
+            "portal_transition", "crossing_verified",
+        ))
+        self.assertTrue(portal_crossing_endpoint_verified(
+            "portal_transition", "place_commit",
+        ))
 
 
 if __name__ == "__main__":

@@ -185,3 +185,82 @@ def portal_crossing_evidence(
         terminal_signed_distance=terminal_signed,
         required_destination_depth=required_depth,
     )
+
+
+def portal_section_normal(gate_xy, destination_xy, bounds_xy=None):
+    """Return the unit section normal oriented toward the destination side."""
+    if bounds_xy is None:
+        return None
+    try:
+        a, b = bounds_xy
+        tx = float(b[0]) - float(a[0])
+        ty = float(b[1]) - float(a[1])
+        width = math.hypot(tx, ty)
+        dx = float(destination_xy[0]) - float(gate_xy[0])
+        dy = float(destination_xy[1]) - float(gate_xy[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if width <= 1e-6 or math.hypot(dx, dy) <= 1e-6:
+        return None
+    nx, ny = -ty / width, tx / width
+    if dx * nx + dy * ny < 0.0:
+        nx, ny = -nx, -ny
+    return (nx, ny)
+
+
+def portal_required_direction_depth(clearance, record=None,
+                                    teb_goal_tolerance=0.50, margin=0.10):
+    """Return the approach distance that keeps the gate-normal depth safe.
+
+    TEB can stop inside its XY goal circle, and a diagonal gate section makes
+    the depth along the approach shorter than the normal depth.  Scale the
+    required normal depth by the approach/section alignment and add the TEB
+    tolerance so a stopped base is still past the door's required depth.
+    """
+    required_normal = portal_crossing_depth(clearance, record)
+    try:
+        tolerance = max(0.0, float(teb_goal_tolerance))
+    except (TypeError, ValueError):
+        tolerance = 0.50
+    try:
+        extra = max(0.0, float(margin))
+    except (TypeError, ValueError):
+        extra = 0.10
+    if not isinstance(record, dict):
+        return required_normal + tolerance + extra
+    gate = record.get("physical_gate")
+    destination = record.get("physical_destination")
+    normal = None
+    if gate is not None and destination is not None:
+        normal = portal_section_normal(
+            gate, destination, record.get("physical_bounds"),
+        )
+    if normal is None or gate is None or destination is None:
+        return required_normal + tolerance + extra
+    try:
+        dx = float(destination[0]) - float(gate[0])
+        dy = float(destination[1]) - float(gate[1])
+        length = math.hypot(dx, dy)
+    except (TypeError, ValueError, IndexError):
+        return required_normal + tolerance + extra
+    if length <= 1e-6:
+        return required_normal + tolerance + extra
+    cos_alignment = abs(
+        dx / length * normal[0] + dy / length * normal[1]
+    )
+    cos_alignment = max(0.20, min(1.0, cos_alignment))
+    return required_normal / cos_alignment + tolerance + extra
+
+
+def portal_crossing_endpoint_verified(route_kind, transaction_state,
+                                      crossing_observed=False,
+                                      evidence_verified=False):
+    """Whether a portal-transition route may terminalize at its endpoint."""
+    if str(route_kind or "").strip().lower() != "portal_transition":
+        return True
+    if crossing_observed or evidence_verified:
+        return True
+    return str(transaction_state or "").strip().lower() in (
+        "crossing_verified",
+        "place_commit",
+    )

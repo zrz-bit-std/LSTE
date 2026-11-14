@@ -12,6 +12,7 @@ from global_frontier_portal_certification import (
     portal_transition_verified_exit_cell,
 )
 from global_frontier_portal_crossing import portal_crossing_depth
+from global_frontier_portal_crossing import portal_required_direction_depth
 from global_frontier_portal_probes import (
     PortalObservationProbe,
     portal_observation_probe,
@@ -257,10 +258,10 @@ class GlobalFrontierCandidatePortalMixin:
         if gate_length <= 1e-6:
             return None
         unit_x, unit_y = gate_dx / gate_length, gate_dy / gate_length
-        minimum_depth = max(
-            0.35,
-            float(getattr(self, "robot_radius", 0.30))
-            + float(getattr(self, "endpoint_terminal_wait_radius", 0.45)),
+        minimum_depth = portal_required_direction_depth(
+            getattr(self, "clearance", 0.0),
+            record,
+            float(getattr(self, "teb_xy_goal_tolerance", 0.35)),
         )
         lateral_limit = max(0.55, float(getattr(self, "region_topology_clearance", 0.50)))
 
