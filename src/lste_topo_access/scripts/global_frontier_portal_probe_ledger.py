@@ -808,6 +808,18 @@ class PortalProbeLedger:
             ],
         }
 
+    def drop(self, probe_id):
+        """Remove one probe identity whose obligation is no longer live.
+
+        Used when the Place exit it served has already completed: keeping a
+        source_arrived record only makes the planner retry a viewpoint that
+        can never be materialized (projection_collapsed / already_attempted).
+        """
+        try:
+            return self._records.pop(int(probe_id), None)
+        except (TypeError, ValueError):
+            return None
+
     def snapshot(self):
         return [self.view(self._records[key]) for key in sorted(self._records)]
 

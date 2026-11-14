@@ -107,6 +107,44 @@ class GlobalFrontierPortalArrivalCommitMixin:
             portal_id=int(exit_item.get("portal_id", portal_id)),
             dispatch_count=int(exit_item.get("dispatch_count", 0)),
         )
+        self._settle_completed_exit_probes(room_place_id, portal_id, now)
+
+    def _settle_completed_exit_probes(self, place_id, portal_id, now):
+        """Drop source-side probes whose Place exit has already completed.
+
+        A reverse probe can stay source_arrived after the robot leaves by the
+        same or another edge.  The selector then keeps reporting
+        durable_portal_probe_unavailable for a viewpoint that is no longer
+        needed (env04 20261114_173825, place 4).
+        """
+        ledger = getattr(self, "portal_probe_ledger", None)
+        pending = getattr(ledger, "pending_for_source", None)
+        drop = getattr(ledger, "drop", None)
+        if not callable(pending) or not callable(drop):
+            return []
+        try:
+            records = pending(int(place_id), include_source_arrived=True)
+        except TypeError:
+            records = pending(int(place_id))
+        dropped = []
+        for record in records or ():
+            if not isinstance(record, dict):
+                continue
+            try:
+                probe_id = int(record["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            drop(probe_id)
+            dropped.append(probe_id)
+        if dropped:
+            self.publish_status(
+                "portal_probe_dropped_on_exit",
+                place_id=int(place_id),
+                portal_id=None if portal_id is None else int(portal_id),
+                probe_ids=dropped,
+                reason="place_exit_completed",
+            )
+        return dropped
 
     def _commit_semantic_room_return(self, active_room, portal_id, destination_place_id,
                                      now, hypothesis_ledger, gp_tree, room_stack):
