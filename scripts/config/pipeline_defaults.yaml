@@ -485,6 +485,10 @@ GLOBAL_FRONTIER_REJECTED_TIMEOUT: 180.0
 # the explorer from revisiting an already inspected doorway after its short
 # temporary-stall retry timeout has expired.
 GLOBAL_FRONTIER_COMPLETED_RADIUS: 1.25
+# Stage-2 child-Place veto for the wide, double-perpendicular cut reported by
+# portal_cut_suspect_diagnostic.  The diagnostic remains report-only; this
+# switch only stops the suspect cut from allocating a new child Place.
+GLOBAL_FRONTIER_PORTAL_CUT_SUSPECT_SUPPRESSION_ENABLED: true
 # Reproducible exploration-method boundary. This is deliberately not a list
 # of score/timeout tweaks: all choices retain the same SLAM, Navfn, TEB,
 # detector, task and world. Valid values:

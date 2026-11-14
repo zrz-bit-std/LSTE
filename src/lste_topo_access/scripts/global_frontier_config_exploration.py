@@ -76,6 +76,14 @@ class GlobalFrontierExplorationConfigurationMixin:
         # the true unknown boundary moves beyond this radius and remains a
         # valid candidate.
         self.completed_radius = max(0.2, float(gp("~completed_radius", 1.25)))
+        # Stage-2 behavior boundary. The wall-tangent diagnostic is always
+        # published; this switch only lets a high-confidence suspect cut
+        # (wide, both jambs perpendicular to the section, destination already
+        # inside the source Place) veto a new child Place.  The default is
+        # false for direct node launches; the production launch enables it.
+        self.portal_cut_suspect_suppression_enabled = str(
+            gp("~portal_cut_suspect_suppression_enabled", False)
+        ).strip().lower() in ("1", "true", "yes", "on")
         self.completed_limit = max(16, int(gp("~completed_limit", 256)))
         self.candidate_limit = max(32, int(gp("~candidate_limit", 512)))
         self.active_reassociation_radius = max(

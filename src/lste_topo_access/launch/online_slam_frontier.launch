@@ -123,6 +123,12 @@
        in simulation time; this only bounds the handshake. -->
   <arg name="controller_release_ack_wall_seconds" default="30.0"/>
   <arg name="completed_radius" default="1.25"/>
+  <!-- Stage-2 child-Place veto for a wide cut whose two wall tangents are
+       both perpendicular to the gate section.  The report-only diagnostic is
+       always emitted; this switch only prevents the suspect cut from
+       allocating a new child Place.  Real doorways have at least one jamb
+       parallel to the section and are unaffected. -->
+  <arg name="portal_cut_suspect_suppression_enabled" default="true"/>
   <!-- Research method boundary. All values keep the same SLAM, Navfn, TEB,
        perception and task pipeline; they only change persistent exploration
        memory: frontier, frontier_distance_dedup, place_portal, or
@@ -271,6 +277,7 @@
     <param name="place_wall_progress_radius" value="$(arg place_wall_progress_radius)"/>
     <param name="controller_release_ack_wall_seconds" value="$(arg controller_release_ack_wall_seconds)"/>
     <param name="completed_radius" value="$(arg completed_radius)"/>
+    <param name="portal_cut_suspect_suppression_enabled" value="$(arg portal_cut_suspect_suppression_enabled)"/>
     <param name="exploration_method" value="$(arg exploration_method)"/>
     <param name="target_done_policy" value="$(arg target_done_policy)"/>
     <param name="region_memory_radius" value="$(arg region_memory_radius)"/>

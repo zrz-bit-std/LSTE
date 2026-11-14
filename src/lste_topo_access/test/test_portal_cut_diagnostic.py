@@ -21,6 +21,7 @@ from global_frontier_place_portal_validation import (  # noqa: E402
     _publish_portal_cut_diagnostic,
     _wall_tangent_cos,
     portal_cut_suspect,
+    suppress_suspect_portal_cut,
 )
 
 
@@ -153,6 +154,35 @@ class DiagnosticPublishTest(unittest.TestCase):
         fields = node.events[0][1]
         self.assertFalse(fields["suspect"])
         self.assertGreater(fields["left_wall_cos"], 0.9)
+
+
+class SuspectSuppressionTest(unittest.TestCase):
+    def test_enabled_suspect_becomes_child_place_veto(self):
+        evidence = {"reason": "distinct_destination_component"}
+        result = suppress_suspect_portal_cut(evidence, True, True)
+        self.assertTrue(result["reject"])
+        self.assertEqual(result["reason"], "portal_cut_suspect")
+        self.assertTrue(result["portal_cut_suspect"])
+        self.assertNotIn("reject", evidence)
+
+    def test_disabled_suppression_preserves_evidence(self):
+        evidence = {"reason": "distinct_destination_component"}
+        result = suppress_suspect_portal_cut(evidence, True, False)
+        self.assertIs(result, evidence)
+        self.assertNotIn("reject", result)
+
+    def test_real_door_is_not_suppressed(self):
+        evidence = {"reason": "distinct_destination_component"}
+        result = suppress_suspect_portal_cut(evidence, False, True)
+        self.assertIs(result, evidence)
+        self.assertNotIn("reject", result)
+
+    def test_existing_rejection_reason_is_preserved(self):
+        evidence = {"reason": "slam_place_boundary_unproven", "reject": True}
+        result = suppress_suspect_portal_cut(evidence, True, True)
+        self.assertTrue(result["reject"])
+        self.assertEqual(result["reason"], "slam_place_boundary_unproven")
+        self.assertTrue(result["portal_cut_suspect"])
 
 
 if __name__ == "__main__":

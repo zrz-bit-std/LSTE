@@ -68,6 +68,24 @@ def portal_cut_suspect(width, left_cos, right_cos, destination_inside):
     )
 
 
+def suppress_suspect_portal_cut(evidence, suspect, enabled):
+    """Turn a suspect cut into a child-place veto when suppression is enabled.
+
+    The diagnostic itself remains report-only: this helper is the single
+    explicit boundary between observation and behavior.  It only rejects the
+    child-place decision; the caller's portal geometry and existing places are
+    untouched.
+    """
+    if not enabled or not suspect or not isinstance(evidence, dict):
+        return evidence
+    result = dict(evidence)
+    result["portal_cut_suspect"] = True
+    if not result.get("reject"):
+        result["reject"] = True
+        result["reason"] = "portal_cut_suspect"
+    return result
+
+
 def _publish_portal_cut_diagnostic(node, message, context, auth, evidence,
                                    source, gate, destination, width, bounds,
                                    existing):
@@ -242,9 +260,12 @@ def authenticated_place_portal_evidence(node, auth):
             evidence.update(source_witness='physical_return_pose',source_map_xy=list(returned),
                             frozen_source_map_xy=list(source))
     if width is not None and gate is not None and destination is not None:
-        _publish_portal_cut_diagnostic(
+        suspect = _publish_portal_cut_diagnostic(
             node, message, context, auth, evidence, source, gate, destination,
             width, bounds, existing)
+        evidence = suppress_suspect_portal_cut(
+            evidence, suspect,
+            getattr(node, "portal_cut_suspect_suppression_enabled", False))
     return evidence
 
 
