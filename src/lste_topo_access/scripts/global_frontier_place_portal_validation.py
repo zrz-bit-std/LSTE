@@ -1,7 +1,174 @@
 """SLAM confirmation at the handoff from completed nested observation to Portal."""
+import math
+
+import numpy as np
+
 from global_frontier_grid import frontier_mask
 from global_frontier_geometry import map_snapshot_projector
-from global_frontier_place_partition import portal_partition_evidence, branch_opening_width, branch_gate_xy, refine_portal_cut, authentication_gate_geometry
+from global_frontier_place_partition import portal_partition_evidence, branch_opening_width, branch_gate_xy, refine_portal_cut, authentication_gate_geometry, partition_place, point_in_place_scope
+
+
+def _wall_tangent_cos(free, unknown, resolution, origin, point, section_dir,
+                      radius_m=0.55):
+    """Return |cos(section, local wall direction)| at one gate endpoint.
+
+    Occupied cells are ``not free and not unknown``.  The wall direction is the
+    principal axis of the occupied cells inside ``radius_m``.  ``None`` means
+    there is not enough wall evidence to judge.
+    """
+    try:
+        point = (float(point[0]), float(point[1]))
+    except (IndexError, TypeError, ValueError):
+        return None
+    try:
+        col = int(math.floor((point[0] - origin[0]) / resolution))
+        row = int(math.floor((point[1] - origin[1]) / resolution))
+    except (TypeError, ValueError):
+        return None
+    free = np.asarray(free, dtype=bool)
+    if unknown is None:
+        unknown = np.zeros_like(free)
+    unknown = np.asarray(unknown, dtype=bool)
+    occupied = (~free) & (~unknown)
+    if not (0 <= row < occupied.shape[0] and 0 <= col < occupied.shape[1]):
+        return None
+    cells = max(1, int(math.ceil(float(radius_m) / max(1e-6, resolution))))
+    r0, r1 = max(0, row - cells), min(occupied.shape[0], row + cells + 1)
+    c0, c1 = max(0, col - cells), min(occupied.shape[1], col + cells + 1)
+    rows, cols = np.nonzero(occupied[r0:r1, c0:c1])
+    if rows.size < 4:
+        return None
+    xs = origin[0] + (cols + c0 + 0.5) * resolution
+    ys = origin[1] + (rows + r0 + 0.5) * resolution
+    x = xs - xs.mean()
+    y = ys - ys.mean()
+    cov = np.array([[float((x * x).mean()), float((x * y).mean())],
+                    [float((x * y).mean()), float((y * y).mean())]])
+    values, vectors = np.linalg.eigh(cov)
+    tangent = vectors[:, int(np.argmax(values))]
+    length = math.hypot(float(tangent[0]), float(tangent[1]))
+    if length <= 1e-9:
+        return None
+    cos = abs(float(tangent[0]) * section_dir[0]
+              + float(tangent[1]) * section_dir[1]) / length
+    return max(0.0, min(1.0, cos))
+
+
+def portal_cut_suspect(width, left_cos, right_cos, destination_inside):
+    """Report-only classifier for a cut across a room's free space."""
+    try:
+        width = None if width is None else float(width)
+    except (TypeError, ValueError):
+        width = None
+    return bool(
+        width is not None and width >= 2.5
+        and left_cos is not None and right_cos is not None
+        and left_cos < 0.35 and right_cos < 0.35
+        and destination_inside is True
+    )
+
+
+def _publish_portal_cut_diagnostic(node, message, context, auth, evidence,
+                                   source, gate, destination, width, bounds,
+                                   existing):
+    """Publish one report-only audit for an authenticated Portal cut."""
+    publish = getattr(node, "publish_status", None)
+    if not callable(publish):
+        return None
+    try:
+        tree = getattr(node, "gp_exploration_tree", None)
+        branch = (None if tree is None
+                  else tree.branches.get(getattr(auth, "branch_id", None)))
+        portal_id = None if not isinstance(branch, dict) else branch.get(
+            "canonical_portal_id")
+        epoch = int(getattr(getattr(context, "components", None), "epoch", 0) or 0)
+        key = (int(getattr(auth, "node_id", 0) or 0),
+               int(getattr(auth, "branch_id", 0) or 0), epoch)
+        seen = getattr(node, "_portal_cut_diagnostic_seen", None)
+        if seen is None:
+            seen = set()
+            node._portal_cut_diagnostic_seen = seen
+        if key in seen:
+            return None
+        seen.add(key)
+
+        resolution = float(message.info.resolution)
+        origin = (float(message.info.origin.position.x),
+                  float(message.info.origin.position.y))
+        free = np.asarray(context.known_free, dtype=bool)
+        unknown = getattr(context, "unknown", None)
+        if unknown is None:
+            unknown = np.zeros_like(free)
+        section_deg = None
+        left_cos = right_cos = None
+        if bounds and len(bounds) == 2 and all(b is not None for b in bounds):
+            ax, ay = map(float, bounds[0])
+            bx, by = map(float, bounds[1])
+            length = math.hypot(bx - ax, by - ay)
+            if length > 1e-6:
+                section = ((bx - ax) / length, (by - ay) / length)
+                section_deg = round(math.degrees(math.atan2(
+                    section[1], section[0])), 1)
+                left_cos = _wall_tangent_cos(
+                    free, unknown, resolution, origin, (ax, ay), section)
+                right_cos = _wall_tangent_cos(
+                    free, unknown, resolution, origin, (bx, by), section)
+
+        destination_inside = None
+        try:
+            destination_inside = point_in_place_scope(node, destination)
+        except Exception:
+            destination_inside = None
+
+        pre_frontiers = post_frontiers = None
+        try:
+            epoch = int(getattr(
+                getattr(context, "components", None), "epoch", 1) or 1)
+            pre_mask, _pre_comp, _pre_label, _used = partition_place(
+                free, resolution, origin, source, existing, epoch)
+            candidate = dict(
+                id=0, gate=gate, destination=destination,
+                width=float(width), bounds=bounds)
+            _post_mask, post_comp, _post_label, _used2 = partition_place(
+                free, resolution, origin, source, [*existing, candidate], epoch)
+            frontier = frontier_mask(free, unknown)
+            pre_frontiers = int(np.count_nonzero(frontier & pre_mask))
+            col = int(math.floor((destination[0] - origin[0]) / resolution))
+            row = int(math.floor((destination[1] - origin[1]) / resolution))
+            labels = getattr(post_comp, "labels", None)
+            if (labels is not None
+                and 0 <= row < labels.shape[0]
+                and 0 <= col < labels.shape[1]):
+                label = int(labels[row, col])
+                if label > 0:
+                    post_frontiers = int(np.count_nonzero(
+                        frontier & (labels == label)))
+        except Exception:
+            pre_frontiers = post_frontiers = None
+
+        suspect = portal_cut_suspect(
+            width, left_cos, right_cos, destination_inside)
+        publish(
+            "portal_cut_suspect_diagnostic",
+            node_id=int(getattr(auth, "node_id", 0) or 0),
+            branch_id=int(getattr(auth, "branch_id", 0) or 0),
+            portal_id=None if portal_id is None else int(portal_id),
+            source_place_id=getattr(node, "current_physical_place_id", None),
+            width=None if width is None else round(float(width), 3),
+            section_deg=section_deg,
+            left_wall_cos=None if left_cos is None else round(left_cos, 3),
+            right_wall_cos=None if right_cos is None else round(right_cos, 3),
+            destination_inside_scope=destination_inside,
+            pre_cut_frontiers=pre_frontiers,
+            post_cut_frontiers=post_frontiers,
+            suspect=bool(suspect),
+            gate=[round(float(v), 3) for v in gate],
+            destination=[round(float(v), 3) for v in destination],
+            evidence_reason=str(evidence.get("reason", "")),
+        )
+        return suspect
+    except Exception:
+        return None
 
 
 def _validation_snapshot_projector(node,message,context,source_xy):
@@ -74,6 +241,10 @@ def authenticated_place_portal_evidence(node, auth):
                 candidate,existing,entry_xy,epoch)
             evidence.update(source_witness='physical_return_pose',source_map_xy=list(returned),
                             frozen_source_map_xy=list(source))
+    if width is not None and gate is not None and destination is not None:
+        _publish_portal_cut_diagnostic(
+            node, message, context, auth, evidence, source, gate, destination,
+            width, bounds, existing)
     return evidence
 
 
