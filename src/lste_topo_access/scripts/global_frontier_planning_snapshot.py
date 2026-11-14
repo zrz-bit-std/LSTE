@@ -334,6 +334,76 @@ class GlobalFrontierPlanningSnapshotMixin:
         except (TypeError, ValueError):
             return False
 
+    def _ensure_exit_reverse_probe(self, place_id, item, now):
+        """Give a ready reverse egress its own source-side durable probe.
+
+        The entry probe belongs to the parent Place and is consumed by the
+        crossing, so the entered Place has no pending probe for the reverse
+        door.  The graph then reports ``durable_portal_probe_unavailable``
+        with source_place_id=<this place> and the exit never materializes
+        (env04 20261114_144747, place 6 / exit portal 5).
+        """
+        ledger = getattr(self, "portal_probe_ledger", None)
+        observe = getattr(ledger, "observe", None)
+        hypotheses = getattr(self, "portal_hypothesis_ledger", None)
+        getter = getattr(hypotheses, "get", None)
+        portal_id = item.get("portal_id")
+        if (not callable(observe) or not callable(getter)
+                or portal_id is None):
+            return None
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return None
+        pending = getattr(ledger, "pending_for_source", None)
+        if callable(pending):
+            try:
+                if pending(int(place_id), include_source_arrived=True):
+                    return None
+            except TypeError:
+                try:
+                    if pending(int(place_id)):
+                        return None
+                except TypeError:
+                    pass
+        record = getter(portal_id)
+        if not isinstance(record, dict):
+            return None
+        gate = record.get("physical_gate")
+        inside = record.get("physical_destination")
+        try:
+            normal = (
+                float(gate[0]) - float(inside[0]),
+                float(gate[1]) - float(inside[1]),
+            )
+        except (IndexError, TypeError, ValueError):
+            return None
+        if normal[0] * normal[0] + normal[1] * normal[1] <= 1e-9:
+            return None
+        try:
+            probe = observe(
+                int(place_id),
+                (float(gate[0]), float(gate[1])),
+                normal,
+                map_gate_xy=record.get("map_gate"),
+                now=float(now),
+                observation_source="exit_reverse",
+            )
+        except TypeError:
+            probe = observe(
+                int(place_id),
+                (float(gate[0]), float(gate[1])),
+                normal,
+            )
+        if isinstance(probe, dict):
+            self.publish_status(
+                "portal_exit_reverse_probe_registered",
+                place_id=int(place_id),
+                portal_id=int(portal_id),
+                probe_id=int(probe.get("id", 0) or 0),
+            )
+        return probe
+
     def _activate_place_exit_if_ready(self):
         """Promote the door-owned exit obligation once the room is complete.
 
@@ -463,6 +533,9 @@ class GlobalFrontierPlanningSnapshotMixin:
         activate = getattr(items, "activate_place_exit", None)
         if not callable(activate):
             return False
+        ensure_probe = getattr(self, "_ensure_exit_reverse_probe", None)
+        if callable(ensure_probe):
+            ensure_probe(place_id, item, now)
         activate(
             int(item["id"]), now, "place_observation_complete",
         )
