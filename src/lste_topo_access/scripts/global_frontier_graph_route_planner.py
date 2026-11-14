@@ -879,6 +879,19 @@ class GraphRoutePlanner:
 
         current_place = place_by_id[current]
         current_covered = _covered(current_place)
+        if room_work_item_only:
+            # A dormant exit is not a local observation task. Excluding it
+            # here lets the existing no-candidate path activate it after two
+            # clean cycles; a ready/returning exit remains selectable and is
+            # dispatched by the egress layer.
+            work[current] = [
+                item for item in work.get(current, ())
+                if not (
+                    str(item.get("kind", "")) == "portal_exit"
+                    and str(item.get("exit_state", "")).strip().lower()
+                    == "dormant"
+                )
+            ]
         local_work = order_work_items_open_tsp(
             robot_pose, work.get(current, ())
         )
@@ -994,6 +1007,32 @@ class GraphRoutePlanner:
             # WorkItems unresolved while traversing that child's subtree.
             ancestors = {_positive_id(value) for value in dfs_ancestor_place_ids}
             completed = {_positive_id(value) for value in dfs_completed_place_ids}
+
+            # A Place whose newest door-exit obligation is resolved has been
+            # physically completed and left. The DFS node state can lag the
+            # WorkItem ledger by one plan tick; without this durable fact the
+            # planner can select the reverse edge back into the finished room,
+            # which is sealed and can never commit an arrival.
+            newest_exit = {}
+            for item in work_records:
+                if str(item.get("kind", "")) != "portal_exit":
+                    continue
+                place_id = _positive_id(item.get("place_id"))
+                if place_id is None:
+                    continue
+                previous = newest_exit.get(place_id)
+                if (
+                    previous is None
+                    or int(item.get("id", 0)) > int(previous.get("id", 0))
+                ):
+                    newest_exit[place_id] = item
+            completed |= {
+                place_id
+                for place_id, item in newest_exit.items()
+                if str(item.get("exit_state", "")).strip().lower() == "resolved"
+                and str(item.get("state", "")).strip().lower() == "resolved"
+            }
+
             def child_edge(record):
                 destination = _positive_id(record.get("destination_place_id"))
                 return (_positive_id(record.get("source_place_id")) == current

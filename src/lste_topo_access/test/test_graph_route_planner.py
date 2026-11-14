@@ -90,6 +90,19 @@ def work(item_id, place_id, active_attempt_id=None, normal_xy=None):
     return item
 
 
+def exit_work(item_id, place_id, portal_id, parent_place_id,
+              state="resolved", exit_state="resolved"):
+    return {
+        "id": item_id,
+        "place_id": place_id,
+        "kind": "portal_exit",
+        "portal_id": portal_id,
+        "parent_place_id": parent_place_id,
+        "state": state,
+        "exit_state": exit_state,
+    }
+
+
 class GraphRoutePlannerTest(unittest.TestCase):
     def setUp(self):
         self.planner = GraphRoutePlanner()
@@ -787,6 +800,96 @@ class GraphRoutePlannerTest(unittest.TestCase):
         self.assertEqual(
             result.reason, "dfs_place_and_children_complete_return_to_parent"
         )
+
+    def test_resolved_exit_blocks_reentry_when_dfs_state_lags(self):
+        """A finished room must not be re-entered while the DFS state catches up."""
+        result = self.plan(
+            2,
+            [place(1), place(2), place(4)],
+            [portal(3, 1, 2), portal(4, 2, 4)],
+            work_items=[
+                exit_work(12, 2, 3, 1, state="unresolved",
+                          exit_state="dormant"),
+                exit_work(14, 4, 4, 2),
+            ],
+            room_work_item_only=True,
+            dfs_parent_portal_id=3,
+            dfs_ancestor_place_ids=[1],
+            dfs_completed_place_ids=[],  # one-tick DFS lag
+            place_projection_complete=True,
+            place_frontier_count=0,
+        )
+
+        self.assertEqual(result.action, ACTION_HOLD)
+        self.assertEqual(
+            result.reason, "semantic_room_work_item_projection_pending"
+        )
+        self.assertNotIn(4, result.portal_path)
+
+    def test_dormant_room_exit_is_not_selectable_local_work(self):
+        """A sleeping exit must reach the activation path, not local work."""
+        result = self.plan(
+            2,
+            [place(1), place(2)],
+            [portal(3, 1, 2)],
+            work_items=[
+                exit_work(12, 2, 3, 1, state="unresolved",
+                          exit_state="dormant"),
+            ],
+            room_work_item_only=True,
+            dfs_parent_portal_id=3,
+            dfs_ancestor_place_ids=[1],
+            place_projection_complete=True,
+            place_frontier_count=0,
+        )
+
+        self.assertEqual(result.action, ACTION_HOLD)
+        self.assertEqual(
+            result.reason, "semantic_room_work_item_projection_pending"
+        )
+
+    def test_ready_room_exit_remains_selectable_local_work(self):
+        result = self.plan(
+            2,
+            [place(1), place(2)],
+            [portal(3, 1, 2)],
+            work_items=[
+                exit_work(12, 2, 3, 1, state="unresolved",
+                          exit_state="ready"),
+            ],
+            room_work_item_only=True,
+            dfs_parent_portal_id=3,
+            dfs_ancestor_place_ids=[1],
+            place_projection_complete=True,
+            place_frontier_count=0,
+        )
+
+        self.assertEqual(result.action, ACTION_OBSERVE_LOCAL_WORK)
+        self.assertEqual(result.obligation_id, 12)
+
+    def test_newer_unresolved_exit_reopens_completed_place(self):
+        """A reopened Place gets a new exit generation and may be entered."""
+        result = self.plan(
+            2,
+            [place(1), place(2), place(4)],
+            [portal(3, 1, 2), portal(4, 2, 4)],
+            work_items=[
+                exit_work(12, 2, 3, 1, state="unresolved",
+                          exit_state="dormant"),
+                exit_work(14, 4, 4, 2),  # older resolved generation
+                exit_work(20, 4, 4, 2, state="unresolved",
+                          exit_state="dormant"),  # newer generation
+            ],
+            room_work_item_only=True,
+            dfs_parent_portal_id=3,
+            dfs_ancestor_place_ids=[1],
+            dfs_completed_place_ids=[],
+            place_projection_complete=True,
+            place_frontier_count=0,
+        )
+
+        self.assertEqual(result.action, ACTION_CROSS_PORTAL)
+        self.assertEqual(result.portal_path, (4,))
 
     def test_target_place_work_cannot_be_abandoned_by_branch_first(self):
         result = self.plan(
