@@ -538,7 +538,7 @@ class GlobalFrontierPlanningSnapshotMixin:
                         "gp_branch_waiting", pending_branch_ids=[],
                         reason="awaiting_sensor_stability_or_safe_map_projection")
                     return
-                timeout = float(getattr(self, "branch_wait_timeout", 30.0) or 0.0)
+                timeout = float(getattr(self, "branch_wait_timeout", 3.0) or 0.0)
                 if (getattr(self, "_branch_wait_key", None) != key
                         or getattr(self, "_branch_wait_since", 0.0) <= 0.0):
                     self._branch_wait_key = key
@@ -588,7 +588,7 @@ class GlobalFrontierPlanningSnapshotMixin:
                         # (every_stable_candidate_started) waiting.  Bound the
                         # wait and record the decision on each branch.
                         superseded = []
-                        if plan_complete and tree is not None:
+                        if tree is not None:
                             for branch_id in wait_ids:
                                 branch = tree.branches.get(int(branch_id))
                                 if (branch is None

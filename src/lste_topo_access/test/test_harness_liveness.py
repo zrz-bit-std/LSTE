@@ -165,8 +165,14 @@ class BranchWaitTimeoutTest(unittest.TestCase):
         self.assertFalse(fixture.obj.frontier_exhausted)
         fixture.report(131.0)
         self.assertTrue(fixture.obj.frontier_exhausted)
-        self.assertEqual(fixture.obj.events[-1][0], "gp_branch_wait_expired")
-        self.assertEqual(fixture.obj.events[-1][1]["pending_branch_ids"], [7])
+        names = [event for event, _payload in fixture.obj.events]
+        self.assertIn("gp_branch_wait_expired", names)
+        expired = [
+            payload for event, payload in fixture.obj.events
+            if event == "gp_branch_wait_expired"
+        ][-1]
+        self.assertEqual(expired["pending_branch_ids"], [7])
+        self.assertIn("gp_branch_wait_superseded", names)
 
     def test_movement_resets_the_wait(self):
         fixture = BranchWaitFixture()
@@ -221,7 +227,10 @@ class BranchWaitTimeoutTest(unittest.TestCase):
         names = [event for event, _payload in fixture.obj.events]
         self.assertIn("gp_branch_wait_superseded", names)
 
-    def test_an_incomplete_plan_does_not_supersede_branches(self):
+    def test_an_incomplete_plan_supersedes_unprojectable_branches(self):
+        # env04 20261114_101256 / _115349 / _030744: the plan stayed
+        # incomplete while pending branches never obtained a projection, so
+        # the 30 s bound kept re-arming and the junction never recovered.
         from unittest import mock
         fixture = BranchWaitFixture(timeout=30.0)
         fixture.obj.last_graph_route_plan = SimpleNamespace(
@@ -229,8 +238,13 @@ class BranchWaitTimeoutTest(unittest.TestCase):
         with mock.patch("rospy.logwarn"), mock.patch("rospy.logwarn_throttle"):
             fixture.report(100.0)
             fixture.report(131.0)
+        branches = fixture.obj.gp_exploration_tree.branches
+        self.assertEqual(branches[7]["state"], "superseded")
         self.assertEqual(
-            fixture.obj.gp_exploration_tree.branches[7]["state"], "pending")
+            branches[7]["authentication_failure_reason"],
+            "no_executable_projection_after_timeout")
+        names = [event for event, _payload in fixture.obj.events]
+        self.assertIn("gp_branch_wait_superseded", names)
 
     def test_a_settled_tree_reaches_the_completion_gate(self):
         # Run 20261103_124742: the tree was built, every obligation settled,

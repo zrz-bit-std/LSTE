@@ -252,5 +252,5 @@ class GlobalFrontierExplorationConfigurationMixin:
         # mission open forever (20261102_214754/20261103_001037 idled until the
         # stall watchdog killed them after the plan was already complete).
         self.branch_wait_timeout = max(
-            0.0, float(gp("~branch_wait_timeout", 30.0))
+            0.0, float(gp("~branch_wait_timeout", 3.0))
         )
