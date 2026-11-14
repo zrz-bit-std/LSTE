@@ -250,17 +250,3 @@ def portal_required_direction_depth(clearance, record=None,
     )
     cos_alignment = max(0.20, min(1.0, cos_alignment))
     return required_normal / cos_alignment + tolerance + extra
-
-
-def portal_crossing_endpoint_verified(route_kind, transaction_state,
-                                      crossing_observed=False,
-                                      evidence_verified=False):
-    """Whether a portal-transition route may terminalize at its endpoint."""
-    if str(route_kind or "").strip().lower() != "portal_transition":
-        return True
-    if crossing_observed or evidence_verified:
-        return True
-    return str(transaction_state or "").strip().lower() in (
-        "crossing_verified",
-        "place_commit",
-    )

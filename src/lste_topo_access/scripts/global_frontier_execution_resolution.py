@@ -2,8 +2,6 @@
 
 import rospy
 
-from global_frontier_portal_crossing import portal_crossing_endpoint_verified
-
 
 PORTAL_AUTH_RETRY_MIN_SECONDS = 8.0
 PORTAL_AUTH_RETRY_MAX_SECONDS = 12.0
@@ -245,42 +243,6 @@ class GlobalFrontierExecutionResolutionMixin:
             # update_return commits only inside the source node's return radius.
             # That physical contract is wider than the generic waypoint radius.
             endpoint_reached = True
-        if (
-            endpoint_reached
-            and str(getattr(self, "active_route_kind", "")).strip().lower()
-            == "portal_transition"
-        ):
-            transaction = getattr(self, "portal_transaction", None)
-            evidence_verified = False
-            evidence = getattr(self, "active_portal_crossing_evidence", None)
-            if callable(evidence):
-                try:
-                    evidence_verified = bool(evidence().verified)
-                except Exception:
-                    evidence_verified = False
-            if not portal_crossing_endpoint_verified(
-                self.active_route_kind,
-                (
-                    None if transaction is None
-                    else getattr(transaction, "state", None)
-                ),
-                bool(getattr(self, "active_portal_crossing_observed", False)),
-                evidence_verified,
-            ):
-                endpoint_reached = False
-                self.publish_status(
-                    "portal_crossing_unverified_endpoint_hold",
-                    route_id=int(getattr(self, "active_route_id", 0) or 0),
-                    portal_id=(
-                        None if transaction is None
-                        else getattr(transaction, "portal_id", None)
-                    ),
-                    state=(
-                        None if transaction is None
-                        else getattr(transaction, "state", None)
-                    ),
-                    reason="endpoint_geometry_without_crossing_verified",
-                )
         terminal_required = self.mission_endpoint_only or self.persistent_execution
         # The turn contract is established by stable measured yaw at the
         # locked target. Persistent MoveBase may omit a terminal for the

@@ -14,7 +14,6 @@ from global_frontier_durable_portal_route import (  # noqa: E402
     project_record,
 )
 from global_frontier_portal_crossing import (  # noqa: E402
-    portal_crossing_endpoint_verified,
     portal_required_direction_depth,
 )
 
@@ -119,30 +118,6 @@ class PortalGoalDepthPolicyTest(unittest.TestCase):
         )
 
         self.assertAlmostEqual(depth, 1.9, places=6)
-
-    def test_non_portal_route_is_always_endpoint_eligible(self):
-        self.assertTrue(portal_crossing_endpoint_verified(
-            "frontier_endpoint", "destination_standoff",
-        ))
-
-    def test_portal_standoff_without_crossing_evidence_is_rejected(self):
-        self.assertFalse(portal_crossing_endpoint_verified(
-            "portal_transition", "destination_standoff",
-            crossing_observed=False,
-            evidence_verified=False,
-        ))
-
-    def test_portal_crossing_observed_or_verified_is_eligible(self):
-        self.assertTrue(portal_crossing_endpoint_verified(
-            "portal_transition", "destination_standoff",
-            crossing_observed=True,
-        ))
-        self.assertTrue(portal_crossing_endpoint_verified(
-            "portal_transition", "crossing_verified",
-        ))
-        self.assertTrue(portal_crossing_endpoint_verified(
-            "portal_transition", "place_commit",
-        ))
 
 
 if __name__ == "__main__":
