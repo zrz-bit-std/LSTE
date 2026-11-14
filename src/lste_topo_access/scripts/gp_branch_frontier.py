@@ -590,6 +590,29 @@ class GPBranchFrontierMixin:
                 else self.junction_portal_authentication.snapshot()
             ))
 
+    def settle_terminal_auth_branch(self, task, now):
+        """Finish an active authentication branch that is already terminal.
+
+        ``start_next()`` only runs when ``active_branch_id`` is None, so a
+        failed/completed branch that kept the id starves every pending
+        doorway and makes the observation period preempt the graph route
+        forever (env04 20261114_162926: branches 11/12 failed, 13 pending).
+        Returns True only when the ledger actually advanced.
+        """
+        if task is None or task.active_branch_id is None:
+            return False
+        branch = task.branches.get(int(task.active_branch_id))
+        if branch is None:
+            return False
+        if str(branch.state).strip().lower() not in ("completed", "failed"):
+            return False
+        settle = getattr(self, "finish_portal_authentication_branch", None)
+        if not callable(settle):
+            return False
+        before = task.active_branch_id
+        settle(now=now)
+        return task.active_branch_id != before
+
     def _expire_stranded_portal_authentication(self, tree, message, now):
         """Conclude a pinned observation period that can never start a branch.
 
@@ -897,6 +920,8 @@ class GPBranchFrontierMixin:
                 self, "active_portal_authentication_phase", "") or ""
             ) in ("entering", "turning", "returning")
             if not auth_route_active:
+                if self.settle_terminal_auth_branch(task, now):
+                    return
                 pause_branch_id = task.active_branch_id
                 if pause_branch_id is None:
                     pause_branch_id = min(task.branches)
