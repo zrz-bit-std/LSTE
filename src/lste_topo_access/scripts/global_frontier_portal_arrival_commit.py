@@ -6,6 +6,44 @@ import rospy
 from global_frontier_room_scope import best_branch_for_portal, build_branch_scope
 
 
+def resolve_portal_dfs_entry(dfs, arrival_source_place_id,
+                             destination_place_id, portal_id,
+                             active_place_id, portal_source_place_id):
+    """Resolve the DFS parent for one Portal arrival.
+
+    The DFS cursor requires the parent to be the current stack top.  A stale
+    departure can hand us another Place; when the active room matches the
+    Portal ledger source, that source is the correct parent.  Return
+    ``(entered, parent_place_id)``.
+    """
+    try:
+        source = int(arrival_source_place_id)
+    except (TypeError, ValueError):
+        source = None
+    if dfs is None:
+        return True, source
+    if source is not None and dfs.enter(
+            source, destination_place_id, portal_id):
+        return True, source
+    try:
+        fallback = int(active_place_id)
+    except (TypeError, ValueError):
+        fallback = None
+    try:
+        portal_source = int(portal_source_place_id)
+    except (TypeError, ValueError):
+        portal_source = None
+    if (
+        source is not None
+        and fallback is not None
+        and fallback != source
+        and fallback == portal_source
+        and dfs.enter(fallback, destination_place_id, portal_id)
+    ):
+        return True, fallback
+    return False, source
+
+
 class GlobalFrontierPortalArrivalCommitMixin:
     """Write one verified portal arrival to place memory and report the result."""
 
@@ -1154,8 +1192,48 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 place_id=int(region["id"]), source_place_id=int(arrival.source_region_id),
                 branch_scope=None)
             dfs = getattr(self, "place_dfs", None)
-            entered = dfs is None or dfs.enter(arrival.source_region_id, region['id'], portal_id)
+            portal_source_place_id = (
+                None if not isinstance(portal_record, dict)
+                else portal_record.get("source_place_id")
+            )
+            entered, dfs_parent = resolve_portal_dfs_entry(
+                dfs,
+                arrival.source_region_id,
+                int(region["id"]),
+                int(portal_id),
+                active_room.get("place_id"),
+                portal_source_place_id,
+            )
+            if not entered:
+                self.publish_status(
+                    "place_dfs_enter_rejected",
+                    arrival_source_place_id=int(arrival.source_region_id),
+                    destination_place_id=int(region["id"]),
+                    portal_id=int(portal_id),
+                    stack=(
+                        None if dfs is None
+                        else dfs.snapshot().get("stack")
+                    ),
+                    reason="source_not_on_dfs_stack",
+                )
+            elif (
+                dfs_parent is not None
+                and int(dfs_parent) != int(arrival.source_region_id)
+            ):
+                self.publish_status(
+                    "place_dfs_enter_source_reconciled",
+                    arrival_source_place_id=int(arrival.source_region_id),
+                    reconciled_source_place_id=int(dfs_parent),
+                    destination_place_id=int(region["id"]),
+                    portal_id=int(portal_id),
+                    reason="active_room_matches_portal_source",
+                )
             if entered:
+                if dfs_parent is None:
+                    parent_place_id = int(arrival.source_region_id)
+                else:
+                    parent_place_id = int(dfs_parent)
+                    active_room["source_place_id"] = parent_place_id
                 room_stack.append(active_room)
                 self.active_semantic_room = active_room
                 if room_branch is not None:
@@ -1167,12 +1245,12 @@ class GlobalFrontierPortalArrivalCommitMixin:
                             record["place_id"] = int(region["id"])
                 self.publish_status("semantic_room_exploration_started",
                     node_id=node_id, branch_id=branch_id, portal_id=int(portal_id),
-                    room_place_id=int(region['id']), source_place_id=int(arrival.source_region_id),
+                    room_place_id=int(region['id']), source_place_id=parent_place_id,
                     semantic_score=None if room_branch is None else room_branch.get("room_semantic_score"),
                     priority=None if room_branch is None else room_branch.get("room_priority"),
                     branch_scope=None, wi_only=True)
                 if dfs is not None:
-                    self.publish_status("place_dfs_entered", parent_place_id=int(arrival.source_region_id),
+                    self.publish_status("place_dfs_entered", parent_place_id=parent_place_id,
                         place_id=int(region['id']), portal_id=int(portal_id), place_dfs=dfs.snapshot())
                 # The crossing just succeeded, so the parent-owned entry
                 # obligation is closed.  Record the opposite obligation now:
@@ -1185,7 +1263,7 @@ class GlobalFrontierPortalArrivalCommitMixin:
                     exit_id = ensure_exit(
                         int(region["id"]),
                         int(portal_id),
-                        int(arrival.source_region_id),
+                        parent_place_id,
                         getattr(arrival, "portal_gate_xy", None),
                         getattr(arrival, "goal_xy", None),
                         now=now,
@@ -1197,7 +1275,7 @@ class GlobalFrontierPortalArrivalCommitMixin:
                             "place_exit_created",
                             work_item_id=int(exit_id),
                             place_id=int(region["id"]),
-                            parent_place_id=int(arrival.source_region_id),
+                            parent_place_id=parent_place_id,
                             portal_id=int(portal_id),
                             generation=generation,
                         )

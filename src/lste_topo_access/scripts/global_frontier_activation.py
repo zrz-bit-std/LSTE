@@ -18,6 +18,33 @@ from global_frontier_portal_crossing import portal_signed_distance
 from global_frontier_graph_route_transaction import route_graph_transaction_identity
 
 
+def _optional_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def portal_source_place_mismatch(current_place_id, departure_source_place_id,
+                                  portal_source_place_id):
+    """Return True when a Portal route would use a stale source Place.
+
+    The current physical Place owns every outgoing Portal edge.  A departure
+    transaction or a Portal ledger record from a previous Place must never
+    start a route: it would be recorded with the wrong parent and the DFS
+    enter would be rejected (env04 20261115_020852: portal 4 used source P2
+    while the robot and the Portal ledger were on P3).
+    """
+    current = _optional_int(current_place_id)
+    if current is None or current <= 0:
+        return False
+    for value in (departure_source_place_id, portal_source_place_id):
+        source = _optional_int(value)
+        if source is not None and source > 0 and source != current:
+            return True
+    return False
+
+
 class GlobalFrontierActivationMixin:
     def _raise_graph_identity_floor(self, *values):
         """Keep a monotonic floor for the graph transaction IDs we allocate.
@@ -907,6 +934,40 @@ class GlobalFrontierActivationMixin:
             source_place_id = getattr(self.place_departure, "region_id", None)
             if source_place_id is None:
                 source_place_id = getattr(self, "current_physical_place_id", None)
+            current_place_id = _optional_int(
+                getattr(self, "current_physical_place_id", None)
+            )
+            portal_id = _optional_int(
+                getattr(self, "last_portal_hypothesis_id", None)
+            )
+            ledger = getattr(self, "portal_hypothesis_ledger", None)
+            portal_record = None
+            if ledger is not None and portal_id is not None:
+                getter = getattr(ledger, "get", None)
+                if callable(getter):
+                    portal_record = getter(portal_id)
+            portal_source_place_id = None
+            if isinstance(portal_record, dict):
+                portal_source_place_id = _optional_int(
+                    portal_record.get("source_place_id")
+                )
+            if portal_source_place_mismatch(
+                current_place_id,
+                source_place_id,
+                portal_source_place_id,
+            ):
+                self.publish_status(
+                    "portal_route_source_mismatch",
+                    route_id=int(getattr(self, "active_route_id", 0) or 0),
+                    current_place_id=current_place_id,
+                    departure_source_place_id=_optional_int(source_place_id),
+                    portal_source_place_id=portal_source_place_id,
+                    reason="stale_place_departure",
+                )
+                self._rollback_failed_activation(
+                    now, "portal_route_source_mismatch", selection,
+                )
+                return False
             if transaction_rebind:
                 transaction_snapshot = transaction.bind_route(
                     self.active_route_id,

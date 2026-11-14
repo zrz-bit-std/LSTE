@@ -160,8 +160,6 @@ class PlaceDepartureTransaction:
     ):
         """Install a departure only when its exact source remains enterable."""
         if (
-            self.active
-            or
             region is None
             or region.get("state") not in (
                 (PLACE_OPEN, PLACE_READY_TO_EXIT, PLACE_DORMANT, PLACE_SUSPENDED)
@@ -171,6 +169,16 @@ class PlaceDepartureTransaction:
             or target_region_claim_active
         ):
             return None
+        if self.active:
+            if int(self.region_id) != int(region["id"]):
+                # A departure prepared for another Place blocks every new
+                # source identity (env04 20261115_020852: P2 departure stayed
+                # active after entering P3, so portal 4 was recorded with
+                # source P2 and dfs.enter(2,4,4) was rejected).  The current
+                # physical Place is authoritative; replace the stale ticket.
+                self.clear()
+            else:
+                return None
         self.region_id = int(region["id"])
         self.component = copy_component_evidence(component)
         self.anchor_map = (float(anchor_map[0]), float(anchor_map[1]))

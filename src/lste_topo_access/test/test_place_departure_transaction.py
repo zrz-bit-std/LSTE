@@ -39,6 +39,17 @@ class OpenPlaceMemory:
         return True
 
 
+class TwoPlaceMemory:
+    def __init__(self):
+        self.regions = {
+            7: {"id": 7, "state": "open"},
+            8: {"id": 8, "state": "open"},
+        }
+
+    def by_id(self, region_id):
+        return self.regions.get(int(region_id))
+
+
 class PendingWorkItems:
     def unresolved_observation_count(self, _region_id, portal_probe_ledger=None):
         del portal_probe_ledger
@@ -240,6 +251,33 @@ class PlaceDepartureTransactionTest(unittest.TestCase):
         self.assertIsNone(replacement)
         self.assertEqual(transaction.anchor_map, (1.5, 2.5))
         self.assertEqual(transaction.basis, "structural_transition")
+
+    def test_new_source_place_replaces_stale_uncommitted_departure(self):
+        """Entering a new Place must not keep the previous source ticket."""
+        memory = TwoPlaceMemory()
+        transaction = PlaceDepartureTransaction()
+
+        first = transaction.prepare_region(
+            memory,
+            region_id=7,
+            anchor_map=(3.0, 4.0),
+            place_hops=1,
+            target_region_claim_active=False,
+        )
+        replacement = transaction.prepare_region(
+            memory,
+            region_id=8,
+            anchor_map=(8.0, 9.0),
+            place_hops=1,
+            target_region_claim_active=False,
+            basis="observation_boundary",
+        )
+
+        self.assertIs(first, memory.regions[7])
+        self.assertIs(replacement, memory.regions[8])
+        self.assertEqual(transaction.region_id, 8)
+        self.assertEqual(transaction.anchor_map, (8.0, 9.0))
+        self.assertEqual(transaction.basis, "observation_boundary")
 
 
 class LocalEgressPlaceLeaseTest(unittest.TestCase):
