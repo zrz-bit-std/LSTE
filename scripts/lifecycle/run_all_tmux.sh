@@ -38,14 +38,34 @@ fi
 
 "$WS/scripts/lifecycle/run_env_tmux.sh"
 
+# `rosnode list` can segfault under a freshly launched ROS graph (observed as
+# a core dump on batch runs, which then failed the 300 s readiness gate).
+# Take a single snapshot per readiness poll and retry a transient crash, so a
+# segfault cannot sink the whole launch and the per-node greps stop spawning a
+# dozen `rosnode list` processes every second.
+rosnode_list_snapshot() {
+  local nodes attempt
+  for attempt in 1 2 3 4 5; do
+    nodes="$(rosnode list 2>/dev/null || true)"
+    if [[ -n "$nodes" ]]; then
+      printf '%s\n' "$nodes"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$nodes"
+}
+
 nodes_session_ready() {
   local window node global_frontier_enabled
   global_frontier_enabled="${GLOBAL_FRONTIER_ENABLED:-${CFG_GLOBAL_FRONTIER_ENABLED:-true}}"
   for window in goal teb_nav controller_switch cmd_vel_mux health; do
     tmux list-windows -t "=lste" -F '#{window_name}' 2>/dev/null | grep -qx "$window" || return 1
   done
+  local node_nodes
+  node_nodes="$(rosnode_list_snapshot)"
   for node in /lste_goal_manager /lste_teb_goal_bridge /lste_controller_switch /lste_cmd_vel_mux /move_base; do
-    rosnode list 2>/dev/null | grep -qx "$node" || return 1
+    grep -qx "$node" <<< "$node_nodes" || return 1
   done
   if [[ "${global_frontier_enabled,,}" == "true" \
       || "$global_frontier_enabled" == "1" ]]; then
@@ -70,8 +90,10 @@ all_nodes_ready() {
       || "$global_frontier_enabled" == "1" ]]; then
     required_nodes+=(/lste_global_frontier)
   fi
+  local node_nodes
+  node_nodes="$(rosnode_list_snapshot)"
   for node in "${required_nodes[@]}"; do
-    rosnode list 2>/dev/null | grep -qx "$node" || return 1
+    grep -qx "$node" <<< "$node_nodes" || return 1
   done
 }
 
