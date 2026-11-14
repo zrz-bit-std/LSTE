@@ -61,6 +61,24 @@ class PlaceWorkItemTest(unittest.TestCase):
         self.assertAlmostEqual(item["semantic_score"], 0.86)
         self.assertEqual((item["x"], item["y"]), (3.0, 4.0))
 
+    def test_discard_unresolved_work_retires_portal_entry_and_exit(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        entry_id = ledger.ensure_portal_entry(
+            4, 3, (12.0, -1.2), 1, -1.0, 1.0,
+        )
+        exit_id = ledger.ensure_place_exit(
+            3, 2, 1, (6.0, 2.0), (6.0, 3.0), now=1.0,
+        )
+
+        discarded = ledger.discard_unresolved_work(3, 2.0, reason="test")
+
+        self.assertEqual(sorted(discarded), sorted([entry_id, exit_id]))
+        self.assertEqual(ledger.unresolved_ids(3), [])
+        self.assertEqual(ledger._items[entry_id]["state"], WORK_RESOLVED)
+        self.assertTrue(ledger._items[entry_id]["dismissed"])
+        self.assertEqual(ledger._items[exit_id]["state"], WORK_RESOLVED)
+        self.assertTrue(ledger.place_is_closed(3))
+
     def test_local_component_split_reuses_physical_owner(self):
         probe = ActivationProbe()
         owner, _tier = probe.region_memory.activate(

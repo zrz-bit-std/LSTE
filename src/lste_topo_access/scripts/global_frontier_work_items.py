@@ -1137,6 +1137,39 @@ class PlaceWorkItemLedger:
             closed.append(int(item["id"]))
         return closed
 
+    def discard_unresolved_work(self, place_id, now,
+                                reason="covered_place_exit_priority"):
+        """Resolve every unresolved item when a covered Place is left.
+
+        Unlike close_place(), this also retires portal_entry and portal_exit
+        obligations.  It is the explicit smooth-DFS escape hatch: once the
+        Place is covered and the robot has physically returned to its parent,
+        no residual WorkItem may suspend the room or trigger another re-entry.
+        """
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return []
+        if place_id <= 0:
+            return []
+        self._closed_place_ids.add(place_id)
+        discarded = []
+        for item in self._items.values():
+            if int(item.get("place_id", -1)) != place_id:
+                continue
+            if item.get("state") != WORK_UNRESOLVED:
+                continue
+            attempt = self._active_attempt(item)
+            if attempt is not None:
+                self._finish_active_attempt(
+                    item, ATTEMPT_SUSPENDED, now, reason)
+            item["state"] = WORK_RESOLVED
+            item["dismissed"] = True
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            discarded.append(int(item["id"]))
+        return discarded
+
     def close_scoped_place(self, place_id, parent_place_id, branch_scope, now,
                            reason="semantic_room_explored_returned_to_junction"):
         """Close one explored entrance arm and return sibling work to its parent.

@@ -145,6 +145,36 @@ class GlobalFrontierPortalArrivalCommitMixin:
             )
         return dropped
 
+    def _covered_room_can_discard_unresolved(self, place_id):
+        """Whether a covered Place may ignore residual WIs on physical return.
+
+        The smooth-DFS contract: once the Place is covered and the robot has
+        physically returned to its parent, residual observation or Portal
+        obligations must not suspend the room.  A genuinely unfinished Place
+        keeps the existing resume path.
+        """
+        memory = getattr(self, "region_memory", None)
+        getter = getattr(memory, "by_id", None)
+        if not callable(getter):
+            return False
+        try:
+            region = getter(int(place_id))
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(region, dict):
+            return False
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        checker = getattr(ledger, "place_is_covered", None)
+        if callable(checker):
+            return bool(checker(region))
+        state = str(region.get("state", "")).strip().lower()
+        if state in ("dormant", "ready_to_exit"):
+            return True
+        try:
+            return int(region.get("endpoint_observations", 0) or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
     def _commit_semantic_room_return(self, active_room, portal_id, destination_place_id,
                                      now, hypothesis_ledger, gp_tree, room_stack):
         room_place_id = int(active_room.get("place_id", -1))
@@ -189,6 +219,57 @@ class GlobalFrontierPortalArrivalCommitMixin:
             and str(item.get("state", "")).strip().lower() == "unresolved"
             and item.get("active_attempt_id") is not None
         ]
+        discarded_ids = []
+        if unresolved_ids and self._covered_room_can_discard_unresolved(
+                room_place_id):
+            # Smooth-DFS policy: the Place is covered and the robot is back in
+            # its parent, so residual observation/Portal obligations are
+            # discarded instead of suspending the room and re-entering it.
+            discarded_ids = list(unresolved_ids)
+            if hypothesis_ledger is not None:
+                for item in work_records:
+                    if (
+                        int(item.get("place_id", -1)) != room_place_id
+                        or int(item.get("id", -1)) not in unresolved_set
+                        or str(item.get("kind", "")) != "portal_entry"
+                    ):
+                        continue
+                    try:
+                        child_portal = hypothesis_ledger.get(
+                            int(item.get("portal_id"))
+                        )
+                    except (TypeError, ValueError):
+                        child_portal = None
+                    if isinstance(child_portal, dict):
+                        child_portal["exploration_suppressed"] = True
+                        child_portal["policy_skip_reason"] = (
+                            "covered_place_exit_priority"
+                        )
+            discard = getattr(
+                self.place_work_items, "discard_unresolved_work", None,
+            )
+            if callable(discard):
+                dropped = discard(
+                    room_place_id, now,
+                    reason="covered_place_exit_priority",
+                )
+                if dropped:
+                    discarded_ids = sorted(
+                        set(discarded_ids) | {int(value) for value in dropped}
+                    )
+            self.publish_status(
+                "covered_room_unresolved_work_discarded",
+                place_id=room_place_id,
+                parent_place_id=int(destination_place_id),
+                portal_id=int(portal_id),
+                unresolved_work_item_ids=discarded_ids,
+                active_work_item_ids=active_ids,
+                reason="covered_place_exit_priority",
+            )
+            mark = getattr(dfs, "mark_returning", None)
+            if callable(mark):
+                mark(room_place_id, portal_id)
+            unresolved_ids = []
         if dfs is not None and dfs.nodes.get(room_place_id, {}).get("state") == "recovery_returning":
             if not dfs.return_to_parent(room_place_id, destination_place_id, portal_id):
                 self.publish_status("place_dfs_return_rejected", place_id=room_place_id,
@@ -273,7 +354,7 @@ class GlobalFrontierPortalArrivalCommitMixin:
             exit_item, room_place_id, destination_place_id, portal_id, now,
         )
         self._invalidate_place_scope_for_handoff(destination_place_id)
-        closed_items = []
+        closed_items = list(discarded_ids)
         reassigned_items = []
         if room_place_id > 0:
             parent_place_id = int(destination_place_id or 0)
@@ -281,17 +362,20 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 self.place_work_items, "close_scoped_place", None,
             )
             if callable(close_scoped) and parent_place_id > 0:
-                closed_items, reassigned_items = close_scoped(
+                scoped_closed, reassigned_items = close_scoped(
                     room_place_id,
                     parent_place_id,
                     branch_scope,
                     now,
                     reason="semantic_room_explored_returned_to_junction",
                 )
+                closed_items.extend(scoped_closed)
             else:
-                closed_items = self.place_work_items.close_place(
-                    room_place_id, now,
-                    reason="semantic_room_explored_returned_to_junction",
+                closed_items.extend(
+                    self.place_work_items.close_place(
+                        room_place_id, now,
+                        reason="semantic_room_explored_returned_to_junction",
+                    )
                 )
         entrance_portal = (hypothesis_ledger.get(int(active_room.get("portal_id", portal_id)))
                            if hypothesis_ledger is not None else None)
