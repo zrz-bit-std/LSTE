@@ -118,21 +118,20 @@ class GlobalFrontierPortalArrivalCommitMixin:
         needed (env04 20261114_173825, place 4).
         """
         ledger = getattr(self, "portal_probe_ledger", None)
-        pending = getattr(ledger, "pending_for_source", None)
+        snapshot = getattr(ledger, "snapshot", None)
         drop = getattr(ledger, "drop", None)
-        if not callable(pending) or not callable(drop):
+        if not callable(snapshot) or not callable(drop):
             return []
-        try:
-            records = pending(int(place_id), include_source_arrived=True)
-        except TypeError:
-            records = pending(int(place_id))
         dropped = []
-        for record in records or ():
+        for record in snapshot() or ():
             if not isinstance(record, dict):
                 continue
             try:
+                source = int(record.get("source_place_id", -1))
                 probe_id = int(record["id"])
             except (KeyError, TypeError, ValueError):
+                continue
+            if source != int(place_id):
                 continue
             drop(probe_id)
             dropped.append(probe_id)

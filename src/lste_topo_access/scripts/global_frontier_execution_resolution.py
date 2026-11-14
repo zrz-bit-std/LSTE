@@ -397,6 +397,11 @@ class GlobalFrontierExecutionResolutionMixin:
                     float(route_steps[row, col]) * resolution, 0.0)
 
         if endpoint_reached and terminal_required:
+            settle_probe = getattr(
+                self, "settle_probe_route_from_geometry", None)
+            if callable(settle_probe) and settle_probe(
+                    x, y, distance, active_component):
+                return None
             # Map coverage and endpoint distance do not own the controller
             # transaction. Wait for the bridge's matching TEB terminal.
             rospy.loginfo_throttle(
@@ -423,6 +428,44 @@ class GlobalFrontierExecutionResolutionMixin:
             watchdog,
         )
         return None
+
+    def settle_probe_route_from_geometry(self, x, y, distance, component):
+        """Settle a durable probe whose viewpoint is already at the robot.
+
+        The bridge coalesces a sub-metre goal and no TEB terminal ever arrives
+        (env04 20261114_193957: probe goals 0.93 m and 0.19 m, three
+        active_timeout settlements, then the exit blocked).  A probe is an
+        observation action, so physical proximity to its viewpoint is the
+        arrival fact; mark the endpoint observed (which settles the probe as
+        source_arrived) and release the lease.
+        """
+        if getattr(self, "active_portal_probe_id", None) is None:
+            return False
+        try:
+            limit = max(0.35, float(getattr(
+                self, "waypoint_release_radius", 0.35) or 0.35))
+        except (TypeError, ValueError):
+            limit = 0.35
+        try:
+            if float(distance) > limit:
+                return False
+        except (TypeError, ValueError):
+            return False
+        self.mark_frontier_observed(
+            x,
+            y,
+            component=component,
+            region_id=getattr(self, "active_frontier_region_id", None),
+        )
+        self.release_active_frontier(
+            preserve_place_departure=bool(
+                getattr(
+                    getattr(self, "place_departure", None), "active", False)
+            ),
+        )
+        if getattr(self, "prefetched_frontier", None) is None:
+            self.prefetched_goal_map = None
+        return True
 
     def active_route_failure_reason(self, watchdog):
         """Choose the single lifecycle reason for a stalled route lease."""

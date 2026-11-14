@@ -73,6 +73,30 @@ class ExitCompletionDropsProbeTest(unittest.TestCase):
         self.assertEqual(events[0]["probe_ids"], [probe_id])
         self.assertEqual(events[0]["place_id"], 4)
 
+    def test_an_observed_probe_is_also_dropped(self):
+        # 20261114_185222: the probe finished as observed after the exit
+        # completed, so the pending-only hook missed it and the selector kept
+        # reporting no_rehydratable_probe_for_source.
+        ledger, probe_id = _ledger_with_probe()
+        ledger.finish(probe_id, "observed", 20.0,
+                      "destination_viewpoint_observed")
+        host = _Host(ledger)
+
+        dropped = host._settle_completed_exit_probes(4, 4, 100.0)
+
+        self.assertEqual(dropped, [probe_id])
+        self.assertIsNone(ledger.get(probe_id))
+
+    def test_a_probe_for_another_place_is_kept(self):
+        ledger, probe_id = _ledger_with_probe()
+        other = ledger.observe(9, (7.0, 7.0), (1.0, 0.0), now=10.0)
+        host = _Host(ledger)
+
+        host._settle_completed_exit_probes(4, 4, 100.0)
+
+        self.assertIsNone(ledger.get(probe_id))
+        self.assertIsNotNone(ledger.get(int(other["id"])))
+
     def test_no_probe_is_a_noop(self):
         ledger = PortalProbeLedger(match_radius=0.5)
         host = _Host(ledger)
