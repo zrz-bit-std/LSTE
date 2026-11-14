@@ -26,6 +26,12 @@ WORK_UNSEEN = WORK_UNRESOLVED
 WORK_DISPATCHED = "dispatched"
 WORK_DEFERRED = "deferred"
 
+# An *item* state (unlike the attempt-only ``WORK_DEFERRED`` above).  A Place
+# closed by physical boundary evidence archives its unfinished local work
+# here: it no longer counts as outstanding work for the closed Place, but a
+# later re-entry can restore it to ``unresolved``.
+WORK_ITEM_DEFERRED = "deferred"
+
 ATTEMPT_ACTIVE = "active"
 ATTEMPT_FAILED = "failed"
 ATTEMPT_BLOCKED = "blocked"
@@ -1048,6 +1054,56 @@ class PlaceWorkItemLedger:
             item, _attempt = self.fail_attempt(item_id, now, reason)
             return item
         raise ValueError("resolved work item or deferred attempt required")
+
+    def defer_place_work(self, place_id, now,
+                         reason="departure_physical_boundary"):
+        """Archive unresolved local WorkItems for a Place closed by evidence.
+
+        Unlike close_place(), the items are not resolved and dismissed: they
+        keep their support geometry and attempts so restore_deferred_work()
+        can resume them if the robot re-enters this Place.
+        """
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return []
+        deferred = []
+        for item in self._items.values():
+            if int(item.get("place_id", -1)) != place_id:
+                continue
+            if item.get("state") != WORK_UNRESOLVED:
+                continue
+            if item.get("kind") in ("portal_entry", "portal_exit"):
+                continue
+            attempt = self._active_attempt(item)
+            if attempt is not None:
+                self._finish_active_attempt(
+                    item, ATTEMPT_SUSPENDED, now, reason)
+            item["state"] = WORK_ITEM_DEFERRED
+            item["dismissed"] = False
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            deferred.append(int(item["id"]))
+        return deferred
+
+    def restore_deferred_work(self, place_id, now,
+                              reason="place_reentered"):
+        """Return archived WorkItems to the active ledger on re-entry."""
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return []
+        restored = []
+        for item in self._items.values():
+            if int(item.get("place_id", -1)) != place_id:
+                continue
+            if item.get("state") != WORK_ITEM_DEFERRED:
+                continue
+            item["state"] = WORK_UNRESOLVED
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            restored.append(int(item["id"]))
+        return restored
 
     def close_place(self, place_id, now, reason="room_exploration_completed"):
         """Resolve and permanently suppress local WorkItems for one Place."""

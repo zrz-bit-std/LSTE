@@ -986,6 +986,11 @@ class GlobalFrontierPortalArrivalCommitMixin:
                     reason="stale_departure_lease_not_committed",
                 )
         self.current_physical_place_id = int(region["id"])
+        restore = getattr(
+            getattr(self, "place_work_items", None),
+            "restore_deferred_work", None)
+        if callable(restore):
+            restore(int(region["id"]), now, "place_reentered")
         if hypothesis is not None:
             entry_work_item_id = hypothesis.get("semantic_entry_work_item_id")
             item_ledger = getattr(self, "place_work_items", None)

@@ -223,20 +223,46 @@ class GlobalFrontierObservationDepartureMixin:
             )
         return departed
 
+    def defer_departed_place_work(self, region_id):
+        """Archive unresolved work for a Place closed by physical evidence."""
+        ledger = getattr(self, "place_work_items", None)
+        defer = getattr(ledger, "defer_place_work", None)
+        if not callable(defer):
+            return []
+        deferred = list(defer(
+            int(region_id), now_for(self), "departure_physical_boundary") or [])
+        if deferred:
+            self.publish_status(
+                "frontier_place_work_deferred",
+                region_id=int(region_id),
+                work_item_ids=deferred,
+                reason="departure_physical_boundary",
+            )
+        return deferred
+
     def commit_active_place_departure(self):
         """Commit a prepared source-place closure after a successful crossing."""
-        source_region = self.region_memory.by_id(self.place_departure.region_id)
+        transaction = self.place_departure
+        physical_evidence = bool(getattr(
+            transaction, "force_close_on_physical_evidence", False))
+        source_region = self.region_memory.by_id(transaction.region_id)
         protect = getattr(
-            self.place_departure, "suspend_if_local_work_pending", None,
+            transaction, "suspend_if_local_work_pending", None,
         )
         if source_region is not None and protect is not None:
             protect(
                 getattr(self, "place_work_items", None),
                 portal_probe_ledger=getattr(self, "portal_probe_ledger", None),
             )
-        closed, anchor, place_hops = self.place_departure.commit(
+        closed, anchor, place_hops = transaction.commit(
             self.region_memory, now_for(self)
         )
+        if (
+            physical_evidence
+            and closed is not None
+            and closed.get("state") == "dormant"
+        ):
+            self.defer_departed_place_work(int(closed["id"]))
         if closed is not None and closed.get("state") == "dormant":
             if self.place_departure.last_committed_basis == "covered_transit":
                 self.publish_status(
@@ -436,6 +462,10 @@ class GlobalFrontierObservationDepartureMixin:
                 ],
                 evidence="outside_place_scope_mask",
             )
+            force_close = getattr(
+                transaction, "require_close_on_physical_evidence", None)
+            if callable(force_close):
+                force_close()
             return self.commit_active_place_departure()
         if not anchor_cells or robot_cell is None:
             return None
@@ -463,4 +493,8 @@ class GlobalFrontierObservationDepartureMixin:
                 round(float(snapshot.robot_map[1]), 3),
             ],
         )
+        force_close = getattr(
+            transaction, "require_close_on_physical_evidence", None)
+        if callable(force_close):
+            force_close()
         return self.commit_active_place_departure()

@@ -55,6 +55,9 @@ class PlaceDepartureTransaction:
         # Branch-first execution keeps unresolved local work resumable after
         # the robot follows a novel Portal into another Place.
         self.suspend_local_work = False
+        # A map-proven boundary crossing must not keep the source Place
+        # suspended while the robot stands outside its mask.
+        self.force_close_on_physical_evidence = False
 
     def require_physical_gate_crossing(self):
         """Bind this departure to a portal's physical gate-crossing proof."""
@@ -89,6 +92,20 @@ class PlaceDepartureTransaction:
         if not self.active or self.transit_only:
             return False
         self.suspend_local_work = True
+        return True
+
+    def require_close_on_physical_evidence(self):
+        """Close the Place even with pending work once the robot is outside.
+
+        Keeping the Place suspended after a map-proven departure leaves the
+        robot outside the Place mask while it still owns the Place, so every
+        local Navfn path is rejected at its first point.  The caller defers
+        the unresolved WorkItems instead of resolving them, so a later
+        re-entry can resume them.
+        """
+        if not self.active or self.transit_only:
+            return False
+        self.force_close_on_physical_evidence = True
         return True
 
     def suspend_if_local_work_pending(
@@ -239,7 +256,10 @@ class PlaceDepartureTransaction:
         place_hops = self.place_hops
         basis = self.basis
         transit_only = self.transit_only
-        suspend_local_work = self.suspend_local_work
+        suspend_local_work = (
+            self.suspend_local_work
+            and not self.force_close_on_physical_evidence
+        )
         self.clear()
         self.last_committed_basis = basis
         if region_id is None or anchor is None:

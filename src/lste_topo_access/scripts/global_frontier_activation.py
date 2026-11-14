@@ -163,6 +163,11 @@ class GlobalFrontierActivationMixin:
                 return None
             if selection.place_hops == 0:
                 self.current_physical_place_id = int(region["id"])
+                restore = getattr(
+                    getattr(self, "place_work_items", None),
+                    "restore_deferred_work", None)
+                if callable(restore):
+                    restore(int(region["id"]), now, "place_reentered")
         elif not getattr(self, "place_memory_enabled", True):
             # Geometry baselines never acquire a hidden Place simply because
             # a frontier has been accepted by Navfn. Their durable state is
