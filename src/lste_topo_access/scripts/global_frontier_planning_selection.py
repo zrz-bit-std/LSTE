@@ -815,7 +815,12 @@ class GlobalFrontierPlanningSelectionMixin:
                     commit = getattr(
                         self, "_commit_graph_route_candidate", None
                     )
-                    if probe_id > 0 and callable(graph_prepare):
+                    if (
+                        probe_id > 0
+                        and callable(graph_prepare)
+                        and getattr(
+                            self, "graph_route_planner_enabled", False)
+                    ):
                         graph_plan = graph_prepare(
                             map_epoch=snapshot_epoch,
                             visible_work_item_ids=(),
