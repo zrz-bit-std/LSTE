@@ -8,13 +8,15 @@ from global_frontier_room_scope import best_branch_for_portal, build_branch_scop
 
 def resolve_portal_dfs_entry(dfs, arrival_source_place_id,
                              destination_place_id, portal_id,
-                             active_place_id, portal_source_place_id):
+                             active_place_id, portal_source_place_id,
+                             portal_destination_place_id=None):
     """Resolve the DFS parent for one Portal arrival.
 
     The DFS cursor requires the parent to be the current stack top.  A stale
-    departure can hand us another Place; when the active room matches the
-    Portal ledger source, that source is the correct parent.  Return
-    ``(entered, parent_place_id)``.
+    departure can hand us another Place; when the active room is one of the
+    Portal endpoints (the recorded source on a forward crossing, the recorded
+    destination on a reverse crossing), that active room is the correct
+    parent.  Return ``(entered, parent_place_id)``.
     """
     try:
         source = int(arrival_source_place_id)
@@ -29,15 +31,17 @@ def resolve_portal_dfs_entry(dfs, arrival_source_place_id,
         fallback = int(active_place_id)
     except (TypeError, ValueError):
         fallback = None
-    try:
-        portal_source = int(portal_source_place_id)
-    except (TypeError, ValueError):
-        portal_source = None
+    endpoints = set()
+    for value in (portal_source_place_id, portal_destination_place_id):
+        try:
+            endpoints.add(int(value))
+        except (TypeError, ValueError):
+            continue
     if (
         source is not None
         and fallback is not None
         and fallback != source
-        and fallback == portal_source
+        and fallback in endpoints
         and dfs.enter(fallback, destination_place_id, portal_id)
     ):
         return True, fallback
@@ -1196,6 +1200,10 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 None if not isinstance(portal_record, dict)
                 else portal_record.get("source_place_id")
             )
+            portal_destination_place_id = (
+                None if not isinstance(portal_record, dict)
+                else portal_record.get("destination_place_id")
+            )
             entered, dfs_parent = resolve_portal_dfs_entry(
                 dfs,
                 arrival.source_region_id,
@@ -1203,6 +1211,7 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 int(portal_id),
                 active_room.get("place_id"),
                 portal_source_place_id,
+                portal_destination_place_id,
             )
             if not entered:
                 self.publish_status(

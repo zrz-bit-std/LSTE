@@ -26,22 +26,38 @@ def _optional_int(value):
 
 
 def portal_source_place_mismatch(current_place_id, departure_source_place_id,
-                                  portal_source_place_id):
-    """Return True when a Portal route would use a stale source Place.
+                                 portal_source_place_id,
+                                 portal_destination_place_id=None):
+    """Return True when a Portal route would start from the wrong Place.
 
-    The current physical Place owns every outgoing Portal edge.  A departure
-    transaction or a Portal ledger record from a previous Place must never
-    start a route: it would be recorded with the wrong parent and the DFS
-    enter would be rejected (env04 20261115_020852: portal 4 used source P2
-    while the robot and the Portal ledger were on P3).
+    A departure transaction from a previous Place must never start a route:
+    it would be recorded with the wrong parent and the DFS enter would be
+    rejected (env04 20261115_020852: portal 4 used source P2 while the robot
+    and the Portal ledger were on P3).
+
+    A Portal ledger record names the endpoint it was first observed from, so
+    a legitimate reverse crossing lists the current Place as its destination.
+    The current physical Place therefore only has to be one of the two Portal
+    endpoints; requiring it to be the recorded source rejected every reverse
+    exit (env04 20261115_025104: portal 3 is P1->P2, every P2 return was
+    rejected with source P1 and the exit dispatch looped for 300 s).
     """
     current = _optional_int(current_place_id)
     if current is None or current <= 0:
         return False
-    for value in (departure_source_place_id, portal_source_place_id):
-        source = _optional_int(value)
-        if source is not None and source > 0 and source != current:
-            return True
+    departure = _optional_int(departure_source_place_id)
+    if departure is not None and departure > 0 and departure != current:
+        return True
+    endpoints = [
+        value
+        for value in (
+            _optional_int(portal_source_place_id),
+            _optional_int(portal_destination_place_id),
+        )
+        if value is not None and value > 0
+    ]
+    if endpoints and current not in endpoints:
+        return True
     return False
 
 
@@ -947,14 +963,19 @@ class GlobalFrontierActivationMixin:
                 if callable(getter):
                     portal_record = getter(portal_id)
             portal_source_place_id = None
+            portal_destination_place_id = None
             if isinstance(portal_record, dict):
                 portal_source_place_id = _optional_int(
                     portal_record.get("source_place_id")
+                )
+                portal_destination_place_id = _optional_int(
+                    portal_record.get("destination_place_id")
                 )
             if portal_source_place_mismatch(
                 current_place_id,
                 source_place_id,
                 portal_source_place_id,
+                portal_destination_place_id,
             ):
                 self.publish_status(
                     "portal_route_source_mismatch",
@@ -962,6 +983,7 @@ class GlobalFrontierActivationMixin:
                     current_place_id=current_place_id,
                     departure_source_place_id=_optional_int(source_place_id),
                     portal_source_place_id=portal_source_place_id,
+                    portal_destination_place_id=portal_destination_place_id,
                     reason="stale_place_departure",
                 )
                 self._rollback_failed_activation(

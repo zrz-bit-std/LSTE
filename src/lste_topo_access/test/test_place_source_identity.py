@@ -29,6 +29,15 @@ class PortalSourcePlaceMismatchTest(unittest.TestCase):
     def test_portal_ledger_mismatch_is_rejected(self):
         self.assertTrue(portal_source_place_mismatch(3, 3, 4))
 
+    def test_reverse_crossing_from_recorded_destination_is_allowed(self):
+        self.assertFalse(portal_source_place_mismatch(2, 2, 1, 2))
+
+    def test_portal_without_current_place_endpoint_is_rejected(self):
+        self.assertTrue(portal_source_place_mismatch(3, 3, 1, 2))
+
+    def test_stale_departure_inside_portal_endpoints_is_still_rejected(self):
+        self.assertTrue(portal_source_place_mismatch(3, 2, 3, 4))
+
     def test_missing_departure_falls_back_to_current_place(self):
         self.assertFalse(portal_source_place_mismatch(3, None, 3))
 
@@ -81,6 +90,19 @@ class PortalDfsEntryResolutionTest(unittest.TestCase):
         self.assertFalse(entered)
         self.assertEqual(parent, 2)
         self.assertEqual(dfs.snapshot()["stack"], [1, 3])
+
+    def test_reverse_crossing_uses_the_active_destination_room(self):
+        dfs = PlaceDfsTraversal()
+        self.assertTrue(dfs.bootstrap(1))
+        self.assertTrue(dfs.enter(1, 2, 3))
+
+        entered, parent = resolve_portal_dfs_entry(
+            dfs, 1, 3, 3, 2, 1, 2,
+        )
+
+        self.assertTrue(entered)
+        self.assertEqual(parent, 2)
+        self.assertEqual(dfs.snapshot()["stack"], [1, 2, 3])
 
     def test_missing_dfs_still_reports_the_source(self):
         entered, parent = resolve_portal_dfs_entry(
