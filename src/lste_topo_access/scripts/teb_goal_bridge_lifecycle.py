@@ -446,6 +446,29 @@ class TebGoalBridgeLifecycleMixin:
         )
         if callback_generation == current_generation:
             return True
+        if callback_name == "done":
+            pending = getattr(self, "transport_handoff_pending", None)
+            if isinstance(pending, dict):
+                try:
+                    old_generation = int(
+                        pending.get("old_generation", 0) or 0
+                    )
+                except (TypeError, ValueError):
+                    old_generation = 0
+                if (old_generation > 0
+                        and callback_generation == old_generation):
+                    # This terminal belongs to the predecessor action that is
+                    # still gating successor dispatch.  Let it reach the
+                    # stale-terminal handler, which closes the transport gate
+                    # without applying the old terminal to the new route.
+                    self.publish_bridge_status(
+                        "stale_action_callback_admitted",
+                        callback=str(callback_name),
+                        callback_action_generation=callback_generation,
+                        current_action_generation=current_generation,
+                        reason="transport_handoff_predecessor",
+                    )
+                    return True
         self.publish_bridge_status(
             "stale_action_callback_ignored",
             callback=str(callback_name),

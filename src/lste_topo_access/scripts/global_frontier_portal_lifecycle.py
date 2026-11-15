@@ -83,7 +83,7 @@ class GlobalFrontierPortalLifecycleMixin(
         )
         component = self.active_frontier_component
         if component is None:
-            if self.portal_arrival_can_commit_without_component():
+            if self.portal_arrival_can_commit_identity(arrival):
                 return self.commit_portal_arrival(
                     arrival,
                     None,

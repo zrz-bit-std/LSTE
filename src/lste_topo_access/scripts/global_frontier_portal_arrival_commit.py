@@ -596,6 +596,13 @@ class GlobalFrontierPortalArrivalCommitMixin:
         """Enter the destination place after a structural identity is available."""
         transaction = getattr(self, "portal_transaction", None)
         portal_id = int(getattr(self, "last_portal_hypothesis_id", 0) or 0)
+        identity_portal = getattr(
+            self, "crossing_transaction_portal_id", None
+        )
+        if callable(identity_portal):
+            resolved = identity_portal(arrival)
+            if resolved > 0:
+                portal_id = int(resolved)
         if transaction is not None and not transaction.commit_authorized(
             route_id=getattr(arrival, "route_id", None),
             portal_id=(portal_id if portal_id > 0 else None),
@@ -998,6 +1005,11 @@ class GlobalFrontierPortalArrivalCommitMixin:
                 source_place_id=arrival.source_region_id,
             )
             if transition is not None:
+                discard = getattr(
+                    self, "discard_pending_portal_arrival", None
+                )
+                if callable(discard):
+                    discard(arrival.route_id)
                 self.publish_status(
                     "portal_transaction_phase",
                     transaction_id=int(transition.transaction_id),

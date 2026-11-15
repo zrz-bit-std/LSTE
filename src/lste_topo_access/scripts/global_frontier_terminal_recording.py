@@ -13,6 +13,30 @@ class GlobalFrontierTerminalRecordingMixin:
         boundary_check = getattr(self, "route_crosses_place_boundary", None)
         if boundary_check is not None:
             crosses_place_boundary = bool(boundary_check(place_hops))
+        transaction = getattr(self, "portal_transaction", None)
+        if (
+            completed is not None
+            and self.active_route_kind != "portal_transition"
+            and transaction is not None
+            and transaction.active
+            and str(transaction.state) == "crossing_verified"
+        ):
+            # The route kind can change before the terminal is recorded.  A
+            # physically verified crossing still belongs to the transaction;
+            # do not drop its arrival silently.
+            self.publish_status(
+                "portal_arrival_record_skipped",
+                route_kind=str(self.active_route_kind),
+                transaction_route_id=int(
+                    transaction.snapshot().route_id or 0
+                ),
+                reason="route_kind_changed_before_terminal",
+            )
+            resolve = getattr(
+                self, "resolve_verified_portal_crossing", None
+            )
+            if callable(resolve):
+                resolve()
         if completed is not None and self.active_route_kind == "portal_transition":
             self.record_portal_place_arrival(completed)
         elif (

@@ -133,6 +133,9 @@ def _initialize_action_state(bridge):
     bridge.active_motion_reference = None
     bridge.active_motion_reference_yaw = None
     bridge.active_motion_progress_monotonic = 0.0
+    bridge.terminal_hold_stall_route_id = 0
+    bridge.terminal_hold_stall_anchor_xy = None
+    bridge.terminal_hold_stall_since = 0.0
     bridge.active_navfn_plan_points = []
     bridge.active_navfn_plan_endpoint = None
     bridge.active_navfn_remaining = None

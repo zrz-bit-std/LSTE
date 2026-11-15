@@ -23,6 +23,8 @@ class TebGoalBridgeHandoffStallMixin:
         pending_delta = self._pending_goal_delta_locked()
         if self._try_frontier_progress_transition_locked(pending_delta):
             return
+        if self._terminal_hold_no_translation_locked(now, pending_delta):
+            return
         stalled = self._action_is_stalled_locked(now)
         target_progress_basis, target_stalled = self._target_stall_state_locked(
             now, pending_delta
@@ -149,6 +151,74 @@ class TebGoalBridgeHandoffStallMixin:
                 "reorientation: yaw_progress=%.1fdeg duration=%.1fs",
                 math.degrees(self.teb_reorientation_total_yaw),
                 duration,
+            )
+        return True
+
+    def _terminal_hold_no_translation_locked(self, now, pending_delta):
+        """Cancel a terminal-held action whose base has stopped translating.
+
+        The planner contract can stay in ``terminal_hold`` while repeated
+        target/frontier re-dispatches keep the feedback progress clock fresh.
+        A pose-anchored window is independent of those resets and bounds the
+        otherwise unbounded predecessor gate before the trial watchdog fires.
+        """
+        reason = str(
+            getattr(self, "teb_feedback_invalid_reason", "") or ""
+        )
+        route_id = int(getattr(self, "active_route_id", 0) or 0)
+        if reason != "planner_contract_terminal_hold" or route_id <= 0:
+            self.terminal_hold_stall_route_id = 0
+            self.terminal_hold_stall_since = 0.0
+            self.terminal_hold_stall_anchor_xy = None
+            return False
+        pose = getattr(self, "pose_odom", None)
+        if pose is None:
+            return False
+        xy = (float(pose.x), float(pose.y))
+        if (
+            route_id != int(
+                getattr(self, "terminal_hold_stall_route_id", 0) or 0
+            )
+            or getattr(self, "terminal_hold_stall_anchor_xy", None) is None
+        ):
+            self.terminal_hold_stall_route_id = route_id
+            self.terminal_hold_stall_anchor_xy = xy
+            self.terminal_hold_stall_since = float(now)
+            return False
+        anchor = self.terminal_hold_stall_anchor_xy
+        if math.hypot(xy[0] - anchor[0], xy[1] - anchor[1]) >= 0.35:
+            self.terminal_hold_stall_route_id = route_id
+            self.terminal_hold_stall_anchor_xy = xy
+            self.terminal_hold_stall_since = float(now)
+            return False
+        timeout = float(
+            getattr(self, "terminal_hold_stall_seconds", 45.0) or 0.0
+        )
+        if timeout <= 0.0 or float(now) - self.terminal_hold_stall_since < timeout:
+            return False
+        held_seconds = max(0.0, float(now) - self.terminal_hold_stall_since)
+        self.terminal_hold_stall_route_id = 0
+        self.terminal_hold_stall_since = 0.0
+        self.terminal_hold_stall_anchor_xy = None
+        self.publish_bridge_status(
+            "terminal_hold_stall",
+            route_id=route_id,
+            reason="planner_contract_terminal_hold_no_translation",
+            held_seconds=round(held_seconds, 1),
+            pose=[round(xy[0], 3), round(xy[1], 3)],
+            pending_delta=round(float(pending_delta), 3),
+        )
+        if int(getattr(self, "active_intent_priority", 0) or 0) >= 2:
+            self._latch_target_failure_locked(
+                "target_terminal_hold_stalled",
+                status_text="NO_PROGRESS",
+                cancel_action=True,
+            )
+        else:
+            self._cancel_stalled_frontier_locked(
+                now,
+                pending_delta,
+                reason="terminal_hold_no_translation",
             )
         return True
 

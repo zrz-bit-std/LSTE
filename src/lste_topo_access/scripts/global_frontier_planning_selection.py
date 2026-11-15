@@ -448,6 +448,11 @@ class GlobalFrontierPlanningSelectionMixin:
         authentication_owns_navigation = bool(
             callable(owns_portal_navigation) and owns_portal_navigation()
         )
+        resolve_crossing = getattr(
+            self, "resolve_verified_portal_crossing", None
+        )
+        if callable(resolve_crossing):
+            resolve_crossing()
         transaction = getattr(self, "portal_transaction", None)
         if (authentication_owns_navigation and transaction is not None
                 and transaction.active and transaction.state == "source_probe"

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import time
 import numpy as np
 from types import SimpleNamespace
 import unittest
@@ -797,6 +798,88 @@ class PortalPlaceArrivalTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def _verified_crossing_explorer(self, active_portal_id=5):
+        explorer = PortalExplorer()
+        transaction = PortalTransaction()
+        transaction.start(
+            19,
+            portal_id=5,
+            source_place_id=3,
+            gate_xy=(7.2, 4.0),
+            destination_xy=(8.5, 4.0),
+            source_side_proven=True,
+            source_signed_distance=-1.0,
+        )
+        transaction.crossing_verified(19)
+        explorer.portal_transaction = transaction
+        explorer.last_portal_hypothesis_id = active_portal_id
+        return explorer, transaction
+
+    def test_crossing_identity_uses_transaction_portal_not_active_hypothesis(self):
+        explorer, transaction = self._verified_crossing_explorer(
+            active_portal_id=9,
+        )
+        # A successor route changed the mutable route kind after the physical
+        # crossing; the terminal-triggered arrival would be skipped.
+        explorer.active_route_kind = "frontier_endpoint"
+        explorer.pending_portal_arrivals = [PendingPortalArrival(
+            route_id=19,
+            goal_xy=(8.5, 4.0),
+            terminal_time=2.0,
+            source_region_id=3,
+            portal_gate_xy=(7.2, 4.0),
+            physical_goal_xy=(8.0, 4.0),
+            physical_portal_gate_xy=(7.2, 4.0),
+        )]
+
+        resolved = explorer.resolve_verified_portal_crossing(now=3.0)
+
+        self.assertTrue(resolved)
+        self.assertFalse(transaction.active)
+        self.assertIn(transaction.state, ("place_commit", "idle"))
+        self.assertTrue(any(
+            event in ("portal_place_entered", "portal_place_covered_arrival")
+            for event, _fields in explorer.events
+        ))
+        self.assertFalse(any(
+            event == "portal_place_arrival_rejected"
+            for event, _fields in explorer.events
+        ))
+        self.assertEqual(explorer.pending_portal_arrivals, [])
+
+    def test_crossing_without_route_or_commit_is_closed_after_budget(self):
+        explorer, transaction = self._verified_crossing_explorer()
+        explorer.active_frontier_component = None
+        explorer.active_route_id = 0
+        explorer.commit_portal_arrival = lambda *_args, **_kwargs: None
+        explorer._crossing_verified_uncommitted_pose = (8.0, 4.0)
+        explorer._crossing_verified_uncommitted_since = time.monotonic() - 31.0
+
+        resolved = explorer.resolve_verified_portal_crossing(now=3.0)
+
+        self.assertTrue(resolved)
+        self.assertFalse(transaction.active)
+        self.assertEqual(transaction.state, "idle")
+        self.assertEqual(transaction.snapshot().last_reason, "crossing_uncommitted")
+        aborted = next(fields for event, fields in explorer.events
+                       if event == "portal_transaction_aborted")
+        self.assertTrue(aborted["preserved_portal_obligation"])
+        self.assertTrue(aborted["crossing_uncommitted"])
+        self.assertEqual(explorer._crossing_verified_uncommitted_since, 0.0)
+
+    def test_crossing_resolver_ignores_unverified_transactions(self):
+        explorer = PortalExplorer()
+        transaction = PortalTransaction()
+        transaction.start(19, portal_id=5, source_place_id=3)
+        explorer.portal_transaction = transaction
+
+        self.assertFalse(
+            explorer.resolve_verified_portal_crossing(now=3.0)
+        )
+        self.assertTrue(transaction.active)
+        self.assertEqual(transaction.state, "source_probe")
 
 
 class SemanticEntryPlaceCommitTest(unittest.TestCase):

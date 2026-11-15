@@ -183,6 +183,9 @@ def _configure_action_health(bridge, gp):
         bridge.position_epsilon * 2.0, float(gp("~handoff_radius", 0.85))
     )
     bridge.progress_timeout = max(2.0, float(gp("~progress_timeout", 12.0)))
+    bridge.terminal_hold_stall_seconds = max(
+        10.0, float(gp("~terminal_hold_stall_seconds", 45.0))
+    )
     # Rotation counts as motion health: 0.12 rad is about one navigation cell
     # of heading change at the suite's yaw tolerance and cannot be produced by
     # noise on a stationary base.
