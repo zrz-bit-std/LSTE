@@ -4,11 +4,23 @@
 import ast
 import json
 from pathlib import Path
+import sys
 import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 SOURCE = SCRIPTS / "goal_manager_frontier.py"
+GOAL_OUTPUT_SOURCE = SCRIPTS / "goal_manager_goal_output.py"
+CORE_SCRIPTS = SCRIPTS.parents[1] / "lste_core" / "scripts"
+for path in (SCRIPTS, CORE_SCRIPTS):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+from utils.route_ownership import (  # noqa: E402
+    GRAPH,
+    GRAPH_GOAL_ROLES,
+    OBSERVATION,
+    OBSERVATION_GOAL_ROLES,
+)
 
 
 def load_status_callback():
@@ -91,6 +103,120 @@ class GoalManagerRouteContractTest(unittest.TestCase):
         self.assertEqual(lifecycle.global_frontier_route_kind, "frontier_connector")
         self.assertEqual(
             lifecycle.global_frontier_mission_route_kind, "frontier_endpoint",
+        )
+
+
+
+def load_goal_output_methods():
+    tree = ast.parse(
+        GOAL_OUTPUT_SOURCE.read_text(encoding="utf-8"),
+        filename=str(GOAL_OUTPUT_SOURCE),
+    )
+    mixin = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "GoalManagerGoalOutputMixin"
+    )
+    methods = [
+        node for node in mixin.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {
+            "_frontier_goal_ownership",
+            "_canonical_goal_identity_ready",
+        }
+    ]
+    namespace = {
+        "GRAPH": GRAPH,
+        "OBSERVATION": OBSERVATION,
+        "GRAPH_GOAL_ROLES": GRAPH_GOAL_ROLES,
+        "OBSERVATION_GOAL_ROLES": OBSERVATION_GOAL_ROLES,
+    }
+    exec(
+        compile(
+            ast.Module(body=methods, type_ignores=[]),
+            str(GOAL_OUTPUT_SOURCE),
+            "exec",
+        ),
+        namespace,
+    )
+    return namespace
+
+
+GOAL_OUTPUT_METHODS = load_goal_output_methods()
+
+
+class GoalOutputOwnership:
+    _frontier_goal_ownership = GOAL_OUTPUT_METHODS["_frontier_goal_ownership"]
+    _canonical_goal_identity_ready = (
+        GOAL_OUTPUT_METHODS["_canonical_goal_identity_ready"]
+    )
+
+    def __init__(self):
+        self.global_frontier_enabled = True
+        self.global_frontier_lifecycle_transaction_id = 7
+        self.global_frontier_route_id = 19
+        self.global_frontier_map_epoch = 10
+        self.global_frontier_origin_epoch = 10
+        self.global_frontier_projection_epoch = 10
+        self.global_frontier_graph_transaction_id = 0
+        self.canonical_route_ownership = GRAPH
+        self.canonical_work_item_id = 16
+        self.canonical_attempt_id = 6
+        self.global_frontier_goal_context = {
+            "goal_role": "place_observation_work",
+            "work_item_id": 16,
+            "attempt_id": 6,
+        }
+        self.rejections = []
+
+    @staticmethod
+    def _canonical_lifecycle_transaction_id():
+        return 7
+
+    @staticmethod
+    def _canonical_map_epoch():
+        return 10
+
+    def publish_goal_arbitration(self, event, **fields):
+        self.rejections.append((event, fields))
+
+
+class GoalOutputOwnershipTest(unittest.TestCase):
+    def test_observation_goal_does_not_inherit_stale_graph_ownership(self):
+        manager = GoalOutputOwnership()
+
+        self.assertTrue(
+            manager._canonical_goal_identity_ready("global_slam_frontier")
+        )
+        self.assertEqual(manager.rejections, [])
+
+    def test_place_observation_goal_accepts_zero_graph_identity(self):
+        manager = GoalOutputOwnership()
+        manager.global_frontier_goal_context = {"goal_role": "place_observation"}
+
+        self.assertTrue(
+            manager._canonical_goal_identity_ready("global_slam_frontier")
+        )
+
+    def test_portal_probe_goal_still_requires_positive_graph_identity(self):
+        manager = GoalOutputOwnership()
+        manager.global_frontier_goal_context = {"goal_role": "portal_probe"}
+
+        self.assertFalse(
+            manager._canonical_goal_identity_ready("global_slam_frontier")
+        )
+        self.assertEqual(
+            manager.rejections[-1][1]["reason"],
+            "missing_graph_transaction_id",
+        )
+
+    def test_portal_probe_goal_accepts_a_positive_graph_identity(self):
+        manager = GoalOutputOwnership()
+        manager.global_frontier_goal_context = {"goal_role": "portal_probe"}
+        manager.global_frontier_graph_transaction_id = 42
+
+        self.assertTrue(
+            manager._canonical_goal_identity_ready("global_slam_frontier")
         )
 
 

@@ -25,6 +25,7 @@ from global_frontier_graph_route_transaction import (  # noqa: E402
     materialize_graph_route_action,
     next_graph_route_transaction_id,
     route_graph_transaction_identity,
+    route_ownership_for_selection,
     with_graph_action,
 )
 from global_frontier_portal_probes import PortalObservationProbe  # noqa: E402
@@ -485,6 +486,69 @@ class GraphRouteTransactionTest(unittest.TestCase):
             selection, None, 50, 0, floor=40,
         )
         self.assertEqual((graph_id, sequence), (51, 51))
+
+    def test_portal_probe_route_gets_monotonic_graph_identity(self):
+        selection = SimpleNamespace(
+            authentication_phase=None,
+            graph_action=None,
+            portal_observation_probe=object(),
+            route_kind="frontier_endpoint",
+        )
+
+        graph_id, sequence = route_graph_transaction_identity(
+            selection, None, 106, 104,
+        )
+
+        self.assertEqual((graph_id, sequence), (107, 107))
+
+    def test_portal_transition_route_gets_monotonic_graph_identity(self):
+        selection = SimpleNamespace(
+            authentication_phase=None,
+            graph_action=None,
+            portal_observation_probe=None,
+            route_kind="portal_transition",
+        )
+
+        graph_id, sequence = route_graph_transaction_identity(
+            selection, None, 12, 0, floor=40,
+        )
+
+        self.assertEqual((graph_id, sequence), (41, 41))
+
+    def test_plain_observation_route_keeps_zero_graph_identity(self):
+        selection = SimpleNamespace(
+            authentication_phase=None,
+            graph_action=None,
+            portal_observation_probe=None,
+            route_kind="frontier_endpoint",
+        )
+
+        self.assertEqual(
+            route_graph_transaction_identity(selection, None, 106, 104),
+            (0, 106),
+        )
+        self.assertEqual(
+            route_ownership_for_selection(selection, 0),
+            "observation",
+        )
+
+    def test_route_ownership_follows_role_and_resolved_graph_id(self):
+        observation = SimpleNamespace(
+            authentication_phase=None,
+            graph_action=None,
+            portal_observation_probe=None,
+            route_kind="frontier_endpoint",
+        )
+        probe = SimpleNamespace(
+            authentication_phase=None,
+            graph_action=None,
+            portal_observation_probe=object(),
+            route_kind="frontier_endpoint",
+        )
+
+        self.assertEqual(route_ownership_for_selection(observation, 0), "observation")
+        self.assertEqual(route_ownership_for_selection(probe, 107), "graph")
+        self.assertEqual(route_ownership_for_selection(observation, 42), "graph")
 
     def test_semantic_room_keeps_selected_work_item_identity_during_materialization(self):
         harness = type("Harness", (), {})()

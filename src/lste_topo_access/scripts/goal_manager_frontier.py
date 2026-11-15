@@ -65,8 +65,11 @@ class GoalManagerFrontierMixin:
         graph_transaction_id = int(
             getattr(self, "global_frontier_graph_transaction_id", 0) or 0
         )
-        context["route_ownership"] = str(
-            getattr(self, "canonical_route_ownership", "graph")
+        ownership = getattr(self, "_frontier_goal_ownership", None)
+        context["route_ownership"] = (
+            str(ownership())
+            if callable(ownership)
+            else str(getattr(self, "canonical_route_ownership", "graph"))
         )
         work_item_id = int(getattr(self, "canonical_work_item_id", 0) or 0)
         attempt_id = int(getattr(self, "canonical_attempt_id", 0) or 0)

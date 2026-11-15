@@ -189,5 +189,24 @@ class ObservationDepartureTest(unittest.TestCase):
         self.assertEqual(explorer.place_departure.region_id, 9)
 
 
+
+class CoveredTransitRebindTest(unittest.TestCase):
+    def test_covered_transit_replaces_a_stale_departure_ticket(self):
+        explorer = ExactOwnerDepartureExplorer()
+        explorer.region_memory.regions[7]["state"] = "open"
+        explorer.region_memory.regions[9]["state"] = "transit"
+        explorer.place_departure.region_id = 7
+
+        departed = explorer.prepare_covered_place_transit(
+            robot_map=(2.0, 3.0),
+            place_hops=1,
+        )
+
+        self.assertEqual(departed["id"], 9)
+        self.assertEqual(explorer.place_departure.region_id, 9)
+        self.assertTrue(explorer.place_departure.transit_only)
+        self.assertTrue(explorer.place_departure.active)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,11 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from global_frontier_models import PortalTransitionRetry
-from global_frontier_graph_route_transaction import route_graph_transaction_identity
+from global_frontier_graph_route_transaction import (
+    route_graph_transaction_identity,
+    route_ownership_for_selection,
+)
+from utils.route_ownership import GRAPH
 
 
 def load_methods(source, class_name, names, namespace):
@@ -57,7 +61,9 @@ ACTIVATION_METHODS = load_methods(
     "GlobalFrontierActivationMixin",
     {"initialize_active_frontier_route"},
     {"math": math, "copy_component_evidence": lambda value: value,
-     "route_graph_transaction_identity": route_graph_transaction_identity},
+     "route_graph_transaction_identity": route_graph_transaction_identity,
+     "route_ownership_for_selection": route_ownership_for_selection,
+     "GRAPH": GRAPH},
 )
 
 
@@ -180,6 +186,16 @@ class ActivationExplorer:
         self.last_status_command_yaw = 0.1
         self.last_status_mission_map = (9.0, 9.0)
         self.history_begins = []
+
+    def _raise_graph_identity_floor(self, *values):
+        floor = int(getattr(self, "graph_route_identity_floor", 0) or 0)
+        for value in values:
+            try:
+                floor = max(floor, int(value or 0))
+            except (TypeError, ValueError):
+                continue
+        self.graph_route_identity_floor = floor
+        return floor
 
     def _clear_active_place_departure(self):
         raise AssertionError("active departure should be retained")

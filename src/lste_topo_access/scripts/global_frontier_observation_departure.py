@@ -10,6 +10,7 @@ import time
 import numpy as np
 
 from clock_provider import now_for
+from global_frontier_place_progress import PLACE_PHASE_TRANSIT
 
 
 class GlobalFrontierObservationDepartureMixin:
@@ -202,7 +203,9 @@ class GlobalFrontierObservationDepartureMixin:
         if current_id is None or self.target_region_claim_active:
             return None
         region = self.region_memory.by_id(current_id)
-        if region is None or region.get("state") != "dormant":
+        if region is None or region.get("state") not in (
+            "dormant", PLACE_PHASE_TRANSIT,
+        ):
             return None
         departed = self.place_departure.prepare_region(
             self.region_memory,

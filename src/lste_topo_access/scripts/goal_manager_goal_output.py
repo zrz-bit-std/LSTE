@@ -14,6 +14,12 @@ from std_msgs.msg import String
 from tf.transformations import quaternion_from_euler, quaternion_matrix
 
 from goal_context import default_goal_context
+from utils.route_ownership import (
+    GRAPH,
+    GRAPH_GOAL_ROLES,
+    OBSERVATION,
+    OBSERVATION_GOAL_ROLES,
+)
 
 class GoalManagerGoalOutputMixin:
     # -------------------- Helpers --------------------
@@ -43,6 +49,28 @@ class GoalManagerGoalOutputMixin:
         except (TypeError, ValueError):
             return 0
 
+    def _frontier_goal_ownership(self) -> str:
+        """Return the ownership declared by the current frontier goal context.
+
+        ``canonical_route_ownership`` is updated only after a route command is
+        accepted.  A rejected or superseded command can therefore leave a
+        stale graph ownership behind and make a later observation goal look
+        like a graph route.  The current goal role is the authoritative
+        declaration for the goal being published.
+        """
+        canonical = str(
+            getattr(self, "canonical_route_ownership", GRAPH)
+        )
+        context = getattr(self, "global_frontier_goal_context", None)
+        if not isinstance(context, dict):
+            return canonical
+        role = str(context.get("goal_role", "")).strip().lower()
+        if role in OBSERVATION_GOAL_ROLES:
+            return OBSERVATION
+        if role in GRAPH_GOAL_ROLES:
+            return GRAPH
+        return canonical
+
     def _canonical_goal_identity_ready(self, source: str) -> bool:
         """Require complete upstream identity for the online route pipeline."""
         if not bool(getattr(self, "global_frontier_enabled", False)):
@@ -56,8 +84,13 @@ class GoalManagerGoalOutputMixin:
             )
             return False
         if source == "global_slam_frontier":
-            ownership = str(
-                getattr(self, "canonical_route_ownership", "graph")
+            ownership_method = getattr(
+                self, "_frontier_goal_ownership", None
+            )
+            ownership = (
+                str(ownership_method())
+                if callable(ownership_method)
+                else str(getattr(self, "canonical_route_ownership", "graph"))
             )
             fields = [
                 ("route_id", getattr(self, "global_frontier_route_id", 0)),
@@ -126,8 +159,13 @@ class GoalManagerGoalOutputMixin:
             # here would drop every target approach detected from a GP work
             # item.  Keep the inherited route id strict and only require the
             # graph id for graph-owned routes.
-            ownership = str(
-                getattr(self, "canonical_route_ownership", "graph")
+            ownership_method = getattr(
+                self, "_frontier_goal_ownership", None
+            )
+            ownership = (
+                str(ownership_method())
+                if callable(ownership_method)
+                else str(getattr(self, "canonical_route_ownership", "graph"))
             )
             inherited_route_id = int(
                 getattr(self, "global_frontier_route_id", 0) or 0

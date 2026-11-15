@@ -28,6 +28,7 @@ from global_frontier_graph_route_planner import (
     GraphRoutePlan,
     PLAN_READY,
 )
+from utils.route_ownership import GRAPH, GRAPH_ACTIONS, OBSERVATION
 
 
 _UNSET = object()
@@ -119,13 +120,46 @@ def next_graph_route_transaction_id(
     return max(values or [0]) + 1
 
 
+def _selection_graph_owned(selection):
+    """Return whether the selected route belongs to the durable graph domain."""
+    auth = str(getattr(selection, "authentication_phase", "") or "")
+    action = str(getattr(selection, "graph_action", "") or "").strip().lower()
+    probe = getattr(selection, "portal_observation_probe", None)
+    route_kind = str(getattr(selection, "route_kind", "") or "").strip().lower()
+    return bool(
+        auth
+        or action in GRAPH_ACTIONS
+        or probe is not None
+        or route_kind == "portal_transition"
+    )
+
+
+def route_ownership_for_selection(selection, graph_transaction_id):
+    """Return the controller ownership class for one selected route.
+
+    Observation/geometry routes own no durable graph transaction; their
+    ownership token is the route/lifecycle identity plus, when present, the
+    work-item attempt.  Portal probes, crossings, and durable graph actions do
+    own a positive graph transaction.
+    """
+    try:
+        graph_id = int(graph_transaction_id or 0)
+    except (TypeError, ValueError):
+        graph_id = 0
+    if _selection_graph_owned(selection) or graph_id > 0:
+        return GRAPH
+    return OBSERVATION
+
+
 def route_graph_transaction_identity(selection, transaction, sequence,
                                      released_graph_transaction_id=0, floor=0):
-    """Keep controller graph IDs monotonic for non-durable GP auth routes.
+    """Keep controller graph IDs monotonic for graph-owned routes.
 
-    The GP observation route temporarily bypasses the durable graph planner,
-    but GoalManager still validates its graph identity against the high-water
-    mark established by earlier WorkItem/Portal materialization attempts.
+    GP authentication, portal probes, and certified portal transitions
+    temporarily bypass the durable graph planner, but GoalManager still
+    validates their graph identity against the high-water mark established by
+    earlier WorkItem/Portal materialization attempts.  Plain observation routes
+    keep the legal zero sentinel and their work-item attempt token instead.
     """
     try:
         current_id = int(getattr(transaction, "graph_transaction_id", 0) or 0)
@@ -137,7 +171,7 @@ def route_graph_transaction_identity(selection, transaction, sequence,
         sequence_id = 0
     if current_id > 0:
         return current_id, sequence_id
-    if not str(getattr(selection, "authentication_phase", "") or ""):
+    if not _selection_graph_owned(selection):
         return 0, sequence_id
     allocated = next_graph_route_transaction_id(
         sequence_id, released_graph_transaction_id, floor,

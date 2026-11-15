@@ -14,6 +14,7 @@ from global_frontier_place_memory import (
     PLACE_READY_TO_EXIT,
     PLACE_SUSPENDED,
 )
+from global_frontier_place_progress import PLACE_PHASE_TRANSIT
 
 
 class PlaceDepartureTransaction:
@@ -159,13 +160,17 @@ class PlaceDepartureTransaction:
         allow_dormant=False,
     ):
         """Install a departure only when its exact source remains enterable."""
+        allowed_states = (PLACE_OPEN, PLACE_READY_TO_EXIT, PLACE_SUSPENDED)
+        if allow_dormant:
+            # A covered transit Place is a legitimate through-room source:
+            # its local work is complete, but the robot may need to cross it
+            # to reach a branch on the other side.  Keep the departure
+            # transit-only so committing it never reopens or closes the
+            # Place as a fresh observation.
+            allowed_states += (PLACE_DORMANT, PLACE_PHASE_TRANSIT)
         if (
             region is None
-            or region.get("state") not in (
-                (PLACE_OPEN, PLACE_READY_TO_EXIT, PLACE_DORMANT, PLACE_SUSPENDED)
-                if allow_dormant
-                else (PLACE_OPEN, PLACE_READY_TO_EXIT, PLACE_SUSPENDED)
-            )
+            or region.get("state") not in allowed_states
             or target_region_claim_active
         ):
             return None

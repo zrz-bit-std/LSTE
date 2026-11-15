@@ -9,13 +9,16 @@ import math
 
 import rospy
 
-from utils.route_ownership import GRAPH, OBSERVATION
+from utils.route_ownership import GRAPH
 
 from lifecycle_manager import State
 from global_frontier_models import SelectedFrontier
 from global_frontier_topology import copy_component_evidence
 from global_frontier_portal_crossing import portal_signed_distance
-from global_frontier_graph_route_transaction import route_graph_transaction_identity
+from global_frontier_graph_route_transaction import (
+    route_graph_transaction_identity,
+    route_ownership_for_selection,
+)
 
 
 def _optional_int(value):
@@ -404,21 +407,6 @@ class GlobalFrontierActivationMixin:
         self.active_last_waypoint_map = None
         self.active_route_kind = selection.route_kind
         self.active_mission_route_kind = selection.route_kind
-        # Two ownership domains share the controller wire protocol.  A route
-        # owned by the durable graph (portal probe/crossing or a durable
-        # work-item action) must present a positive graph transaction.  A
-        # geometry/place observation work item owns no graph transaction and
-        # carries its work-item attempt identity instead.
-        self.active_route_ownership = (
-            GRAPH
-            if (
-                str(getattr(selection, "authentication_phase", "") or "")
-                or str(getattr(selection, "graph_action", "") or "").strip().lower()
-                in ("probe_portal", "cross_portal", "portal_crossing")
-                or graph_transaction is not None
-            )
-            else OBSERVATION
-        )
         self.active_portal_authentication_phase = str(
             getattr(selection, "authentication_phase", "") or ""
         )
@@ -442,6 +430,13 @@ class GlobalFrontierActivationMixin:
             getattr(self, "graph_route_action_transaction_sequence", 0) or 0
         ):
             self.graph_route_action_transaction_sequence = graph_sequence
+        # Keep ownership and the graph identity in lockstep.  Observation
+        # routes carry graph_transaction_id=0; portal probes/crossings and
+        # durable graph actions carry a positive id.  This avoids declaring a
+        # graph-owned route with a zero transaction on the wire.
+        self.active_route_ownership = route_ownership_for_selection(
+            selection, graph_transaction_id
+        )
         route_origin_epoch = getattr(graph_transaction, "origin_epoch", None)
         route_projection_epoch = getattr(
             graph_transaction, "projection_epoch", None

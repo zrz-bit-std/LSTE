@@ -303,5 +303,31 @@ class LocalEgressPlaceLeaseTest(unittest.TestCase):
         self.assertEqual(lease.phase, "idle")
 
 
+
+class CoveredTransitDepartureTest(unittest.TestCase):
+    def test_transit_place_can_prepare_a_transit_only_departure(self):
+        memory = OpenPlaceMemory()
+        memory.region["state"] = "transit"
+        transaction = PlaceDepartureTransaction()
+
+        prepared = transaction.prepare_region(
+            memory,
+            region_id=7,
+            anchor_map=(3.0, 4.0),
+            place_hops=1,
+            target_region_claim_active=False,
+            basis="covered_transit",
+            allow_dormant=True,
+        )
+
+        self.assertIs(prepared, memory.region)
+        self.assertTrue(transaction.transit_only)
+        closed, anchor, hops = transaction.commit(memory, now=42.0)
+        self.assertIs(closed, memory.region)
+        self.assertEqual(anchor, (3.0, 4.0))
+        self.assertEqual(hops, 1)
+        self.assertEqual(memory.close_calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
