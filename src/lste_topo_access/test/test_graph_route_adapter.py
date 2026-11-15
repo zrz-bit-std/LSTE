@@ -1429,5 +1429,156 @@ class PlaceObservationBestEffortAdapterTest(unittest.TestCase):
         )
 
 
+
+class ReturnSettlementFixture(GlobalFrontierGraphRouteAdapterMixin):
+    """Minimal owner for the DFS return-budget settlement path."""
+
+    def __init__(self, transaction=None):
+        from global_frontier_place_dfs import PlaceDfsTraversal
+        self.current_physical_place_id = 2
+        self.current_place_scope_id = 2
+        self.current_place_scope_valid = True
+        self.place_navigation_constraints = SimpleNamespace(
+            last_report={"robot_inside": True})
+        self.pose_odom = SimpleNamespace(x=4.0, y=0.0)
+        self.active_route_id = 0
+        self.portal_transaction = transaction
+        self.pending_local_egress = None
+        self.pending_portal_retry = None
+        self.portal_transaction_route_rebind_pending = True
+        self.active_portal_crossing_observed = False
+        self.place_dfs = PlaceDfsTraversal()
+        self.place_dfs.enter(1, 2, 8)
+        node = self.place_dfs.nodes[2]
+        node["state"] = "returning"
+        node["return_progress_at"] = 0.0
+        node["return_progress_xy"] = (4.0, 0.0)
+        self.events = []
+        self.release_calls = 0
+
+    def publish_status(self, event, **fields):
+        self.events.append((event, fields))
+
+    def active_portal_authentication(self):
+        return None
+
+    def release_active_frontier(self, **_kwargs):
+        self.release_calls += 1
+        route_id = int(getattr(self, "active_route_id", 0) or 0)
+        self.active_route_id = 0
+        if route_id and self.portal_transaction is not None:
+            self.portal_transaction.release_unstarted_route(route_id)
+
+
+def settled_return_transaction():
+    from global_frontier_portal_transaction import PortalTransaction
+    tx = PortalTransaction()
+    tx.start(7, portal_id=8, source_place_id=2, gate_xy=(1.0, 0.0),
+             destination_xy=(2.0, 0.0), source_side_proven=True,
+             source_signed_distance=-1.0)
+    tx.release_unstarted_route(7)
+    return tx
+
+
+class SettledReturnTransactionTest(unittest.TestCase):
+    def test_unstarted_return_lease_is_closed_after_settlement(self):
+        tx = settled_return_transaction()
+
+        fixture = ReturnSettlementFixture(tx)
+        self.assertFalse(fixture._update_place_execution_recovery())
+
+        self.assertEqual(fixture.place_dfs.nodes[2]["state"], "return_failed")
+        self.assertFalse(tx.active)
+        self.assertEqual(tx.state, "idle")
+        self.assertEqual(tx.snapshot().last_reason, "place_dfs_return_settled")
+        self.assertFalse(fixture.portal_transaction_route_rebind_pending)
+        names = [name for name, _fields in fixture.events]
+        self.assertIn("place_dfs_return_settled", names)
+        self.assertIn("portal_transaction_aborted", names)
+        self.assertIn("portal_transaction_finished", names)
+        aborted = next(fields for name, fields in fixture.events
+                       if name == "portal_transaction_aborted")
+        self.assertTrue(aborted["preserved_portal_obligation"])
+        # The edge identity and historical source-side proof stay visible in
+        # the finished snapshot for audit; a fresh return re-proves them.
+        finished = tx.snapshot()
+        self.assertEqual(finished.portal_id, 8)
+        self.assertEqual(finished.source_place_id, 2)
+        self.assertEqual(finished.gate_xy, (1.0, 0.0))
+        self.assertTrue(finished.source_side_proven)
+
+    def test_clearing_the_lease_does_not_unblock_a_bound_route(self):
+        from global_frontier_portal_transaction import PortalTransaction
+        tx = PortalTransaction()
+        tx.start(7, portal_id=8, source_place_id=2, gate_xy=(1.0, 0.0),
+                 destination_xy=(2.0, 0.0))
+        fixture = ReturnSettlementFixture(tx)
+
+        fixture._update_place_execution_recovery()
+
+        self.assertTrue(tx.active)
+        self.assertNotIn("portal_transaction_aborted",
+                         [name for name, _fields in fixture.events])
+
+    def test_running_release_may_zero_the_route_before_cleanup(self):
+        from global_frontier_portal_transaction import PortalTransaction
+        tx = PortalTransaction()
+        tx.start(7, portal_id=8, source_place_id=2, gate_xy=(1.0, 0.0),
+                 destination_xy=(2.0, 0.0))
+        fixture = ReturnSettlementFixture(tx)
+        fixture.active_route_id = 7
+        # The route already started, so the DFS budget must not be restarted.
+        fixture.place_dfs.nodes[2]["return_route_id"] = 7
+        fixture.place_dfs.nodes[2]["return_progress_at"] = 0.0
+
+        fixture._update_place_execution_recovery()
+
+        self.assertEqual(fixture.release_calls, 1)
+        self.assertFalse(tx.active)
+        self.assertEqual(tx.state, "idle")
+
+    def test_a_different_portal_lease_is_left_alone(self):
+        from global_frontier_portal_transaction import PortalTransaction
+        tx = PortalTransaction()
+        tx.start(7, portal_id=9, source_place_id=2)
+        tx.release_unstarted_route(7)
+        fixture = ReturnSettlementFixture(tx)
+
+        fixture._update_place_execution_recovery()
+
+        self.assertTrue(tx.active)
+        self.assertNotIn("portal_transaction_aborted",
+                         [name for name, _fields in fixture.events])
+
+    def test_pending_retry_keeps_the_lease_owned(self):
+        tx = settled_return_transaction()
+        fixture = ReturnSettlementFixture(tx)
+        fixture.pending_portal_retry = object()
+
+        fixture._update_place_execution_recovery()
+
+        self.assertTrue(tx.active)
+
+    def test_active_authentication_keeps_the_lease_owned(self):
+        tx = settled_return_transaction()
+        fixture = ReturnSettlementFixture(tx)
+        fixture.active_portal_authentication = lambda: object()
+
+        fixture._update_place_execution_recovery()
+
+        self.assertTrue(tx.active)
+
+    def test_settlement_is_idempotent(self):
+        tx = settled_return_transaction()
+        fixture = ReturnSettlementFixture(tx)
+
+        fixture._update_place_execution_recovery()
+        fixture._update_place_execution_recovery()
+
+        names = [name for name, _fields in fixture.events]
+        self.assertEqual(names.count("place_dfs_return_settled"), 1)
+        self.assertEqual(names.count("portal_transaction_aborted"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

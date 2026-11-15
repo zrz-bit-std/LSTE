@@ -104,6 +104,12 @@ class GlobalFrontierGraphRouteAdapterMixin:
                 release(discard_prefetch=True,
                         await_controller_release_ack=True,
                         preserve_place_departure=True)
+            # A return route released before controller dispatch leaves its
+            # Portal lease in source_probe/throat with route_id=0.  The DFS
+            # verdict above is terminal, so no navigation owner remains; close
+            # that lease or it blocks every later selection forever.
+            self._close_settled_return_transaction(
+                current_place_id, dfs_entry_portal_id)
             self.publish_status(
                 "place_dfs_return_settled",
                 place_id=int(current_place_id),
@@ -113,6 +119,69 @@ class GlobalFrontierGraphRouteAdapterMixin:
             )
             return False
         return False
+
+    def _close_settled_return_transaction(
+        self, current_place_id, entry_portal_id,
+    ):
+        """Release a return lease that was canceled before dispatch.
+
+        ``place_dfs_return_settled`` is the graph layer's terminal verdict on
+        the physical return.  A Portal transaction left in source_probe/throat
+        with route_id=0 has no navigation owner, yet the selector treats it as
+        an active lease and returns ``portal_transaction_wait`` forever.  Close
+        only that exact unstarted lease and keep the durable DFS/Portal
+        obligation (and its source-side evidence) intact for a later retry.
+        """
+        transaction = getattr(self, "portal_transaction", None)
+        if transaction is None or not transaction.active:
+            return False
+        if transaction.state not in ("source_probe", "throat"):
+            return False
+        snapshot = transaction.snapshot()
+        try:
+            route_id = int(snapshot.route_id or 0)
+            tx_portal_id = int(snapshot.portal_id or 0)
+            tx_source_place_id = int(snapshot.source_place_id or 0)
+            place_id = int(current_place_id)
+            entry_portal_id = int(entry_portal_id or 0)
+        except (TypeError, ValueError):
+            return False
+        if route_id != 0:
+            return False
+        if tx_portal_id <= 0 or tx_portal_id != entry_portal_id:
+            return False
+        if tx_source_place_id not in (0, place_id):
+            return False
+        if (getattr(self, "pending_local_egress", None) is not None
+                or getattr(self, "pending_portal_retry", None) is not None):
+            return False
+        auth = getattr(self, "active_portal_authentication", None)
+        if callable(auth) and auth() is not None:
+            return False
+        transition = transaction.abort("place_dfs_return_settled")
+        if transition is None:
+            return False
+        self.publish_status(
+            "portal_transaction_aborted",
+            transaction_id=int(transition.transaction_id),
+            route_id=int(transition.route_id),
+            portal_id=transition.portal_id,
+            state=transition.state,
+            reason=transition.last_reason,
+            preserved_portal_obligation=True,
+        )
+        finished = transaction.finish("place_dfs_return_settled")
+        self.portal_transaction_route_rebind_pending = False
+        if finished is not None:
+            self.publish_status(
+                "portal_transaction_finished",
+                transaction_id=int(finished.transaction_id),
+                portal_id=finished.portal_id,
+                source_place_id=finished.source_place_id,
+                state=finished.state,
+                reason=finished.last_reason,
+            )
+        return True
 
     @staticmethod
     def _graph_snapshot_map_epoch(snapshot):
