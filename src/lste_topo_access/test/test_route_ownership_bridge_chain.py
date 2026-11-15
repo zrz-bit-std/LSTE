@@ -12,6 +12,7 @@ import json
 import math
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -19,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src" / "lste_core" / "scripts"))
 
 GOAL_OUTPUT = ROOT / "src" / "lste_topo_access" / "scripts" / "goal_manager_goal_output.py"
 BRIDGE_LIFECYCLE = ROOT / "src" / "lste_topo_access" / "scripts" / "teb_goal_bridge_lifecycle.py"
+REPORTING = ROOT / "src" / "lste_topo_access" / "scripts" / "global_frontier_reporting.py"
 
 
 def load_method(source, class_name, method_name):
@@ -102,6 +104,116 @@ def mission_payload(ownership, graph_id, **overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def load_publish_route_command():
+    tree = ast.parse(
+        REPORTING.read_text(encoding="utf-8"), filename=str(REPORTING),
+    )
+    mixin = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "GlobalFrontierReportingMixin"
+    )
+    method = next(
+        node for node in mixin.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "publish_route_command"
+    )
+    holder = ast.ClassDef(
+        name="Holder", bases=[], keywords=[], body=[method],
+        decorator_list=[],
+    )
+    module = ast.Module(body=[holder], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {
+        "json": json,
+        "rospy": SimpleNamespace(
+            Time=SimpleNamespace(
+                now=lambda: SimpleNamespace(to_sec=lambda: 1.0),
+            ),
+        ),
+        "String": lambda data=None: data,
+    }
+    exec(compile(module, str(REPORTING), "exec"), namespace)
+    return namespace["Holder"].publish_route_command
+
+
+PUBLISH_ROUTE_COMMAND = load_publish_route_command()
+
+
+class PublishedCommandIdentity:
+    publish_route_command = PUBLISH_ROUTE_COMMAND
+
+    def __init__(self, ownership, contract_graph_id):
+        self.active_route_id = 2
+        self.active_route_ownership = ownership
+        self.active_route_dispatch_contract = {
+            "route_id": 2,
+            "graph_transaction_id": contract_graph_id,
+        }
+        self.graph_route_action_transaction = None
+        self.active_portal_authentication = None
+        self.active_route_map_epoch = 12
+        self.last_map_epoch = 12
+        self.topology_component_epoch = 12
+        self.active_action_generation = 3
+        self.active_mission_route_kind = "frontier_endpoint"
+        self.last_graph_route_plan = None
+        self.active_portal_probe_phase = ""
+        self.active_transition_kind = "initial"
+        self.active_predecessor_route_id = 0
+        self.active_transition_distance = None
+        self.active_work_item_id = None
+        self.active_work_item_attempt_id = None
+        self.decision_wake_scheduler = None
+        self.gp_exploration_tree = None
+        self.published = []
+        self.command_publisher = SimpleNamespace(publish=self._publish)
+
+    @staticmethod
+    def route_lifecycle_transaction_id():
+        return 7
+
+    def active_goal_context(self, route_kind=None, graph_transaction_id=None):
+        return {
+            "goal_role": "place_observation",
+            "route_ownership": self.active_route_ownership,
+            "graph_transaction_id": graph_transaction_id,
+        }
+
+    @staticmethod
+    def portal_transaction_report():
+        return {}
+
+    @staticmethod
+    def _optional_place_id(value):
+        return value if value else None
+
+    def _publish(self, data):
+        self.published.append(json.loads(data))
+
+
+class PublishedCommandIdentityTest(unittest.TestCase):
+    def test_graph_owned_route_publishes_activation_graph_identity(self):
+        command = PublishedCommandIdentity("graph", 1)
+
+        command.publish_route_command(
+            "map", 1.0, 2.0, 0.0, "frontier_endpoint",
+        )
+
+        self.assertEqual(command.published[-1]["graph_transaction_id"], 1)
+        self.assertEqual(command.published[-1]["route_ownership"], "graph")
+
+    def test_observation_route_keeps_zero_graph_identity(self):
+        command = PublishedCommandIdentity("observation", 0)
+
+        command.publish_route_command(
+            "map", 1.0, 2.0, 0.0, "frontier_endpoint",
+        )
+
+        self.assertEqual(command.published[-1]["graph_transaction_id"], 0)
+        self.assertEqual(command.published[-1]["route_ownership"], "observation")
 
 
 class GoalOutputIdentityTest(unittest.TestCase):

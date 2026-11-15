@@ -64,6 +64,40 @@ def portal_source_place_mismatch(current_place_id, departure_source_place_id,
     return False
 
 
+def rebind_stale_portal_departure(
+    explorer, current_place_id, departure_source_place_id,
+    portal_source_place_id, portal_destination_place_id,
+    robot_map, place_hops,
+):
+    """Return a departure source consistent with the current Portal endpoint.
+
+    A departure prepared from a stale component owner can survive until route
+    activation, after which the current physical Place is authoritative.  If
+    the current Place is one of the Portal endpoints, replace the stale ticket
+    with a covered transit departure from that Place and retry the guard once.
+    """
+    current = _optional_int(current_place_id)
+    source = _optional_int(departure_source_place_id)
+    if not portal_source_place_mismatch(
+        current, source, portal_source_place_id, portal_destination_place_id,
+    ):
+        return source
+    endpoints = (
+        _optional_int(portal_source_place_id),
+        _optional_int(portal_destination_place_id),
+    )
+    if current is None or current <= 0 or current not in endpoints:
+        return source
+    if source == current:
+        return source
+    rebound = explorer.prepare_covered_place_transit(
+        robot_map, place_hops or 1,
+    )
+    if rebound is not None:
+        return current
+    return source
+
+
 class GlobalFrontierActivationMixin:
     def _raise_graph_identity_floor(self, *values):
         """Keep a monotonic floor for the graph transaction IDs we allocate.
@@ -966,6 +1000,15 @@ class GlobalFrontierActivationMixin:
                 portal_destination_place_id = _optional_int(
                     portal_record.get("destination_place_id")
                 )
+            source_place_id = rebind_stale_portal_departure(
+                self,
+                current_place_id,
+                source_place_id,
+                portal_source_place_id,
+                portal_destination_place_id,
+                robot_map,
+                getattr(selection, "place_hops", None),
+            )
             if portal_source_place_mismatch(
                 current_place_id,
                 source_place_id,

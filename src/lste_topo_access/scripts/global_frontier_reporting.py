@@ -1049,11 +1049,18 @@ class GlobalFrontierReportingMixin:
         graph_owned_portal_route = (
             str(route_kind or "").strip().lower() == "portal_transition"
         )
-        if graph_transaction_id <= 0 and (
-            auth is not None or graph_owned_portal_route
-        ):
-            # Authentication waypoints are temporary GP work, but the
-            # persistent GoalManager still requires a positive route identity.
+        graph_owned_route = bool(
+            auth is not None
+            or graph_owned_portal_route
+            or str(getattr(self, "active_route_ownership", "")).strip().lower()
+            == "graph"
+        )
+        if graph_transaction_id <= 0 and graph_owned_route:
+            # The live graph transaction can be cleared between activation and
+            # publication.  The activation-time dispatch contract remains the
+            # source of truth for this route's graph identity; without this
+            # fallback a graph-owned route is published with a zero id and the
+            # GoalManager correctly discards it as missing identity.
             activated = getattr(self, "active_route_dispatch_contract", None) or {}
             if int(activated.get("route_id", 0) or 0) != int(self.active_route_id):
                 activated = {}

@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 
 
@@ -12,6 +13,7 @@ if str(SCRIPTS) not in sys.path:
 
 from global_frontier_activation import (  # noqa: E402
     portal_source_place_mismatch,
+    rebind_stale_portal_departure,
 )
 from global_frontier_place_dfs import PlaceDfsTraversal  # noqa: E402
 from global_frontier_portal_arrival_commit import (  # noqa: E402
@@ -49,6 +51,39 @@ class PortalSourcePlaceMismatchTest(unittest.TestCase):
 
     def test_zero_valued_sources_are_ignored(self):
         self.assertFalse(portal_source_place_mismatch(3, 0, 0))
+
+
+class StalePortalDepartureRebindTest(unittest.TestCase):
+    class Explorer:
+        def __init__(self):
+            self.calls = []
+            self.place_departure = SimpleNamespace(region_id=2)
+
+        def prepare_covered_place_transit(self, robot_map, place_hops):
+            self.calls.append((robot_map, place_hops))
+            self.place_departure.region_id = 3
+            return {"id": 3}
+
+    def test_stale_departure_rebinds_to_current_portal_endpoint(self):
+        explorer = self.Explorer()
+
+        source = rebind_stale_portal_departure(
+            explorer, 3, 2, 3, 5, (1.0, 2.0), 1,
+        )
+
+        self.assertEqual(source, 3)
+        self.assertEqual(explorer.place_departure.region_id, 3)
+        self.assertEqual(explorer.calls, [((1.0, 2.0), 1)])
+
+    def test_current_place_outside_portal_endpoints_stays_rejected(self):
+        explorer = self.Explorer()
+
+        source = rebind_stale_portal_departure(
+            explorer, 3, 2, 4, 5, (1.0, 2.0), 1,
+        )
+
+        self.assertEqual(source, 2)
+        self.assertEqual(explorer.calls, [])
 
 
 class PortalDfsEntryResolutionTest(unittest.TestCase):
