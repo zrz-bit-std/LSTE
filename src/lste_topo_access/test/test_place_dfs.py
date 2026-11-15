@@ -23,6 +23,16 @@ class PlaceDfsTest(unittest.TestCase):
         self.assertEqual(dfs.nodes[2]['state'],'returning')
         self.assertTrue(dfs.return_to_parent(2,1,10))
         self.assertEqual(dfs.stack,[1])
+    def test_mark_returning_allows_a_suspended_stack_top(self):
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
+        dfs.nodes[2]['state']='suspended'
+        self.assertTrue(dfs.mark_returning(2,10))
+        self.assertEqual(dfs.nodes[2]['state'],'returning')
+
+    def test_mark_returning_still_rejects_a_suspended_non_top(self):
+        dfs=PlaceDfsTraversal();dfs.enter(1,2,10);dfs.enter(2,3,11)
+        dfs.nodes[2]['state']='suspended'
+        self.assertFalse(dfs.mark_returning(2,10))
     def test_normal_return_has_physical_budget_independent_of_projection_refresh(self):
         dfs=PlaceDfsTraversal();dfs.enter(1,2,10)
         self.assertTrue(dfs.ready_to_return(2,projection_complete=True))

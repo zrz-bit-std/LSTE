@@ -373,6 +373,57 @@ class GlobalFrontierPlanningSelectionMixin:
         self.graph_route_probe_id = None
         return candidate, "durable_portal_probe", False
 
+    def _ready_place_exit_for_current_place(self):
+        """Return whether this Place owns a ready/returning exit obligation."""
+        items = getattr(self, "place_work_items", None)
+        getter = getattr(items, "place_exit_item", None)
+        place_id = getattr(self, "current_physical_place_id", None)
+        if not callable(getter) or place_id is None:
+            return False
+        try:
+            place_id = int(place_id)
+            item = getter(place_id)
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(item, dict):
+            return False
+        if str(item.get("exit_state", "")).strip().lower() not in (
+            "ready", "returning",
+        ):
+            return False
+        try:
+            exit_portal_id = int(item.get("portal_id", 0) or 0)
+        except (TypeError, ValueError):
+            exit_portal_id = 0
+        dfs = getattr(self, "place_dfs", None)
+        nodes = getattr(dfs, "nodes", None)
+        node = nodes.get(place_id) if isinstance(nodes, dict) else None
+        if isinstance(node, dict):
+            try:
+                entry_portal_id = int(node.get("portal_id", 0) or 0)
+            except (TypeError, ValueError):
+                entry_portal_id = 0
+            if (
+                entry_portal_id > 0
+                and exit_portal_id > 0
+                and entry_portal_id != exit_portal_id
+            ):
+                return False
+        return True
+
+    def _select_ready_exit_before_probe(self, snapshot):
+        """Give a queued door exit one attempt before a Portal probe."""
+        if not self._ready_place_exit_for_current_place():
+            return None
+        egress = getattr(self, "select_durable_portal_egress", None)
+        if not callable(egress):
+            return None
+        candidate = egress(snapshot)
+        if candidate is None:
+            return None
+        self.graph_route_portal_id = None
+        return candidate, "durable_portal_egress", False
+
     def select_next_active_frontier(self, snapshot):
         """Choose a terminal successor after resolving cache and claim policy."""
         # A held target-room claim filters out every candidate outside the
@@ -800,6 +851,9 @@ class GlobalFrontierPlanningSelectionMixin:
             and not self.frontier_validation_pending
             and not durable_probe_checked
         ):
+            ready_exit = self._select_ready_exit_before_probe(snapshot)
+            if ready_exit is not None:
+                return ready_exit
             durable_probe = getattr(self, "select_durable_portal_probe", None)
             if durable_probe is not None:
                 candidate = durable_probe(snapshot)

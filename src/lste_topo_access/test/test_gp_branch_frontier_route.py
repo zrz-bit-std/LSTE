@@ -17,6 +17,9 @@ from gp_branch_frontier import (
     select_reachable_return_sidestep_goal,
 )
 from gp_observation_tree import JunctionObservationTree
+from global_frontier_geometry import (
+    map_snapshot_projector_with_latest_fallback,
+)
 from global_frontier_planning_selection import GlobalFrontierPlanningSelectionMixin
 from global_frontier_work_items import (
     GlobalFrontierWorkItemLifecycleMixin, PlaceWorkItemLedger,
@@ -1297,6 +1300,70 @@ class PendingPassabilityTest(unittest.TestCase):
         self.assertNotIn(8, task.branches)
         self.assertEqual(task.phase, "complete")
         self.assertEqual(branch["authentication_state"], "waiting_passable_section")
+
+
+
+class MapSnapshotTfFallbackTest(unittest.TestCase):
+    class Node:
+        _place_partition_tf_key = None
+        _place_partition_projector = None
+
+        def __init__(self, fresh=False):
+            self.fresh = fresh
+            self.calls = []
+
+        def planar_xy_projector(self, target, source, stamp=None):
+            self.calls.append(stamp)
+            if stamp is not None:
+                if not self.fresh:
+                    return None
+                return lambda x, y: (x + 1.0, y + 2.0)
+            return lambda x, y: (x + 1.0, y + 2.0)
+
+    @staticmethod
+    def message():
+        return SimpleNamespace(
+            header=SimpleNamespace(
+                frame_id="map",
+                stamp=SimpleNamespace(to_sec=lambda: 10.0),
+            ),
+        )
+
+    def test_stale_map_stamp_falls_back_to_latest_tf(self):
+        node = self.Node()
+
+        project = map_snapshot_projector_with_latest_fallback(
+            node, self.message(), "map",
+        )
+
+        self.assertIsNotNone(project)
+        self.assertEqual(len(node.calls), 2)
+        self.assertIsNotNone(node.calls[0])
+        self.assertIsNone(node.calls[1])
+        self.assertEqual(project(1.0, 2.0), (2.0, 4.0))
+
+    def test_fresh_map_stamp_does_not_use_fallback(self):
+        node = self.Node(fresh=True)
+
+        project = map_snapshot_projector_with_latest_fallback(
+            node, self.message(), "map",
+        )
+
+        self.assertIsNotNone(project)
+        self.assertEqual(len(node.calls), 1)
+        self.assertIsNotNone(node.calls[0])
+
+    def test_cached_snapshot_projector_skips_tf(self):
+        node = self.Node()
+        node._place_partition_tf_key = ("map", 10.0)
+        node._place_partition_projector = lambda x, y: (x, y)
+
+        project = map_snapshot_projector_with_latest_fallback(
+            node, self.message(), "map",
+        )
+
+        self.assertEqual(node.calls, [])
+        self.assertEqual(project(3.0, 4.0), (3.0, 4.0))
 
 
 if __name__ == "__main__":

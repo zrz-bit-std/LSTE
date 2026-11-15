@@ -159,7 +159,9 @@ class PlaceDfsTraversal:
         node = self.nodes.get(place_id)
         if node is None or node.get("portal_id") != portal_id:
             return False
-        if node.get("state") not in ("exploring", "returning", "return_failed"):
+        if node.get("state") not in (
+            "exploring", "returning", "return_failed", "suspended",
+        ):
             return False
         node["state"] = "returning"
         node.pop("failure_reason", None)

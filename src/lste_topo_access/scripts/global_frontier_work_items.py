@@ -820,6 +820,26 @@ class PlaceWorkItemLedger:
         item["updated_at"] = float(now)
         return item
 
+    def retry_place_exit(self, item_id, now=0.0, reason=""):
+        """Refresh a ready exit obligation without changing its edge.
+
+        A ready exit that has never been dispatched must not be retired just
+        because the planner spent the timeout window on another durable
+        action.  Resetting ``activated_at`` gives the existing egress path a
+        fresh opportunity without inventing a new route or bypassing any
+        Portal/DFS validation.
+        """
+        item = self._items.get(item_id)
+        if item is None or item.get("kind") != "portal_exit":
+            return None
+        if item.get("state") != WORK_UNRESOLVED:
+            return None
+        item["exit_state"] = WORK_EXIT_READY
+        item["activated_at"] = float(now)
+        item["last_reason"] = str(reason or "reverse_egress_waiting")
+        item["updated_at"] = float(now)
+        return item
+
     def mark_place_exit_dispatched(self, item_id, now=0.0, route_id=0):
         """Record that the reverse egress candidate was handed to the executor."""
         item = self._items.get(item_id)

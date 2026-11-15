@@ -497,22 +497,47 @@ class GlobalFrontierPlanningSnapshotMixin:
                     and ready_timeout > 0.0
                     and now - activated >= ready_timeout
                 ):
-                    block = getattr(items, "block_place_exit", None)
-                    if callable(block):
-                        block(
-                            int(item["id"]), now,
-                            "reverse_egress_not_materialized",
-                        )
-                    self.publish_status(
-                        "place_exit_blocked",
-                        work_item_id=int(item["id"]),
-                        place_id=place_id,
-                        portal_id=item.get("portal_id"),
-                        dispatch_count=int(
+                    try:
+                        dispatch_count = int(
                             item.get("dispatch_count", 0) or 0
-                        ),
-                        reason="reverse_egress_not_materialized",
-                    )
+                        )
+                    except (TypeError, ValueError):
+                        dispatch_count = 0
+                    if dispatch_count <= 0:
+                        # The exit was never handed to the executor.  Keep it
+                        # ready so the next egress cycle can try it instead of
+                        # permanently retiring a door that was only queued.
+                        retry = getattr(items, "retry_place_exit", None)
+                        if callable(retry):
+                            retry(
+                                int(item["id"]), now,
+                                "reverse_egress_waiting_after_timeout",
+                            )
+                        else:
+                            item["activated_at"] = float(now)
+                        self.publish_status(
+                            "place_exit_waiting",
+                            work_item_id=int(item["id"]),
+                            place_id=place_id,
+                            portal_id=item.get("portal_id"),
+                            dispatch_count=dispatch_count,
+                            reason="reverse_egress_waiting_after_timeout",
+                        )
+                    else:
+                        block = getattr(items, "block_place_exit", None)
+                        if callable(block):
+                            block(
+                                int(item["id"]), now,
+                                "reverse_egress_not_materialized",
+                            )
+                        self.publish_status(
+                            "place_exit_blocked",
+                            work_item_id=int(item["id"]),
+                            place_id=place_id,
+                            portal_id=item.get("portal_id"),
+                            dispatch_count=dispatch_count,
+                            reason="reverse_egress_not_materialized",
+                        )
             return False
         if not self._place_exit_activation_ready(place_id, now):
             self._place_exit_ready_key = None

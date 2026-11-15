@@ -13,6 +13,10 @@ if str(SCRIPTS) not in sys.path:
 from global_frontier_planning_snapshot import (  # noqa: E402
     GlobalFrontierPlanningSnapshotMixin,
 )
+from global_frontier_planning_selection import (  # noqa: E402
+    GlobalFrontierPlanningSelectionMixin,
+)
+from global_frontier_place_dfs import PlaceDfsTraversal  # noqa: E402
 from global_frontier_work_items import PlaceWorkItemLedger  # noqa: E402
 
 
@@ -150,7 +154,7 @@ class PlaceExitActivationTest(unittest.TestCase):
                             for event, _fields in probe.events))
 
 
-    def test_ready_exit_that_never_materializes_is_blocked(self):
+    def test_ready_exit_without_dispatch_waits_instead_of_blocking(self):
         probe = ExitActivationProbe()
         exit_id = probe.make_exit()
         probe.place_work_items.activate_place_exit(exit_id, now=10.0)
@@ -160,9 +164,75 @@ class PlaceExitActivationTest(unittest.TestCase):
         probe._activate_place_exit_if_ready()
 
         item = probe.place_work_items.place_exit_item(2)
-        self.assertEqual(item["exit_state"], "blocked")
-        self.assertTrue(any(event == "place_exit_blocked"
+        self.assertEqual(item["exit_state"], "ready")
+        self.assertEqual(item["activated_at"], 200.0)
+        self.assertTrue(any(event == "place_exit_waiting"
                             for event, _fields in probe.events))
+        self.assertFalse(any(event == "place_exit_blocked"
+                             for event, _fields in probe.events))
+
+
+
+class ReadyExitSelectionProbe(GlobalFrontierPlanningSelectionMixin):
+    def __init__(self):
+        self.place_work_items = PlaceWorkItemLedger(0.7)
+        self.current_physical_place_id = 2
+        self.place_dfs = PlaceDfsTraversal()
+        self.place_dfs.bootstrap(1)
+        self.place_dfs.enter(1, 2, 7)
+        self.egress_calls = 0
+        self.egress_candidate = (1, 2, 3.0, 4.0, 1.0, 0.0, 0.0, 0.0, None)
+        self.graph_route_portal_id = 99
+
+    def make_exit(self, portal_id=7, activate=True):
+        item_id = self.place_work_items.ensure_place_exit(
+            2, portal_id, 1, (6.6, 1.9), (6.2, 3.0),
+            now=1.0, generation=1,
+        )
+        if activate:
+            self.place_work_items.activate_place_exit(item_id, now=2.0)
+        return item_id
+
+    def select_durable_portal_egress(self, _snapshot):
+        self.egress_calls += 1
+        return self.egress_candidate
+
+
+class ReadyExitSelectionTest(unittest.TestCase):
+    def test_ready_exit_is_selected_before_probe(self):
+        probe = ReadyExitSelectionProbe()
+        probe.make_exit()
+
+        self.assertTrue(probe._ready_place_exit_for_current_place())
+        selected = probe._select_ready_exit_before_probe(object())
+
+        self.assertEqual(selected[1], "durable_portal_egress")
+        self.assertEqual(probe.egress_calls, 1)
+        self.assertIsNone(probe.graph_route_portal_id)
+
+    def test_dormant_exit_keeps_probe_precedence(self):
+        probe = ReadyExitSelectionProbe()
+        probe.make_exit(activate=False)
+
+        self.assertFalse(probe._ready_place_exit_for_current_place())
+        self.assertIsNone(probe._select_ready_exit_before_probe(object()))
+        self.assertEqual(probe.egress_calls, 0)
+
+    def test_portal_mismatch_does_not_preempt_probe(self):
+        probe = ReadyExitSelectionProbe()
+        probe.make_exit(portal_id=8)
+
+        self.assertFalse(probe._ready_place_exit_for_current_place())
+        self.assertIsNone(probe._select_ready_exit_before_probe(object()))
+        self.assertEqual(probe.egress_calls, 0)
+
+    def test_failed_egress_falls_through_to_probe(self):
+        probe = ReadyExitSelectionProbe()
+        probe.make_exit()
+        probe.egress_candidate = None
+
+        self.assertIsNone(probe._select_ready_exit_before_probe(object()))
+        self.assertEqual(probe.egress_calls, 1)
 
 
 if __name__ == "__main__":

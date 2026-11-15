@@ -355,11 +355,14 @@ class GPBranchFrontierMixin:
             return math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))
         # The scan stays at its acquisition-time odom pose, while every
         # raster query and measured doorway use this map's immutable epoch.
-        from global_frontier_geometry import map_snapshot_projector, inverse_planar_projector
+        from global_frontier_geometry import (
+            map_snapshot_projector_with_latest_fallback,
+            inverse_planar_projector,
+        )
         frame = message.header.frame_id or 'map'
-        project = map_snapshot_projector(self, message)
-        if project is None:
-            project = self.planar_xy_projector(frame, 'odom', stamp=message.header.stamp)
+        project = map_snapshot_projector_with_latest_fallback(
+            self, message, frame,
+        )
         if project is None:
             return
         unproject = inverse_planar_projector(project)

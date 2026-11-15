@@ -20,6 +20,32 @@ def map_snapshot_projector(node, message):
     return project if callable(project) else None
 
 
+def map_snapshot_projector_with_latest_fallback(
+    node, message, target_frame="map",
+):
+    """Project the current pose with the snapshot or the latest TF.
+
+    The occupancy raster is an immutable snapshot, but the robot's current
+    odom->map pose must not use a stamp older than the TF cache.  Try the map
+    stamp first (the normal path), then fall back to the latest transform.
+    """
+    project = map_snapshot_projector(node, message)
+    if project is not None:
+        return project
+    factory = getattr(node, "planar_xy_projector", None)
+    if not callable(factory):
+        return None
+    try:
+        stamp = message.header.stamp
+    except AttributeError:
+        stamp = None
+    if stamp is not None:
+        project = factory(target_frame, "odom", stamp=stamp)
+        if project is not None:
+            return project
+    return factory(target_frame, "odom")
+
+
 def inverse_planar_projector(project):
     """Invert the captured planar affine transform without a second TF lookup."""
     zero = np.asarray(project(0., 0.), dtype=float)
