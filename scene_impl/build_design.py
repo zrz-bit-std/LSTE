@@ -184,9 +184,10 @@ SCENES["env06_gate_nested"] = dict(
     ],
     # +1 = thicken toward +axis (room side), -1 = toward -axis.
     door_side={"W_corr_n": 1, "W_corr_s": -1, "W_b2_e": 1},
-    # Narrow the B2 pantry door to 2.00 m: at 2.30 m the structural place map
-    # returned zero splits (0/5), so B2/B3 merged into the corridor place and
-    # the GP graph never created them.  Every other door keeps DOOR_W.
+    # Narrow the B2 pantry door to 2.00 m.  Measured with StructuralPlaceMap
+    # (clearance 0.60, place_clear 0.75): 1.40/1.45 -> 5/5 splits, 1.50 -> 4/5,
+    # 2.00 and 2.30 -> 0/5.  So 2.00 m alone does not split B2 from the
+    # corridor; keep 1.40 m if the goal is a structural place split.
     door_widths={"D_b2": 2.00},
     objects=[
         ("b1_desk", "desk_brown", 2.10, 2.55, 0.0, 0.0, "env", "B1 西北角，整体贴墙"),
