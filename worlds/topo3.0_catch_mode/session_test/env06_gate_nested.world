@@ -81,22 +81,22 @@
         </visual>
       </link>
       <link name='wall_05'>
-        <pose>9.2500 -2.3250 1.250 0 -0 0</pose>
+        <pose>9.3250 -2.3250 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>8.2000 0.7000 2.50</size></box></geometry>
+          <geometry><box><size>8.3500 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>8.2000 0.7000 2.50</size></box></geometry>
+          <geometry><box><size>8.3500 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_06'>
-        <pose>20.8250 -2.3250 1.250 0 -0 0</pose>
+        <pose>20.7500 -2.3250 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>10.3500 0.7000 2.50</size></box></geometry>
+          <geometry><box><size>10.5000 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>10.3500 0.7000 2.50</size></box></geometry>
+          <geometry><box><size>10.5000 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>

@@ -184,6 +184,10 @@ SCENES["env06_gate_nested"] = dict(
     ],
     # +1 = thicken toward +axis (room side), -1 = toward -axis.
     door_side={"W_corr_n": 1, "W_corr_s": -1, "W_b2_e": 1},
+    # Narrow the B2 pantry door to 2.00 m: at 2.30 m the structural place map
+    # returned zero splits (0/5), so B2/B3 merged into the corridor place and
+    # the GP graph never created them.  Every other door keeps DOOR_W.
+    door_widths={"D_b2": 2.00},
     objects=[
         ("b1_desk", "desk_brown", 2.10, 2.55, 0.0, 0.0, "env", "B1 西北角，整体贴墙"),
         ("b1_ch1", "office_chair", 1.10, 1.35, 0.0, 0.0, "env", "随桌移到西北"),
@@ -242,11 +246,14 @@ def wall_boxes(scene):
         else:
             out.append(dict(id=wid, cx=center, cy=mid, w=length, d=depth, yaw=90.0, kind="V"))
 
+    overrides = dict(scene.get("door_widths") or {})
     for wid, kind, at, a, b, _openings in scene["walls"]:
         # Derive the clear cuts from the door table so the design tables,
         # figures, and the emitted world always share one door width.
+        # ``door_widths`` pins individual doors (metres) on top of DOOR_W.
         cuts = sorted(
-            (dc - dw / 2.0, dc + dw / 2.0)
+            (dc - float(overrides.get(_did, dw)) / 2.0,
+             dc + float(overrides.get(_did, dw)) / 2.0)
             for _did, _room, axis, dat, dc, dw, _s in scene["doors"]
             if axis == kind and abs(dat - at) < 1e-6
         )
@@ -287,8 +294,10 @@ def write_tables(scene, outdir):
         else:
             rows_w.append([scene["title"], b["id"], b["kind"], b["cx"], b["cy"],
                            round(b["w"], 3), THICK, WALL_H, ""])
+    overrides = dict(scene.get("door_widths") or {})
     for did, room, axis, at, center, width, s in scene["doors"]:
-        rows_d.append([scene["title"], did, room, axis, at, center, width, round(s, 2)])
+        rows_d.append([scene["title"], did, room, axis, at, center,
+                       float(overrides.get(did, width)), round(s, 2)])
     for rid, name, x0, x1, y0, y1, s, terms, expected in scene["rooms"]:
         rows_r.append([scene["title"], rid, name, x0, x1, y0, y1,
                        round((x1 - x0) * (y1 - y0), 1), round(s, 2), terms, expected])
@@ -352,7 +361,7 @@ def draw_scene(scene, path):
     for did, room, axis, at, center, width, s in scene["doors"]:
         if axis == "H":
             ax.plot([center - width / 2, center + width / 2], [at, at], "-", color="#16a34a", lw=4, zorder=6)
-            ax.annotate(f"{did}\n1.4m", (center, at), textcoords="offset points", xytext=(0, 10),
+            ax.annotate(f"{did}\n{width:.2f}m", (center, at), textcoords="offset points", xytext=(0, 10),
                         ha="center", fontsize=7, color="#15803d", zorder=7)
         else:
             ax.plot([at, at], [center - width / 2, center + width / 2], "-", color="#16a34a", lw=4, zorder=6)
@@ -589,8 +598,9 @@ def main():
         draw_scene(scene, os.path.join(ROOT, "figures", f"{name}.png"))
         md += [f"## {name}", "", "**墙体（中心线坐标，厚 0.15、高 2.5）**", "",
                md_table(["id", "orient", "cx", "cy", "len", "note"], [[r[1], r[2], r[3], r[4], r[5], r[8]] for r in rw]), "",
-               "**门洞（宽 1.40 m）**", "",
-               md_table(["id", "room", "axis", "at", "center", "S_env"], [[r[1], r[2], r[3], r[4], r[5], r[7]] for r in rd]), "",
+               "**门洞（默认 {:.2f} m；door_widths 可逐门覆盖）**".format(DOOR_W), "",
+               md_table(["id", "room", "axis", "at", "center", "width", "S_env"],
+                        [[r[1], r[2], r[3], r[4], r[5], r[6], r[7]] for r in rd]), "",
                "**房间**", "",
                md_table(["id", "name", "x0", "x1", "y0", "y1", "area", "S_env", "见", "期望"],
                         [[r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]] for r in rr]), "",
