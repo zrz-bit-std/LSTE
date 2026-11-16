@@ -187,7 +187,7 @@ a3_lamp, model=lamp_table_small, pose=(8.62, -6.05, 0.75), yaw=0
 
 - **A3 改为开放仓库**：移除办公室家具（热桌、办公椅、主桌、laptop、显示器、台灯、
   垃圾桶）以及隔断；保留墙/门。新增：
-  - 目标梯子 `a3_ladder`（`ladder_75deg_0rails`）@ `(8.50, -5.80, 0)`，靠北墙斜放；
+  - 目标梯子 `a3_target`（`ladder_75deg_0rails`）@ `(8.50, -5.80, 0)`，靠北墙斜放；
   - 北墙货架 `a3_shelf_n`、西侧货架 `a3_shelf_w`；
   - 10 个纸箱（梯子旁、门口左右纸箱堆、西侧纸箱）。
 - **A2**：保留会议室（桌 + 3 椅 + 显示器），但 `monitor / computer / laptop /
@@ -216,7 +216,7 @@ a3_lamp, model=lamp_table_small, pose=(8.62, -6.05, 0.75), yaw=0
 ### 9.3 world / JSON / pipeline
 
 - World：`worlds/topo3.0_catch_mode/session_test/env05_gate_ring.world`
-  14 段墙 / 27 个物体；A3 隔断已移除；`a3_ladder` 存在。
+  14 段墙 / 27 个物体；A3 隔断已移除；`a3_target` 存在。
 - Task JSON：`model/Data_exchange/vlm_prompt/lab/ladder.json`
   - target `ladder`
   - env `warehouse / storage room / stockroom`
@@ -227,7 +227,7 @@ a3_lamp, model=lamp_table_small, pose=(8.62, -6.05, 0.75), yaw=0
     traffic cone`
 - Pipeline：`pipeline/env05.yaml`
   - `TASK_JSON=.../ladder.json`，`TASK_ID=ladder`
-  - `TARGET_EVAL_GAZEBO_TARGET_MODEL=a3_ladder`（Gazebo 实例名）
+  - `TARGET_EVAL_GAZEBO_TARGET_MODEL=a3_target`（Gazebo 实例名）
   - labels `ladder`
   - center `0,0.699,1.20`，size `0.951,1.548,2.520`
 - 旧的 laptop / coffee_machine / trash_can 任务 JSON 已删除；lab 当前只保留

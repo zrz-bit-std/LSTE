@@ -807,8 +807,9 @@ WDETECT_SMALL_OBJECT_TILE_INTERVAL: 2.0
 # navigation metrics observer to distinguish an unexplored target from a
 # geometrically exposed-but-missed target. Set ENABLED false outside Gazebo.
 TARGET_EVAL_ENABLED: true
-# Gazebo model names for this yellow-cup task. They are evaluation truth, not
-# detector prompts and not inputs to GoalManager or TEB.
+# Gazebo model names for this task (env06 = B3 desk plant). They are
+# evaluation truth, not detector prompts and not inputs to GoalManager or TEB.
+# The v6 world instantiates the plant as b3_target (URI plant_1, z=0.75 desk).
 TARGET_EVAL_GAZEBO_TARGET_MODEL: b3_target
 TARGET_EVAL_GAZEBO_ROBOT_MODEL: pro3
 TARGET_EVAL_WORLD_FRAME: world
@@ -842,8 +843,8 @@ TARGET_EVAL_DEPTH_RELATIVE_TOLERANCE: 0.05
 TARGET_EVAL_DETECTIONS_TOPIC: /lste/detections
 # Comma-separated because the shell YAML loader exports scalar values only.
 # Labels are normalized case-insensitively and '_' is treated as a space.
-TARGET_EVAL_TARGET_LABELS: "plant,potted plant"
-# Target bounds in the Gazebo model frame. They approximate the physical cup
+TARGET_EVAL_TARGET_LABELS: "plant,potted plant,green plant"
+# Target bounds in the Gazebo model frame. They approximate the physical potted plant
 # for spatial IoU evaluation; they never alter detector or controller boxes.
 TARGET_EVAL_TARGET_CENTER_M: "0,0,0.28"
 TARGET_EVAL_TARGET_SIZE_M: "0.83,0.84,0.55"

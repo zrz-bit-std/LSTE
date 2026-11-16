@@ -73,7 +73,7 @@ A3 原隔断已移除，改为开放仓库；墙/门/十字实体不变。梯子
 
 | id | 模型 | x | y | yaw | z | 说明 |
 |---|---|---|---|---|---|---|
-| **a3_ladder** | **ladder_75deg_0rails** | **5.40** | **−5.80** | **0** | **0** | **目标，正对 D_a3 门心** |
+| **a3_target** | **ladder_75deg_0rails** | **5.40** | **−5.80** | **0** | **0** | **目标，正对 D_a3 门心** |
 | a3_shelf_n | bookshelf_large | 7.60 | −4.45 | 0 | 0 | 北墙货架，避开门口-梯子视线 |
 | a3_shelf_w | bookshelf_large | 2.72 | −7.60 | 90 | 0 | 西墙货架，避开门口-梯子视线 |
 | a3_box1/2 | cardboard_box | 4.30 | −5.55 | 0 | 0 / 0.40 | 梯子西侧纸箱堆 |
@@ -95,7 +95,7 @@ A3 原隔断已移除，改为开放仓库；墙/门/十字实体不变。梯子
 ## 5. 目标、观察圈与 ctx
 
 ```
-a3_ladder      (5.40, −5.80, 0)       ladder_75deg_0rails
+a3_target      (5.40, −5.80, 0)       ladder_75deg_0rails
 target_view    (5.40, −7.50, 0.60)    正对梯子，观察距离 1.70 m
 target ring    free + reachable       validate_world.py PASS
 ```
@@ -157,5 +157,5 @@ target ring    free + reachable       validate_world.py PASS
 | A2 办公室诱饵 | monitor/chair/desk 作为 negative，S_env −0.45，应跳过 |
 | A1 仓库诱饵 | 纸箱 0.73，但没有梯子，进门后退出 |
 | 梯子高 2.52 m，房间墙 2.5 m | 顶部略高于墙 0.02 m；world 无 ceiling，视觉/检测正常 |
-| 目标 eval 实例名 | `TARGET_EVAL_GAZEBO_TARGET_MODEL=a3_ladder`，不是 URI `ladder_75deg_0rails` |
+| 目标 eval 实例名 | `TARGET_EVAL_GAZEBO_TARGET_MODEL=a3_target`，不是 URI `ladder_75deg_0rails` |
 | 新观察圈检测值未复测 | 几何与截图已确认；正式实验前跑一次 WeDetect 记录新分数 |

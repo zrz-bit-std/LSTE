@@ -53,7 +53,7 @@
 | a2_ch2 | office_chair | 14.6 | -0.4 | 0.0 | 0.0 | 0.76x0.64x0.56 | env | 门前一排 |
 | a2_ch3 | office_chair | 15.6 | -0.4 | 0.0 | 0.0 | 0.76x0.64x0.56 | env | 门前一排 |
 | a2_mon | monitor_3 | 15.4 | -2.2 | 0.0 | 0.75 | 0.6x0.1x0.34 | env | 桌面，随桌南移 |
-| a3_ladder | ladder_75deg_0rails | 5.4 | -5.8 | 0.0 | 0.0 | 0.95x1.55x2.52 | target | A3 门正对面，东西向对齐 D_a3 |
+| a3_target | ladder_75deg_0rails | 5.4 | -5.8 | 0.0 | 0.0 | 0.95x1.55x2.52 | target | A3 门正对面，东西向对齐 D_a3 |
 | a3_shelf_n | bookshelf_large | 7.6 | -4.45 | 0.0 | 0.0 | 1.66x0.43x1.84 | env | 北墙货架，避开门口-梯子视线 |
 | a3_shelf_w | bookshelf_large | 2.72 | -7.6 | 90.0 | 0.0 | 1.66x0.43x1.84 | env | 西墙货架，避开门口-梯子视线 |
 | a3_box1 | cardboard_box | 4.3 | -5.55 | 0.0 | 0.0 | 0.4x0.4x0.4 | env | 梯子西侧纸箱，不遮挡 |
@@ -153,10 +153,10 @@
 | b2_trash | first_2015_trash_can | 17.6 | -1.7 | 0.0 | 0.0 | 0.57x0.64x0.74 | decoy | 异类干扰(垃圾桶) |
 | b2_cup_y | cup_yellow | 17.35 | 2.8 | 0.0 | 0.75 | 0.123x0.082x0.077 | decoy | 颜色消融变体目标 |
 | b2_cup_b | cup_blue | 17.75 | 2.8 | 0.0 | 0.75 | 0.128x0.09x0.11 | decoy | 颜色消融变体负例 |
-| b3_desk | desk_brown | 22.0 | 0.6 | 0.0 | 0.0 | 2.4x0.8x0.75 | env | 正对门 B3 |
-| b3_chair | office_chair | 24.0 | 1.6 | 180.0 | 0.0 | 0.76x0.64x0.56 | env | 向东移到房间东侧，让出西侧探索空间 |
+| b3_desk | desk_brown | 23.4 | 0.6 | 0.0 | 0.0 | 2.4x0.8x0.75 | env | v6 桌面东移，留出绿植位置 |
+| b3_chair | office_chair | 24.3 | -0.3 | 180.0 | 0.0 | 0.76x0.64x0.56 | env | v6 移到桌南侧，便于观察 |
 | b3_shelf | bookshelf_large | 21.0 | 3.05 | 0.0 | 0.0 | 1.66x0.43x1.84 | occluder | 北墙，装饰/遮挡 |
-| b3_target | plant_1 | 22.0 | -0.3 | 0.0 | 0.0 | 0.83x0.84x0.55 | target | 桌后，需绕到南侧 |
+| b3_target | plant_1 | 22.62 | 0.6 | 0.0 | 0.75 | 0.83x0.84x0.55 | target | v6 桌面靠西边缘 |
 | b4_cab | file_cabinet_large | 20.2 | -7.7 | 180.0 | 0.0 | 1.49x1.17x0.68 | decoy |  |
 | b4_box1 | cardboard_box | 22.6 | -7.8 | 0.0 | 0.0 | 0.4x0.4x0.4 | decoy |  |
 | b4_box2 | cardboard_box | 23.1 | -7.8 | 0.4 | 0.0 | 0.4x0.4x0.4 | decoy |  |
