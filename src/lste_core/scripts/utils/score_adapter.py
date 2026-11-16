@@ -95,6 +95,14 @@ def _make_ctx_entries(detections: Sequence[LsteDetection]) -> List[ctx_mod.DetEn
 
 
 def _combine_prompt_terms(task: LsteTask, detections: LsteDetections) -> List[str]:
+    # Negative clues are evidence *against* a room; they must only feed
+    # neg_ratio.  prompt_B carries them so the detector can see the object,
+    # but they must not also inflate the positive denominator.
+    negative = {
+        str(item).strip().lower()
+        for item in (task.obj_negative_clues or [])
+        if str(item).strip()
+    }
     terms: List[str] = []
     for seq in (
         detections.prompt_b_terms,
@@ -104,7 +112,7 @@ def _combine_prompt_terms(task: LsteTask, detections: LsteDetections) -> List[st
     ):
         for item in (seq or []):
             text = str(item).strip()
-            if text:
+            if text and text.lower() not in negative:
                 terms.append(text)
     return terms
 

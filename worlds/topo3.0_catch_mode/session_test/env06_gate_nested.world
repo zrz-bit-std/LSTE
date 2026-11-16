@@ -71,62 +71,62 @@
         </visual>
       </link>
       <link name='wall_04'>
-        <pose>1.6500 -2.6000 1.250 0 -0 0</pose>
+        <pose>1.4250 -2.3250 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>3.3000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>2.8500 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>3.3000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>2.8500 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_05'>
-        <pose>9.5000 -2.6000 1.250 0 -0 0</pose>
+        <pose>9.2500 -2.3250 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>9.6000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.2000 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>9.6000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.2000 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_06'>
-        <pose>20.8500 -2.6000 1.250 0 -0 0</pose>
+        <pose>20.8250 -2.3250 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>10.3000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>10.3500 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>10.3000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>10.3500 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_07'>
-        <pose>4.4000 -5.6000 1.250 0 -0 0</pose>
+        <pose>4.1750 -5.8750 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>8.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.3500 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>8.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.3500 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_08'>
-        <pose>15.0000 -5.6000 1.250 0 -0 0</pose>
+        <pose>15.0000 -5.8750 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>9.6000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.7000 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>9.6000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>8.7000 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_09'>
-        <pose>23.6000 -5.6000 1.250 0 -0 0</pose>
+        <pose>23.8250 -5.8750 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>4.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>4.3500 0.7000 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>4.8000 0.1500 2.50</size></box></geometry>
+          <geometry><box><size>4.3500 0.7000 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
@@ -151,22 +151,22 @@
         </visual>
       </link>
       <link name='wall_12'>
-        <pose>18.5000 -0.9000 1.250 0 -0 0</pose>
+        <pose>18.7750 -1.1250 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>0.1500 3.4000 2.50</size></box></geometry>
+          <geometry><box><size>0.7000 2.9500 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>0.1500 3.4000 2.50</size></box></geometry>
+          <geometry><box><size>0.7000 2.9500 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
       <link name='wall_13'>
-        <pose>18.5000 2.8000 1.250 0 -0 0</pose>
+        <pose>18.7750 3.0250 1.250 0 -0 0</pose>
         <collision name='collision'>
-          <geometry><box><size>0.1500 1.2000 2.50</size></box></geometry>
+          <geometry><box><size>0.7000 0.7500 2.50</size></box></geometry>
         </collision>
         <visual name='visual'>
-          <geometry><box><size>0.1500 1.2000 2.50</size></box></geometry>
+          <geometry><box><size>0.7000 0.7500 2.50</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
@@ -298,49 +298,49 @@
     <include>
       <uri>model://office_chair</uri>
       <name>b2_chair</name>
-      <pose>13.6000 1.6000 0.0000 0 -0 0.000000</pose>
+      <pose>13.0000 1.6000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://desk_brown</uri>
       <name>b2_counter</name>
-      <pose>17.2000 2.8500 0.0000 0 -0 0.000000</pose>
+      <pose>16.6000 2.8500 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://coffee_machine</uri>
       <name>b2_coffee</name>
-      <pose>16.5000 2.8500 0.7500 0 -0 0.000000</pose>
+      <pose>15.9000 2.8500 0.7500 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://first_2015_trash_can</uri>
       <name>b2_trash</name>
-      <pose>17.6000 -1.7000 0.0000 0 -0 0.000000</pose>
+      <pose>17.6000 -1.4500 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://cup_yellow</uri>
       <name>b2_cup_y</name>
-      <pose>17.3500 2.8000 0.7500 0 -0 0.000000</pose>
+      <pose>16.7500 2.8000 0.7500 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://cup_blue</uri>
       <name>b2_cup_b</name>
-      <pose>17.7500 2.8000 0.7500 0 -0 0.000000</pose>
+      <pose>17.1500 2.8000 0.7500 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://desk_brown</uri>
       <name>b3_desk</name>
-      <pose>22.0000 0.6000 0.0000 0 -0 0.000000</pose>
+      <pose>23.4000 0.6000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://office_chair</uri>
       <name>b3_chair</name>
-      <pose>24.0000 1.6000 0.0000 0 -0 3.141593</pose>
+      <pose>24.3000 -0.3000 0.0000 0 -0 3.141593</pose>
       <static>1</static>
     </include>
     <include>
@@ -352,7 +352,31 @@
     <include>
       <uri>model://plant_1</uri>
       <name>b3_target</name>
-      <pose>22.0000 -0.3000 0.0000 0 -0 0.000000</pose>
+      <pose>22.6200 0.6000 0.7500 0 -0 0.000000</pose>
+      <static>1</static>
+    </include>
+    <include>
+      <uri>model://monitor_3</uri>
+      <name>b3_mon</name>
+      <pose>23.9000 0.3000 0.7500 0 -0 0.000000</pose>
+      <static>1</static>
+    </include>
+    <include>
+      <uri>model://keyboard</uri>
+      <name>b3_keyboard</name>
+      <pose>24.2000 0.6000 0.7500 0 -0 0.000000</pose>
+      <static>1</static>
+    </include>
+    <include>
+      <uri>model://cup_yellow</uri>
+      <name>b3_cup</name>
+      <pose>24.4000 0.8000 0.7500 0 -0 0.000000</pose>
+      <static>1</static>
+    </include>
+    <include>
+      <uri>model://first_2015_trash_can</uri>
+      <name>b3_trash</name>
+      <pose>23.6000 1.5000 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
@@ -376,19 +400,19 @@
     <include>
       <uri>model://fire_hydrant</uri>
       <name>n_hyd1</name>
-      <pose>11.9000 -3.0500 0.0000 0 -0 0.000000</pose>
+      <pose>11.9000 -2.8250 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://fire_hydrant</uri>
       <name>n_hyd2</name>
-      <pose>22.6000 -5.1500 0.0000 0 -0 0.000000</pose>
+      <pose>22.6000 -5.3750 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <include>
       <uri>model://construction_cone</uri>
       <name>n_cone1</name>
-      <pose>6.4000 -3.0500 0.0000 0 -0 0.000000</pose>
+      <pose>6.4000 -2.8500 0.0000 0 -0 0.000000</pose>
       <static>1</static>
     </include>
     <gui fullscreen='0'>
