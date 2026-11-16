@@ -127,6 +127,39 @@ tmux set-environment -t "=$SESSION" LSTE_GAZEBO_SEED "$GAZEBO_RANDOM_SEED"
 tmux set-option -t "=$SESSION:" remain-on-exit on
 echo "[env] roscore started (window 0)"
 
+# "roscore started" only means the tmux window exists.  Verify the master
+# actually answers before the node session starts; otherwise every node waits
+# on rostopic and the launch dies 300 s later with an empty registry.
+roscore_responsive() {
+  bash -lc "source \"$WS/scripts/config/pipeline_env.sh\"; timeout 5 rosnode list >/dev/null 2>&1"
+}
+
+wait_roscore_ready() {
+  local _attempt
+  for _attempt in $(seq 1 20); do
+    if roscore_responsive; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+if ! wait_roscore_ready; then
+  echo "[env] roscore did not answer within 20 s; restarting it once" >&2
+  tmux capture-pane -p -t "=$SESSION:roscore" -S -30 2>/dev/null >&2 || true
+  tmux kill-window -t "=$SESSION:roscore" 2>/dev/null || true
+  sleep 1
+  tmux new-window -d -t "=$SESSION" -n "roscore" -c "$WS" \
+    "bash -lc 'WS=\"$WS\"; source \"$WS/scripts/config/pipeline_env.sh\"; roscore'; echo; echo '[EXIT] roscore'; exec bash"
+  if ! wait_roscore_ready; then
+    echo "[error] roscore is not reachable after one restart." >&2
+    tmux capture-pane -p -t "=$SESSION:roscore" -S -40 2>/dev/null >&2 || true
+    exit 1
+  fi
+fi
+echo "[env] roscore ready"
+
 WAIT_ROSCORE='until rostopic list >/dev/null 2>&1; do echo \"waiting for roscore...\"; sleep 1; done'
 
 # Window 1: Gazebo 场景（不含 pro3，用 _no_pro3.world）

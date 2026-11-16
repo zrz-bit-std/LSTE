@@ -106,4 +106,31 @@ if (( ${#residual_pids[@]} > 0 )); then
   kill -KILL "${residual_pids[@]}" 2>/dev/null || true
 fi
 
+# A batch runner starts the next launch immediately after this script returns.
+# Starting roscore while the previous master still owns 11311 leaves the new
+# graph unregistered (empty ``rosnode list``) and fails the readiness gate
+# after 300 s.  Wait for both the processes and the port to disappear.
+master_port_free() {
+  if command -v ss >/dev/null 2>&1; then
+    ! ss -ltn 2>/dev/null | grep -qE '[:.]11311[[:space:]]'
+  else
+    ! (exec 3<>/dev/tcp/127.0.0.1/11311) 2>/dev/null
+  fi
+}
+
+for _ in $(seq 1 50); do
+  mapfile -t residual_pids < <(collect_residual_pids)
+  if (( ${#residual_pids[@]} == 0 )) && master_port_free; then
+    break
+  fi
+  sleep 0.2
+done
+mapfile -t residual_pids < <(collect_residual_pids)
+if (( ${#residual_pids[@]} > 0 )) || ! master_port_free; then
+  echo "[stop] Warning: ROS master port 11311 still busy after teardown" >&2
+fi
+# Small settle margin: the kernel may still be closing sockets even after the
+# processes disappear from the process table.
+sleep 2
+
 echo "[stop] LSTE complete system is stopped."

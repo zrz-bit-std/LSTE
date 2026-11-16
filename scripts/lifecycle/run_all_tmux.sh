@@ -98,17 +98,26 @@ all_nodes_ready() {
 }
 
 wait_for_all_nodes() {
-  local attempt
-  for attempt in $(seq 1 300); do
+  local attempt timeout
+  timeout="${LSTE_READY_TIMEOUT:-300}"
+  for attempt in $(seq 1 "$timeout"); do
     if all_nodes_ready; then
       echo "[all] All benchmark nodes are registered."
       return 0
     fi
     sleep 1
   done
-  echo "[error] Required LSTE nodes did not become ready within 300 seconds." >&2
-  echo "[error] Registered nodes:" >&2
-  rosnode list 2>/dev/null >&2 || true
+  echo "[error] Required LSTE nodes did not become ready within ${timeout} seconds." >&2
+  {
+    echo "[error] Registered nodes:"
+    rosnode list 2>/dev/null || true
+    echo "[error] ROS master port 11311:"
+    ss -ltnp 2>/dev/null | grep -E '[:.]11311[[:space:]]' || echo "  not listening"
+    echo "[error] Residual ROS/Gazebo processes:"
+    pgrep -af 'rosmaster|roscore|gzserver|gzclient' | head -20 || true
+    echo "[error] lste-env roscore window (tail):"
+    tmux capture-pane -p -t "=lste-env:roscore" -S -40 2>/dev/null | tail -40 || true
+  } >&2
   return 1
 }
 

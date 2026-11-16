@@ -616,8 +616,23 @@ def main():
                                         "stationary_radius_m": args.radius,
                                         "max_total_seconds": args.max_total_seconds,
                                         "max_exploration_seconds": args.max_total_seconds})
+        infra_retries = max(0, int(os.environ.get("LSTE_INFRA_RETRIES", "2")))
         while len(state["attempts"]) < args.attempts:
-            result = run_attempt(campaign, len(state["attempts"]) + 1, args, config)
+            number = len(state["attempts"]) + 1
+            for retry_index in range(infra_retries + 1):
+                result = run_attempt(campaign, number, args, config)
+                if result.get("status") != "infrastructure_failure":
+                    break
+                if retry_index >= infra_retries:
+                    break
+                result["infra_retry_index"] = retry_index + 1
+                print(json.dumps({
+                    "attempt": number,
+                    "run": result.get("run"),
+                    "status": result.get("status"),
+                    "reason": result.get("reason"),
+                    "retry": retry_index + 1,
+                }, ensure_ascii=False), flush=True)
             state["attempts"].append(result)
             save(state_path, state)
             write_report(campaign, state)
