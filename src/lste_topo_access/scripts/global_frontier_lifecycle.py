@@ -3,6 +3,7 @@
 
 from copy import deepcopy
 import json
+import traceback
 
 import rospy
 
@@ -899,6 +900,21 @@ class GlobalFrontierLifecycleMixin:
                 and getattr(self, "active_terminal_received", False)
             ):
                 return State.EXECUTION_DONE
+            return None
+        except Exception:
+            # A malformed arrival/hypothesis must not kill the rospy timer
+            # thread.  Keep the route state available for the periodic
+            # crossing resolver and report the recording failure.
+            rospy.logerr(
+                "Global frontier terminal event failed: %s",
+                traceback.format_exc().strip(),
+            )
+            publish = getattr(self, "publish_status", None)
+            if callable(publish):
+                publish(
+                    "execution_terminal_recording_failed",
+                    reason="terminal_event_exception",
+                )
             return None
         finally:
             # The queued terminal, including a stale/mismatched one, has now

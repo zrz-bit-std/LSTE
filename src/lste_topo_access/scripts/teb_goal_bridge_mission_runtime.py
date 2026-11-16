@@ -22,6 +22,14 @@ class TebGoalBridgeMissionRuntimeMixin:
             )
             if callable(tick_watchdog):
                 tick_watchdog()
+            terminal_hold = getattr(
+                self, "_terminal_hold_no_translation_locked", None
+            )
+            if callable(terminal_hold):
+                terminal_hold(
+                    now_for(self),
+                    self._pending_goal_delta_locked(),
+                )
             if self._is_active_mode():
                 if self.persistent_execution:
                     # Persistent execution has one long-lived action client,

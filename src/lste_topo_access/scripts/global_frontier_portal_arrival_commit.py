@@ -654,9 +654,18 @@ class GlobalFrontierPortalArrivalCommitMixin:
         except (TypeError, ValueError):
             bound_destination = None
         if bound_destination is None and isinstance(hypothesis, dict):
+            # A partially populated hypothesis can have a destination while
+            # its source is still unset.  Never let that malformed record
+            # escape as an int(None) on the lifecycle thread.
             if (hypothesis.get("destination_place_id") is not None
-                    and int(hypothesis["source_place_id"]) == int(arrival.source_region_id)):
-                bound_destination = int(hypothesis["destination_place_id"])
+                    and hypothesis.get("source_place_id") is not None):
+                try:
+                    if int(hypothesis["source_place_id"]) == int(
+                            arrival.source_region_id):
+                        bound_destination = int(
+                            hypothesis["destination_place_id"])
+                except (TypeError, ValueError):
+                    bound_destination = None
         # An incomplete semantic room can require a second visit after the
         # robot returns to its parent Place.  That forward traversal is not a
         # reverse traversal of the durable Portal edge, so the edge's directed

@@ -345,6 +345,14 @@ class GlobalFrontierPlanningRuntimeMixin:
         self.planning_cycle_started_wall = started
         try:
             try:
+                # A crossing_verified lease must be resolved even when no
+                # frontier/selection cycle runs (controller lease release or
+                # an idle planner).  This timer is the unconditional boundary.
+                resolve_crossing = getattr(
+                    self, "resolve_verified_portal_crossing", None
+                )
+                if callable(resolve_crossing):
+                    resolve_crossing()
                 # A held graph materializes no route, so the adapter's
                 # simulation-time best-effort timer is never armed. Bound that
                 # hold in wall time before the mission watchdog fires.

@@ -882,6 +882,68 @@ if __name__ == "__main__":
         self.assertEqual(transaction.state, "source_probe")
 
 
+    def test_partial_hypothesis_without_source_does_not_crash_arrival(self):
+        explorer, transaction = self._verified_crossing_explorer(
+            active_portal_id=5,
+        )
+        explorer.portal_hypothesis_ledger = SimpleNamespace(
+            get=lambda _portal_id: {
+                "id": 5,
+                "destination_place_id": 4,
+                "source_place_id": None,
+            },
+        )
+        arrival = PendingPortalArrival(
+            route_id=19,
+            goal_xy=(8.5, 4.0),
+            terminal_time=3.0,
+            source_region_id=3,
+            portal_gate_xy=(7.2, 4.0),
+            physical_goal_xy=(8.0, 4.0),
+            physical_portal_gate_xy=(7.2, 4.0),
+        )
+
+        result = explorer.commit_portal_arrival(
+            arrival,
+            explorer.active_frontier_component,
+            now=3.0,
+            evidence_source="partial_hypothesis",
+        )
+
+        self.assertTrue(result is None or isinstance(result, dict))
+        self.assertTrue(any(
+            event in ("portal_place_arrived", "portal_place_entered",
+                      "portal_place_covered_arrival")
+            or event.startswith("portal_")
+            for event, _fields in explorer.events
+        ))
+
+    def test_crossing_resolver_contains_commit_exception(self):
+        explorer, transaction = self._verified_crossing_explorer()
+        explorer.active_frontier_component = None
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("boom")
+
+        explorer.commit_portal_arrival = boom
+
+        resolved = explorer.resolve_verified_portal_crossing(now=3.0)
+
+        self.assertFalse(resolved)
+        self.assertTrue(transaction.active)
+        self.assertEqual(explorer.events[-1][0], "portal_arrival_commit_failed")
+        self.assertEqual(explorer.events[-1][1]["reason"], "RuntimeError")
+
+    def test_crossing_resolution_is_wired_to_the_planning_timer(self):
+        source = (
+            SCRIPTS / "global_frontier_planning_runtime.py"
+        ).read_text()
+        self.assertIn("resolve_verified_portal_crossing", source)
+        lifecycle = (
+            SCRIPTS / "global_frontier_lifecycle.py"
+        ).read_text()
+        self.assertIn("execution_terminal_recording_failed", lifecycle)
+
+
 class SemanticEntryPlaceCommitTest(unittest.TestCase):
     def test_crossing_into_the_destination_resolves_the_semantic_entry(self):
         explorer = PortalExplorer()

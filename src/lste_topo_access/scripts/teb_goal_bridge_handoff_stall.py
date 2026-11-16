@@ -23,8 +23,6 @@ class TebGoalBridgeHandoffStallMixin:
         pending_delta = self._pending_goal_delta_locked()
         if self._try_frontier_progress_transition_locked(pending_delta):
             return
-        if self._terminal_hold_no_translation_locked(now, pending_delta):
-            return
         stalled = self._action_is_stalled_locked(now)
         target_progress_basis, target_stalled = self._target_stall_state_locked(
             now, pending_delta
@@ -162,11 +160,31 @@ class TebGoalBridgeHandoffStallMixin:
         A pose-anchored window is independent of those resets and bounds the
         otherwise unbounded predecessor gate before the trial watchdog fires.
         """
+        if bool(getattr(self, "navigation_hold", False)):
+            # A target observation deliberately freezes the base; a zero
+            # planner command is expected and must not be cancelled here.
+            return False
         reason = str(
             getattr(self, "teb_feedback_invalid_reason", "") or ""
         )
+        contract_state = getattr(self, "planner_contract_state", None)
+        contract_reason = str(
+            getattr(self, "planner_contract_reason", "") or ""
+        )
+        try:
+            contract_terminal = int(contract_state) == 0
+        except (TypeError, ValueError):
+            contract_terminal = False
+        # The terminal hold is recorded on the typed planner contract.  The
+        # TEB feedback string is often the consequence (planner_zero_command)
+        # or is already bridge_inactive, so keying on it alone never fires.
+        terminal_hold = bool(
+            (contract_terminal and "terminal_hold" in contract_reason)
+            or reason == "planner_contract_terminal_hold"
+            or (reason == "planner_zero_command" and contract_terminal)
+        )
         route_id = int(getattr(self, "active_route_id", 0) or 0)
-        if reason != "planner_contract_terminal_hold" or route_id <= 0:
+        if not terminal_hold or route_id <= 0:
             self.terminal_hold_stall_route_id = 0
             self.terminal_hold_stall_since = 0.0
             self.terminal_hold_stall_anchor_xy = None
@@ -207,19 +225,31 @@ class TebGoalBridgeHandoffStallMixin:
             held_seconds=round(held_seconds, 1),
             pose=[round(xy[0], 3), round(xy[1], 3)],
             pending_delta=round(float(pending_delta), 3),
+            planner_contract_state=contract_state,
+            planner_contract_reason=contract_reason,
+            action_active=bool(getattr(self, "action_active", False)),
         )
+        recovered = False
         if int(getattr(self, "active_intent_priority", 0) or 0) >= 2:
-            self._latch_target_failure_locked(
+            recovered = bool(self._latch_target_failure_locked(
                 "target_terminal_hold_stalled",
                 status_text="NO_PROGRESS",
                 cancel_action=True,
-            )
-        else:
-            self._cancel_stalled_frontier_locked(
+            ))
+        if not recovered:
+            recovered = bool(self._cancel_stalled_frontier_locked(
                 now,
                 pending_delta,
                 reason="terminal_hold_no_translation",
-            )
+            ))
+        if (not recovered
+                and not bool(getattr(self, "target_failure_latched", False))):
+            # The action lease may already be released while the planner
+            # contract remains terminal.  Wake the normal successor dispatch
+            # rather than leaving the bridge parked forever.
+            dispatch = getattr(self, "dispatch_locked", None)
+            if callable(dispatch):
+                dispatch(force=True, reason="terminal_hold_no_translation")
         return True
 
     def _report_stalled_frontier_locked(self, now, pending_delta):

@@ -67,6 +67,9 @@ class TerminalHoldFixture:
         self.teb_feedback_invalid_reason = reason
         self.active_route_id = route_id
         self.active_intent_priority = priority
+        self.planner_contract_state = 0
+        self.planner_contract_reason = "terminal_hold"
+        self.action_active = False
         self.pose_odom = SimpleNamespace(x=1.0, y=2.0)
         self.terminal_hold_stall_seconds = 45.0
         self.terminal_hold_stall_route_id = 0
@@ -75,6 +78,7 @@ class TerminalHoldFixture:
         self.events = []
         self.latches = []
         self.cancels = []
+        self.dispatches = []
 
     def publish_bridge_status(self, event, **fields):
         self.events.append((event, fields))
@@ -85,6 +89,10 @@ class TerminalHoldFixture:
 
     def _cancel_stalled_frontier_locked(self, now, pending_delta, reason=None):
         self.cancels.append((now, pending_delta, reason))
+        return True
+
+    def dispatch_locked(self, force=False, reason=""):
+        self.dispatches.append((force, reason))
         return True
 
 
@@ -173,8 +181,10 @@ class TerminalHoldWatchdogTest(unittest.TestCase):
         )
         self.assertEqual(fixture.latches, [])
 
-    def test_non_terminal_hold_reason_does_not_fire(self):
+    def test_non_terminal_contract_does_not_fire(self):
         fixture = TerminalHoldFixture(reason="planner_zero_command")
+        fixture.planner_contract_state = 1
+        fixture.planner_contract_reason = "planner_command"
 
         self.assertFalse(
             TERMINAL_HOLD_STALL(fixture, 100.0, 0.4)
@@ -185,12 +195,59 @@ class TerminalHoldWatchdogTest(unittest.TestCase):
         self.assertEqual(fixture.events, [])
         self.assertEqual(fixture.latches, [])
 
-    def test_watchdog_is_wired_into_the_stall_policy(self):
-        source = (SCRIPTS / "teb_goal_bridge_handoff_stall.py").read_text()
-        self.assertIn(
-            "_terminal_hold_no_translation_locked(now, pending_delta)",
-            source,
+    def test_planner_contract_hold_detected_from_zero_command_feedback(self):
+        fixture = TerminalHoldFixture(reason="planner_zero_command")
+
+        TERMINAL_HOLD_STALL(fixture, 100.0, 0.4)
+        self.assertTrue(
+            TERMINAL_HOLD_STALL(fixture, 146.0, 0.4)
         )
+        self.assertEqual(
+            [reason for reason, _fields in fixture.latches],
+            ["target_terminal_hold_stalled"],
+        )
+        event = fixture.events[-1][1]
+        self.assertEqual(event["planner_contract_state"], 0)
+        self.assertEqual(event["planner_contract_reason"], "terminal_hold")
+
+    def test_target_observation_hold_does_not_cancel(self):
+        fixture = TerminalHoldFixture()
+        fixture.navigation_hold = True
+
+        self.assertFalse(
+            TERMINAL_HOLD_STALL(fixture, 100.0, 0.4)
+        )
+        self.assertFalse(
+            TERMINAL_HOLD_STALL(fixture, 200.0, 0.4)
+        )
+        self.assertEqual(fixture.latches, [])
+        self.assertEqual(fixture.cancels, [])
+
+    def test_recovery_falls_back_to_successor_dispatch(self):
+        fixture = TerminalHoldFixture()
+        fixture._latch_target_failure_locked = (
+            lambda *_args, **_kwargs: False
+        )
+        fixture._cancel_stalled_frontier_locked = (
+            lambda *_args, **_kwargs: False
+        )
+
+        TERMINAL_HOLD_STALL(fixture, 100.0, 0.4)
+        self.assertTrue(
+            TERMINAL_HOLD_STALL(fixture, 146.0, 0.4)
+        )
+        self.assertEqual(
+            fixture.dispatches,
+            [(True, "terminal_hold_no_translation")],
+        )
+
+    def test_watchdog_is_wired_into_the_bridge_timer(self):
+        source = (
+            SCRIPTS / "teb_goal_bridge_mission_runtime.py"
+        ).read_text()
+        self.assertIn("_terminal_hold_no_translation_locked", source)
+        timer = source.split("if self._is_active_mode():", 1)[0]
+        self.assertIn("terminal_hold", timer)
 
 
 if __name__ == "__main__":

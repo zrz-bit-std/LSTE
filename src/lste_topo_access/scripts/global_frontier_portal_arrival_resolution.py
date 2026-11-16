@@ -90,10 +90,19 @@ class GlobalFrontierPortalArrivalResolutionMixin:
             physical_portal_gate_xy=snapshot.gate_xy,
         )
         if self.portal_arrival_can_commit_identity(arrival):
-            region = self.commit_portal_arrival(
-                arrival, None, now,
-                evidence_source="crossing_transaction_recovery",
-            )
+            try:
+                region = self.commit_portal_arrival(
+                    arrival, None, now,
+                    evidence_source="crossing_transaction_recovery",
+                )
+            except Exception as error:
+                self.publish_status(
+                    "portal_arrival_commit_failed",
+                    reason=type(error).__name__,
+                    detail=str(error)[:200],
+                    evidence_source="crossing_transaction_recovery",
+                )
+                region = None
             if region is not None:
                 self._crossing_verified_uncommitted_since = 0.0
                 self._crossing_verified_uncommitted_pose = None
@@ -102,10 +111,19 @@ class GlobalFrontierPortalArrivalResolutionMixin:
         if (component is not None
                 and not self.portal_arrival_still_in_source_place(
                     arrival, component)):
-            region = self.commit_portal_arrival(
-                arrival, component, now,
-                evidence_source="crossing_transaction_component_recovery",
-            )
+            try:
+                region = self.commit_portal_arrival(
+                    arrival, component, now,
+                    evidence_source="crossing_transaction_component_recovery",
+                )
+            except Exception as error:
+                self.publish_status(
+                    "portal_arrival_commit_failed",
+                    reason=type(error).__name__,
+                    detail=str(error)[:200],
+                    evidence_source="crossing_transaction_component_recovery",
+                )
+                region = None
             if region is not None:
                 self._crossing_verified_uncommitted_since = 0.0
                 self._crossing_verified_uncommitted_pose = None
