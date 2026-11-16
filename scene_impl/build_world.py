@@ -49,21 +49,14 @@ FOOTER = """  </world>
 
 
 def with_door_width(scene, w):
-    """Return a copy of the scene whose wall openings use width w.
-
-    A scene may pin individual doors through ``door_widths`` (door id ->
-    metres); those keep their pinned width while every other opening follows
-    the global ``w`` used by door-width sweeps.
-    """
+    """Return a copy of the scene whose wall openings all use width w."""
     out = dict(scene)
-    overrides = dict(scene.get("door_widths") or {})
     walls = []
     for wid, kind, at, a, b, _old in scene["walls"]:
         cuts = []
         for did, room, axis, dat, dc, dw, s in scene["doors"]:
             if axis == kind and abs(dat - at) < 1e-6:
-                width = float(overrides.get(did, w))
-                cuts.append((dc - width / 2.0, dc + width / 2.0))
+                cuts.append((dc - w / 2.0, dc + w / 2.0))
         walls.append((wid, kind, at, a, b, sorted(cuts)))
     out["walls"] = walls
     return out
