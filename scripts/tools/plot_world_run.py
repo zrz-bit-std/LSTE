@@ -163,10 +163,17 @@ def read_scene(world_path, model_roots):
     # Included models (env05/env06 target and furniture are <include> blocks,
     # not inline <model> blocks).  Resolve the task target by the explicit
     # *_target include name used by the new session worlds.
-    for include in world.findall('include'):
+    # An explicit *_target include outranks a cup_yellow distractor: env06
+    # carries both a yellow cup and the plant that is its actual task target.
+    includes = world.findall('include')
+    ordered = [i for i in includes
+               if str(i.findtext('name') or '').endswith('_target')] + includes
+    for include in ordered:
+        if target is not None:
+            break
         name = str(include.findtext('name') or '')
         uri = str(include.findtext('uri') or '')
-        if target is None and (name.endswith('_target') or 'cup_yellow' in uri):
+        if name.endswith('_target') or 'cup_yellow' in uri:
             target = pose_matrix(include.findtext('pose'))[:2, 3].tolist()
     return shapes, target, missing
 
