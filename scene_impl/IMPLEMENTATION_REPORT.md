@@ -25,7 +25,7 @@
 > 3. B5 保持负分，B2/B3/目标不变；`audit_scene.py` 的 `DOOR_LABELS` 已同步（D_b1 负分、D_b4 办公）。
 > 4. 2026-11-17 已重渲染 env06 的 10 个机位、俯视图/标注图和 `rooms_contact_sheet.png`（新增 `cam_b4`/`cam_b4in`）。
 > 5. 2026-11-17 env04 接入同一套截图流程（9 机位 + 俯视/标注/拼图，输出 `shots/env04`）；同时修复可视化成功判定（audit 先于可视化运行，并回退读取 `audit.completion.task_done`）和设计平面图门宽标签（1.4 m → 实际 2.30 m）。
-> 6. 2026-11-17 env04 地面材质改为白色（`Gazebo/White`），俯视截图不再全黑；9 机位、俯视、标注和拼图已重新渲染。
+> 6. 2026-11-17 env04 地面改用与 env05/env06 相同的 `model://ground_plane`（Gazebo/Grey），俯视截图不再全黑；9 机位、俯视、标注和拼图已重新渲染。
 
 ## 1. 交付物
 
