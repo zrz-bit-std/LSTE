@@ -24,6 +24,7 @@
 > 2. **B1 改为负分储物间**：B4 原 file cabinet + 2 个 cardboard box 搬到 B1，另加 1 个同款文件柜；B1 门口 S_env=**−0.68**；
 > 3. B5 保持负分，B2/B3/目标不变；`audit_scene.py` 的 `DOOR_LABELS` 已同步（D_b1 负分、D_b4 办公）。
 > 4. 2026-11-17 已重渲染 env06 的 10 个机位、俯视图/标注图和 `rooms_contact_sheet.png`（新增 `cam_b4`/`cam_b4in`）。
+> 5. 2026-11-17 env04 接入同一套截图流程（9 机位 + 俯视/标注/拼图，输出 `shots/env04`）；同时修复可视化成功判定（audit 先于可视化运行，并回退读取 `audit.completion.task_done`）和设计平面图门宽标签（1.4 m → 实际 2.30 m）。
 
 ## 1. 交付物
 
@@ -34,7 +35,7 @@
 | `ladder.json` | `model/Data_exchange/vlm_prompt/lab/` | 当前 env05 任务（A3 仓库梯子） |
 | `plant.json` | 同上 | 同上 |
 | 生成/校验脚本 | `/home/zrz/lste_scene_impl/` | `build_design.py`、`build_world.py`、`validate_world.py`、`audit_scene.py`、`sweep_doors.py` |
-| 机位截图 | `/home/zrz/lste_scene_impl/shots/env05_gate_ring/`、`shots/env06_gate_nested/` | env05 9 机位 + 俯视/标注/拼图；env06 10 机位（含 B4 诱饵 / B1 负分）+ 俯视/标注/拼图 |
+| 机位截图 | `/home/zrz/lste_scene_impl/shots/env04/`、`shots/env05_gate_ring/`、`shots/env06_gate_nested/` | env04 9 机位 + 俯视/标注/拼图；env05 9 机位 + 俯视/标注/拼图；env06 10 机位（含 B4 诱饵 / B1 负分）+ 俯视/标注/拼图 |
 | 审计报告 | `/home/zrz/lste_scene_impl/audit_report.md` | 可通行性 + 魔术值 + 观望 + 语义 |
 | 实验记录 | `/home/zrz/lste_scene_impl/logs/env05_summary.txt`、`env06_summary.txt` | 每次实验的最终快照 |
 

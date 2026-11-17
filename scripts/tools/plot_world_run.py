@@ -196,11 +196,30 @@ def extract_run(records, attempt=None):
     def event(name, default=None):
         return next((d for e, d in records if e == name), default)
     start = event('run_start', {})
-    observed_done = next((d for e, d in records if e == 'task_done' and d.get('value') is True), None)
-    done = None if attempt.get('status') in {'failed','infrastructure_failure'} else observed_done
     stop = event('run_stop', {})
     completion_event = event('task_completed', {})
     completion = completion_event.get('completion_snapshot', {})
+    observed_done = next((d for e, d in records if e == 'task_done' and d.get('value') is True), None)
+    # The campaign audit runs after the metrics stream closes and is the
+    # authoritative success record.  Older visualizations were produced
+    # before that audit, so a successful run could lack a metrics task_done
+    # event and be mislabelled as a failure.  Fall back to the audit.
+    audit_completion = ((attempt.get('audit') or {}).get('completion') or {})
+    if observed_done is None and audit_completion.get('task_done') is True:
+        done_ros = audit_completion.get('task_done_ros')
+        try:
+            done_ros = float(done_ros)
+        except (TypeError, ValueError):
+            done_ros = None
+        if done_ros is None:
+            done_ros = stop.get('ros_time', completion_event.get('ros_time', 0.0))
+        observed_done = {
+            'value': True,
+            'ros_time': done_ros,
+            'completion_evidence': audit_completion.get('completion_evidence'),
+            'source': 'attempt_audit',
+        }
+    done = observed_done
     periodic = [d for e, d in records if e == 'sample' and d.get('pose')]
     final = completion.get('metrics', {}) if done else stop.get('summary', {})
     if not final:
@@ -325,6 +344,8 @@ def main():
     result_path = args.log.parent/'attempt_result.json'
     attempt = json.loads(result_path.read_text()) if result_path.exists() else {}
     data = extract_run(records, attempt)
+    if data['wall'] is None and data['done'] is not None:
+        data['wall'] = attempt.get('wall_seconds_including_startup')
     start, done, stop = data['start'], data['done'], data['stop']
     t0, td, samples = data['t0'], data['duration'], data['samples']
     xy = np.asarray([d['pose'][:2] for d in samples]).reshape(-1, 2)

@@ -15,6 +15,17 @@ PAD = 8
 COLS = 3
 
 CAMS = {
+    "env04": [
+        ("cam_p1", "P1 西侧房间（spawn）— 入口"),
+        ("cam_p1in", "P1 室内 — 向西"),
+        ("cam_p2", "P2 北侧房间 — file boxes"),
+        ("cam_p5door", "P5/P6 — 0.9 m 西墙门"),
+        ("cam_p5in", "P5/P6 室内"),
+        ("cam_east", "P4 东侧目标房"),
+        ("cam_target", "目标观察 — yellow cup"),
+        ("cam_eastdoor", "目标房南入口 — 向北"),
+        ("cam_south", "南侧走廊 — 向东"),
+    ],
     "env05_gate_ring": [
         ("cam_a1", "A1 文印/储藏（仓库诱饵）— 门口"),
         ("cam_a1in", "A1 室内 — 柜子/纸箱"),

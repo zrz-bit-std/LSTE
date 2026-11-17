@@ -353,11 +353,11 @@ def draw_scene(scene, path):
     for did, room, axis, at, center, width, s in scene["doors"]:
         if axis == "H":
             ax.plot([center - width / 2, center + width / 2], [at, at], "-", color="#16a34a", lw=4, zorder=6)
-            ax.annotate(f"{did}\n1.4m", (center, at), textcoords="offset points", xytext=(0, 10),
+            ax.annotate(f"{did}\n{width:.2f}m", (center, at), textcoords="offset points", xytext=(0, 10),
                         ha="center", fontsize=7, color="#15803d", zorder=7)
         else:
             ax.plot([at, at], [center - width / 2, center + width / 2], "-", color="#16a34a", lw=4, zorder=6)
-            ax.annotate(f"{did}\n1.4m", (at, center), textcoords="offset points", xytext=(10, 0),
+            ax.annotate(f"{did}\n{width:.2f}m", (at, center), textcoords="offset points", xytext=(10, 0),
                         ha="left", fontsize=7, color="#15803d", zorder=7)
     # spawn
     sx, sy, syaw = scene["spawn"]

@@ -61,7 +61,8 @@ PATTERN = re.compile(
 )
 src, n2 = PATTERN.subn(NEW_WALL, src)
 n += n2
-src = src.replace("  </world>", CAM + "  </world>")
+head, sep, tail = src.rpartition("</world>")
+src = head + CAM + sep + tail
 open(out, "w", encoding="utf-8").write(src)
 open(out + ".cams", "w", encoding="utf-8").write(name)
 print("wrote", out, "camera", name, (x, y, z),

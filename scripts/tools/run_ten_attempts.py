@@ -452,6 +452,18 @@ def run_attempt(campaign, number, args, config):
     result["ended_at"] = dt.datetime.now().isoformat()
     save(directory / "attempt_result.json", result)
 
+    audit_path = directory / (run + "_audit.json")
+    audit = subprocess.run([sys.executable, str(WS / "scripts/tools/audit_search_attempt.py"),
+                            "--attempt-result", str(directory / "attempt_result.json"),
+                            "--out", str(audit_path)],
+                           capture_output=True, text=True, timeout=180)
+    result["audit_path"] = str(audit_path)
+    result["audit_stdout"] = audit.stdout
+    result["audit_stderr"] = audit.stderr[-2000:]
+    if audit_path.exists():
+        result["audit"] = json.loads(audit_path.read_text())
+    save(directory / "attempt_result.json", result)
+
     visualization = directory / (run + "_visualization.log")
     with visualization.open("w") as stream:
         subprocess.run([sys.executable, str(WS / "scripts/tools/plot_world_run.py"),
@@ -484,17 +496,6 @@ def run_attempt(campaign, number, args, config):
             except (OSError, ValueError, TypeError):
                 pass
 
-    audit_path = directory / (run + "_audit.json")
-    audit = subprocess.run([sys.executable, str(WS / "scripts/tools/audit_search_attempt.py"),
-                            "--attempt-result", str(directory / "attempt_result.json"),
-                            "--out", str(audit_path)],
-                           capture_output=True, text=True, timeout=180)
-    result["audit_path"] = str(audit_path)
-    result["audit_stdout"] = audit.stdout
-    result["audit_stderr"] = audit.stderr[-2000:]
-    if audit_path.exists():
-        result["audit"] = json.loads(audit_path.read_text())
-    save(directory / "attempt_result.json", result)
     return result
 
 

@@ -43,6 +43,11 @@ CAMS = {
     ],
 }
 
+# env04 is rendered from the saved no-robot world, but the output directory
+# follows the scene name used by the rest of the shot pipeline.
+CAMS["env04"] = CAMS["env04_no_pro3"]
+
+
 TPL = """    <model name="{name}">
       <static>true</static>
       <pose>{x:.4f} {y:.4f} {z:.4f} 0 0 {yaw:.6f}</pose>
@@ -74,7 +79,8 @@ def main():
     src = open(world, encoding="utf-8").read()
     extra = "".join(TPL.format(name=n, x=x, y=y, z=z, yaw=yaw)
                     for n, x, y, z, yaw, _note in CAMS[name])
-    src = src.replace("  </world>", extra + "  </world>")
+    head, sep, tail = src.rpartition("</world>")
+    src = head + extra + sep + tail
     open(out, "w", encoding="utf-8").write(src)
     open(out + ".cams", "w", encoding="utf-8").write(",".join(c[0] for c in CAMS[name]))
     print("wrote", out, "with", len(CAMS[name]), "cameras")
