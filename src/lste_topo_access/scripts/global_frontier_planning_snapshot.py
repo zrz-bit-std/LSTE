@@ -582,6 +582,15 @@ class GlobalFrontierPlanningSnapshotMixin:
         activate_exit = getattr(self, "_activate_place_exit_if_ready", None)
         if callable(activate_exit):
             activate_exit()
+        # A policy-retired doorway is a bet on a better room.  Once that room
+        # is covered, target-free, and this Place owns no other WorkItem or
+        # uncrossed doorway, restore one retired side room instead of declaring
+        # the mission stranded.  The next planning cycle will dispatch its
+        # rebuilt Portal-entry WorkItem.
+        restore_retired = getattr(
+            self, "_restore_portal_entries_if_exhausted", None)
+        if callable(restore_retired) and restore_retired():
+            return
         if getattr(self, "gp_portal_assistance_enabled", False):
             tree = getattr(self, "gp_exploration_tree", None)
             pending = [] if tree is None else [

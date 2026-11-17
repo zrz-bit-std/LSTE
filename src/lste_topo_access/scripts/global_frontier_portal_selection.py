@@ -2,7 +2,9 @@
 
 import math
 
+from clock_provider import now_for
 from global_frontier_portal_admission import GlobalFrontierPortalAdmissionMixin
+from global_frontier_portal_belief import PortalHypothesisLedger
 from global_frontier_graph_executive import choose_graph_action
 from global_frontier_portal_decision import (
     PortalDecisionCandidate,
@@ -399,7 +401,35 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         except (TypeError, ValueError):
             return True
 
-    def _portal_forward_alternatives(self, request, portal_sources):
+    def _portal_alternative_is_actionable(self, record, destination_place_id):
+        """Return whether a doorway can still justify skipping another one.
+
+        A suppressed doorway was already retired by policy, and a doorway
+        whose destination Place is covered leads back into finished space.
+        Neither is a live alternative to exploration: counting them would
+        re-retire a restored doorway immediately.
+        """
+        if not isinstance(record, dict):
+            return True
+        if record.get("exploration_suppressed"):
+            return False
+        try:
+            destination_place_id = int(destination_place_id)
+        except (TypeError, ValueError):
+            return True
+        region_memory = getattr(self, "region_memory", None)
+        by_id = getattr(region_memory, "by_id", None)
+        region = by_id(destination_place_id) if callable(by_id) else None
+        if (
+            isinstance(region, dict)
+            and PortalHypothesisLedger.place_is_covered(region)
+        ):
+            return False
+        return True
+
+    def _portal_forward_alternatives(
+        self, request, portal_sources, with_provenance=False,
+    ):
         """Return ``(straight_available, positive_available)`` for this pass.
 
         The turn-evidence gate is relative: a negative doorway is skipped only
@@ -415,6 +445,11 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         negative (a nearby door or fire hydrant), and refusing the last way
         forward parks the robot (run 20261113_181729 stopped at y=-3.98 with
         the only south doorway at -0.538).
+
+        ``with_provenance`` additionally returns the Portal/Place that supplied
+        the positive evidence.  Retirement records that identity so the skip
+        can be reversed once the preferred room has been fully observed and
+        produced no target evidence.
         """
         try:
             soft_limit = math.radians(float(
@@ -428,6 +463,7 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
             min_score = 0.15
         straight = False
         positive = False
+        positive_choice = None
         for source in portal_sources.values():
             try:
                 endpoint_row = source.endpoint_row
@@ -456,19 +492,27 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                         continue
                 except (AttributeError, TypeError, ValueError):
                     continue
-            if not positive:
-                ledger = getattr(self, "portal_hypothesis_ledger", None)
-                hypothesis_key = getattr(source, "hypothesis_id", None)
-                if ledger is not None and hypothesis_key is not None:
-                    record = ledger.get(hypothesis_key) or {}
-                    try:
-                        score = float(record.get("semantic_score"))
-                    except (TypeError, ValueError):
-                        score = None
-                    if (score is not None and math.isfinite(score)
-                            and score >= min_score
-                            and not record.get("exploration_suppressed")):
-                        positive = True
+            ledger = getattr(self, "portal_hypothesis_ledger", None)
+            hypothesis_key = getattr(source, "hypothesis_id", None)
+            record = {}
+            if ledger is not None and hypothesis_key is not None:
+                record = ledger.get(hypothesis_key) or {}
+            if not self._portal_alternative_is_actionable(
+                    record, record.get("destination_place_id")):
+                continue
+            try:
+                score = float(record.get("semantic_score"))
+            except (TypeError, ValueError):
+                score = None
+            if (score is not None and math.isfinite(score)
+                    and score >= min_score
+                    and (positive_choice is None or score > positive_choice[0])):
+                positive = True
+                positive_choice = (
+                    score,
+                    hypothesis_key,
+                    record.get("destination_place_id"),
+                )
             if not straight:
                 try:
                     delta, _penalty = self._route_heading_penalty(
@@ -481,11 +525,20 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     delta = None
                 if delta is not None and delta <= soft_limit:
                     straight = True
-            if straight and positive:
+            if straight and positive and not with_provenance:
                 break
+        if with_provenance:
+            if positive_choice is None:
+                return straight, positive, None, None, None
+            score, portal_id, place_id = positive_choice
+            return straight, positive, portal_id, place_id, score
         return straight, positive
 
-    def _retire_negative_room_entry(self, record, portal_id, room_score, now):
+    def _retire_negative_room_entry(
+        self, record, portal_id, room_score, now,
+        justified_by_portal_id=None, justified_by_place_id=None,
+        justified_by_score=None,
+    ):
         """Retire a doorway that was inspected and still looks negative.
 
         Deferring is enough while the inside of the room is still unknown: the
@@ -496,6 +549,11 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         Portal-entry WorkItem unresolved would make the source Place look
         unfinished forever, so the DFS suspends and re-enters that Place in a
         loop (run 20261113_180426: place 3 every ~9 s, 160 identical notes).
+
+        The retirement is a bet on the doorway that supplied the positive
+        alternative.  Record that identity so ``_restore_portal_entries_if_
+        exhausted`` can reverse the skip when the bet has been fully explored
+        without target evidence and the source Place has no other work.
         """
         if not isinstance(record, dict):
             return None
@@ -509,6 +567,22 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
         record["exploration_suppressed"] = True
         record["policy_skip_reason"] = "negative_room_turn"
         record["policy_skip_ros"] = float(now)
+        record.setdefault("policy_restore_count", 0)
+        for key, value in (
+            ("retired_by_portal_id", justified_by_portal_id),
+            ("retired_by_place_id", justified_by_place_id),
+        ):
+            if value is None:
+                continue
+            try:
+                record[key] = int(value)
+            except (TypeError, ValueError):
+                continue
+        if justified_by_score is not None:
+            try:
+                record["retired_by_score"] = float(justified_by_score)
+            except (TypeError, ValueError):
+                pass
         work = getattr(self, "place_work_items", None)
         abandon = getattr(work, "abandon_portal_entry", None)
         retired = None
@@ -532,6 +606,297 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                 reason="negative_room_turn",
             )
         return retired
+
+    def _place_region_is_covered(self, place_id):
+        region_memory = getattr(self, "region_memory", None)
+        by_id = getattr(region_memory, "by_id", None)
+        if not callable(by_id):
+            return False
+        try:
+            region = by_id(int(place_id))
+        except (TypeError, ValueError):
+            return False
+        return bool(
+            isinstance(region, dict)
+            and PortalHypothesisLedger.place_is_covered(region)
+        )
+
+    def _place_has_pending_durable_work(self, place_id):
+        """Return whether a Place still owns an unresolved obligation."""
+        items = getattr(self, "place_work_items", None)
+        snapshot = getattr(items, "snapshot", None)
+        if not callable(snapshot):
+            return False
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return True
+        for item in snapshot() or ():
+            if not isinstance(item, dict):
+                continue
+            try:
+                if int(item.get("place_id", -1)) != place_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if str(item.get("state", "")).strip().lower() == "unresolved":
+                return True
+            if str(item.get("exit_state", "")).strip().lower() in (
+                    "ready", "returning"):
+                return True
+        return False
+
+    def _place_has_actionable_uncrossed_portal(self, place_id):
+        """Return whether another live doorway still remains at this Place."""
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        snapshot = getattr(ledger, "snapshot", None)
+        if not callable(snapshot):
+            return False
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return False
+        for record in snapshot() or ():
+            if not isinstance(record, dict):
+                continue
+            try:
+                if int(record.get("source_place_id", -1)) != place_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if record.get("exploration_suppressed"):
+                continue
+            if str(record.get("state", "")).strip().lower() not in (
+                    "certified", "selected"):
+                continue
+            try:
+                if int(record.get("crossing_count", 0) or 0) > 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            destination = record.get("destination_place_id")
+            if destination is None:
+                # An unbound certified doorway is still an open option.
+                return True
+            try:
+                destination = int(destination)
+            except (TypeError, ValueError):
+                continue
+            if self._place_region_is_covered(destination):
+                continue
+            return True
+        return False
+
+    def _retirement_justification_is_spent(self, record):
+        """Return whether the room that justified a skip is truly finished.
+
+        The preferred room must be covered, free of pending work, and free of
+        target evidence.  A positive environment score from a chair or desk is
+        exactly the decoy case: the room was worth visiting, but it did not
+        contain the task target.
+        """
+        try:
+            justified_place = int(record.get("retired_by_place_id"))
+        except (TypeError, ValueError):
+            return False
+        try:
+            if justified_place == int(getattr(
+                    self, "current_physical_place_id", -1)):
+                return False
+        except (TypeError, ValueError):
+            return False
+        if not self._place_region_is_covered(justified_place):
+            return False
+        if self._place_has_pending_durable_work(justified_place):
+            return False
+        semantic = getattr(self, "semantic_place_belief", None)
+        evidence_reader = getattr(semantic, "evidence", None)
+        evidence = (
+            evidence_reader(justified_place)
+            if callable(evidence_reader) else None
+        )
+        if (
+            isinstance(evidence, dict)
+            and int(evidence.get("target_hits", 0) or 0) > 0
+        ):
+            return False
+        target_belief = getattr(self, "target_belief", None)
+        target_reader = getattr(target_belief, "evidence", None)
+        target_evidence = (
+            target_reader(justified_place)
+            if callable(target_reader) else None
+        )
+        if (
+            isinstance(target_evidence, dict)
+            and int(target_evidence.get("target_hits", 0) or 0) > 0
+        ):
+            return False
+        return True
+
+    def _retired_portal_restore_rank(self, record):
+        gate = record.get("physical_gate") or record.get("map_gate")
+        pose = getattr(self, "pose_odom", None)
+        try:
+            distance = math.hypot(
+                float(gate[0]) - float(pose.x),
+                float(gate[1]) - float(pose.y),
+            )
+        except (AttributeError, IndexError, TypeError, ValueError):
+            distance = float("inf")
+        try:
+            score = float(record.get("semantic_score"))
+        except (TypeError, ValueError):
+            score = -1.0
+        try:
+            portal_id = int(record.get("id", 0) or 0)
+        except (TypeError, ValueError):
+            portal_id = 0
+        return distance, -score, portal_id
+
+    def _restore_portal_entry_record(self, record, now=None):
+        """Clear a policy retirement and recreate its durable entry WorkItem."""
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        getter = getattr(ledger, "get", None)
+        if not callable(getter):
+            return False
+        try:
+            portal_id = int(record.get("id"))
+        except (TypeError, ValueError):
+            return False
+        live = getter(portal_id)
+        if not isinstance(live, dict):
+            return False
+        if not live.get("exploration_suppressed"):
+            return False
+        gate = live.get("physical_gate") or live.get("map_gate")
+        try:
+            gate_xy = (float(gate[0]), float(gate[1]))
+        except (IndexError, TypeError, ValueError):
+            return False
+        try:
+            score = float(live.get("semantic_score"))
+        except (TypeError, ValueError):
+            score = -1.0
+        try:
+            priority = int(live.get("semantic_priority"))
+        except (TypeError, ValueError):
+            priority = 10 ** 9
+        try:
+            source_place_id = int(live.get("source_place_id"))
+        except (TypeError, ValueError):
+            return False
+        work = getattr(self, "place_work_items", None)
+        ensure = getattr(work, "ensure_portal_entry", None)
+        if not callable(ensure):
+            return False
+        if now is None:
+            now = now_for(self)
+        now = float(now)
+        entry_id = ensure(
+            portal_id, source_place_id, gate_xy, priority, score, now,
+        )
+        if entry_id is None:
+            return False
+        reopen = getattr(work, "reopen_portal_entry", None)
+        if callable(reopen):
+            reopened = reopen(
+                portal_id, now, "policy_restored_after_decoy_completion")
+            if reopened is not None:
+                entry_id = reopened
+        live["exploration_suppressed"] = False
+        live["policy_skip_reason"] = ""
+        live["navigation_deferred_reason"] = ""
+        live["navigation_deferred_until_epoch"] = None
+        live["policy_restored_ros"] = now
+        live["policy_restore_reason"] = "exhausted_after_decoy_completion"
+        try:
+            live["policy_restore_count"] = int(
+                live.get("policy_restore_count", 0) or 0) + 1
+        except (TypeError, ValueError):
+            live["policy_restore_count"] = 1
+        live["semantic_entry_work_item_id"] = int(entry_id)
+        publish = getattr(self, "publish_status", None)
+        if callable(publish):
+            publish(
+                "portal_entry_policy_restored",
+                portal_id=portal_id,
+                source_place_id=source_place_id,
+                destination_place_id=live.get("destination_place_id"),
+                retired_by_portal_id=live.get("retired_by_portal_id"),
+                retired_by_place_id=live.get("retired_by_place_id"),
+                semantic_score=score,
+                gate=[round(gate_xy[0], 3), round(gate_xy[1], 3)],
+                work_item_id=int(entry_id),
+                restore_count=int(live["policy_restore_count"]),
+                reason="exhausted_after_decoy_completion",
+            )
+        return True
+
+    def _restore_portal_entries_if_exhausted(self, now=None):
+        """Reverse a negative-room retirement once its bet is fully spent.
+
+        Retirement exists because a positive doorway made a negative side room
+        look like a wasted turn.  When that preferred room is covered, carries
+        no target evidence, and the source Place has no other WorkItem or
+        uncrossed doorway left, the comparison that justified the skip no
+        longer holds.  Restoring one doorway prevents a decoy room from
+        stranding the mission at zero velocity.
+        """
+        place_id = getattr(self, "current_physical_place_id", None)
+        try:
+            place_id = int(place_id)
+        except (TypeError, ValueError):
+            return False
+        if bool(getattr(self, "target_region_claim_active", False)):
+            return False
+        if self._place_has_pending_durable_work(place_id):
+            return False
+        if self._place_has_actionable_uncrossed_portal(place_id):
+            return False
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        snapshot = getattr(ledger, "snapshot", None)
+        if not callable(snapshot):
+            return False
+        candidates = []
+        for record in snapshot() or ():
+            if not isinstance(record, dict):
+                continue
+            try:
+                if int(record.get("source_place_id", -1)) != place_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if not record.get("exploration_suppressed"):
+                continue
+            if record.get("policy_skip_reason") != "negative_room_turn":
+                continue
+            if str(record.get("state", "")).strip().lower() not in (
+                    "certified", "selected"):
+                continue
+            try:
+                if int(record.get("crossing_count", 0) or 0) > 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            try:
+                if int(record.get("policy_restore_count", 0) or 0) >= 1:
+                    continue
+            except (TypeError, ValueError):
+                pass
+            destination = record.get("destination_place_id")
+            try:
+                destination = int(destination)
+            except (TypeError, ValueError):
+                continue
+            if self._place_region_is_covered(destination):
+                continue
+            if not self._retirement_justification_is_spent(record):
+                continue
+            candidates.append(record)
+        if not candidates:
+            return False
+        record = min(candidates, key=self._retired_portal_restore_rank)
+        return self._restore_portal_entry_record(record, now)
 
     def _portal_room_score_ranking(self, source_place_id):
         """Return the two highest certified room scores of one source Place."""
@@ -854,8 +1219,14 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     route_heading_delta, room_score):
                 if forward_alternatives is None:
                     forward_alternatives = self._portal_forward_alternatives(
-                        request, portal_sources)
-                straight_available, positive_available = forward_alternatives
+                        request, portal_sources, with_provenance=True)
+                (
+                    straight_available,
+                    positive_available,
+                    positive_portal_id,
+                    positive_place_id,
+                    positive_score,
+                ) = forward_alternatives
                 if straight_available or positive_available:
                     # Going straight needs no evidence; turning into a room
                     # does, but only while the corridor ahead is still usable.
@@ -869,6 +1240,9 @@ class GlobalFrontierPortalSelectionMixin(GlobalFrontierPortalAdmissionMixin):
                     ))
                     self._retire_negative_room_entry(
                         record, hypothesis_key, room_score, request.now,
+                        justified_by_portal_id=positive_portal_id,
+                        justified_by_place_id=positive_place_id,
+                        justified_by_score=positive_score,
                     )
                     continue
                 # Every candidate needs a large turn, so refusing this one

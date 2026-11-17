@@ -21,6 +21,7 @@ from global_frontier_graph_route_planner import (
     GraphRoutePlan,
     dfs_exit_projection_ready,
 )
+from global_frontier_portal_belief import PortalHypothesisLedger
 
 
 _GRAPH_ROUTE_MATERIALIZATION_MAX_MISSES = 4
@@ -2353,6 +2354,57 @@ class GlobalFrontierGraphRouteAdapterMixin:
         )
         return True
 
+    def _graph_plan_suppressed_portal_conflict(self, portal_id):
+        """Return evidence when a retained plan points at a retired covered edge.
+
+        A suppressed Portal is not a transient projection miss.  Its entry
+        WorkItem was deliberately retired, its probe was dropped when the room
+        closed, and its destination Place is already covered.  Retrying the
+        same plan can only reproduce the same egress refusal, so the adapter
+        releases the lease and lets the selection layer restore another
+        doorway.
+        """
+        ledger = getattr(self, "portal_hypothesis_ledger", None)
+        getter = getattr(ledger, "get", None)
+        if not callable(getter):
+            return None
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return None
+        record = getter(portal_id)
+        if not isinstance(record, dict):
+            return None
+        if not record.get("exploration_suppressed"):
+            return None
+        try:
+            current_place_id = int(getattr(
+                self, "current_physical_place_id", -1))
+            source_place_id = int(record.get("source_place_id", -1))
+        except (TypeError, ValueError):
+            return None
+        if current_place_id != source_place_id:
+            # Inside the retired room the same edge is a legitimate exit.
+            return None
+        try:
+            destination_place_id = int(record.get("destination_place_id"))
+        except (TypeError, ValueError):
+            return None
+        region_memory = getattr(self, "region_memory", None)
+        by_id = getattr(region_memory, "by_id", None)
+        region = by_id(destination_place_id) if callable(by_id) else None
+        if not isinstance(region, dict):
+            return None
+        if not PortalHypothesisLedger.place_is_covered(region):
+            return None
+        return {
+            "portal_id": portal_id,
+            "source_place_id": record.get("source_place_id"),
+            "destination_place_id": destination_place_id,
+            "policy_skip_reason": record.get("policy_skip_reason"),
+            "reason": "suppressed_portal_destination_covered",
+        }
+
     def _retain_graph_route_plan_lease(self, plan, reason="materialization_wait"):
         """Keep one ready durable action across transient map snapshots.
 
@@ -2954,6 +3006,31 @@ class GlobalFrontierGraphRouteAdapterMixin:
             first_id = int(first_id)
         except (TypeError, ValueError):
             return plan, None
+
+        policy_conflict = self._graph_plan_suppressed_portal_conflict(first_id)
+        if policy_conflict is not None:
+            reason = policy_conflict["reason"]
+            publish = getattr(self, "publish_status", None)
+            if callable(publish):
+                identity = self._graph_route_materialization_identity(
+                    plan=plan, map_epoch=map_epoch)
+                publish("graph_route_policy_conflict", **identity,
+                        **policy_conflict)
+            self._publish_graph_route_unavailable(
+                plan, reason, map_epoch=map_epoch,
+                controller_release_allowed=True,
+            )
+            self._clear_graph_route_plan_lease(reason)
+            self.last_graph_route_plan = None
+            self.last_graph_route_plan_signature = None
+            self.graph_route_action_transaction = None
+            self.graph_route_portal_id = None
+            self.graph_route_probe_id = None
+            restore_retired = getattr(
+                self, "_restore_portal_entries_if_exhausted", None)
+            if callable(restore_retired):
+                restore_retired()
+            return None, None
 
         if plan.action == ACTION_PROBE_PORTAL and plan.obligation_kind == "portal_probe":
             probe_ledger = getattr(self, "portal_probe_ledger", None)

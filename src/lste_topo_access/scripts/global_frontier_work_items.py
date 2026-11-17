@@ -677,6 +677,40 @@ class PlaceWorkItemLedger:
         item["updated_at"] = float(now)
         return item
 
+    def reopen_portal_entry(self, portal_id, now, reason="policy_restored"):
+        """Return a retired Portal entry to the unresolved obligation ledger.
+
+        ``abandon_portal_entry`` resolves the WorkItem so a negative side room
+        cannot keep its source Place unfinished forever.  If the room that
+        justified that retirement is later fully observed without target
+        evidence, the doorway becomes the last remaining option and its entry
+        obligation must be able to resume rather than stay resolved.
+        """
+        try:
+            portal_id = int(portal_id)
+        except (TypeError, ValueError):
+            return None
+        for item in self._items.values():
+            if item.get("kind") != "portal_entry":
+                continue
+            try:
+                if int(item.get("portal_id", -1)) != portal_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            active = self._active_attempt(item)
+            if active is not None:
+                self._finish_active_attempt(
+                    item, ATTEMPT_SUSPENDED, now, reason,
+                )
+            item["state"] = WORK_UNRESOLVED
+            item["resolution"] = None
+            item["dismissed"] = False
+            item["last_reason"] = str(reason)
+            item["updated_at"] = float(now)
+            return int(item["id"])
+        return None
+
     def clear_portal_entry_cooldown(self, portal_id):
         """Reset the cooldown after the crossing actually succeeds."""
         try:

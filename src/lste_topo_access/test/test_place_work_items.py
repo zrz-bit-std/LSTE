@@ -315,6 +315,22 @@ class PortalEntryAbandonTest(unittest.TestCase):
         self.assertEqual(retired["last_reason"], "return_unrecoverable")
         self.assertEqual(ledger.unresolved_frontier_observation_count(1), 0)
 
+    def test_reopen_returns_the_same_entry_to_unresolved(self):
+        ledger = PlaceWorkItemLedger(0.7)
+        item_id = ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)
+        ledger.abandon_portal_entry(
+            4, 10.0, "negative_room_turn",
+            resolution="policy_skipped_negative_room",
+        )
+        reopened = ledger.reopen_portal_entry(
+            4, 12.0, "policy_restored_after_decoy_completion")
+        self.assertEqual(reopened, item_id)
+        item = next(
+            entry for entry in ledger.snapshot()
+            if entry["id"] == item_id
+        )
+        self.assertEqual(item["state"], WORK_UNRESOLVED)
+
     def test_second_abandon_is_a_no_op(self):
         ledger = PlaceWorkItemLedger(0.7)
         ledger.ensure_portal_entry(4, 1, (1.0, 2.0), 1, 0.8, 1.0)

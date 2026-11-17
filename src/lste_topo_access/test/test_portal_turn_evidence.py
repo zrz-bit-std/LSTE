@@ -234,6 +234,23 @@ class NegativeRoomRetirementTest(unittest.TestCase):
         names = [name for name, _fields in host.events]
         self.assertIn("portal_entry_policy_skipped", names)
 
+    def test_retirement_records_the_justifying_alternative(self):
+        host = self._host()
+        record = {
+            "id": 5, "gp_authentication_state": "completed",
+            "semantic_entry_work_item_id": 24,
+        }
+        host._retire_negative_room_entry(
+            record, 5, -0.538, 100.0,
+            justified_by_portal_id=1,
+            justified_by_place_id=2,
+            justified_by_score=1.0,
+        )
+        self.assertEqual(record["retired_by_portal_id"], 1)
+        self.assertEqual(record["retired_by_place_id"], 2)
+        self.assertEqual(record["retired_by_score"], 1.0)
+        self.assertEqual(record["policy_restore_count"], 0)
+
     def test_unknown_inside_stays_deferred_only(self):
         host = self._host()
         record = {"id": 6, "gp_authentication_state": "entering"}
@@ -251,10 +268,11 @@ if __name__ == "__main__":
 class ForwardAlternativesTest(unittest.TestCase):
     """A negative doorway yields only to a straighter or better doorway."""
 
-    def _host(self, deltas, scores=None, rejected=()):
+    def _host(self, deltas, scores=None, rejected=(), destinations=None):
         from types import SimpleNamespace
 
         scores = scores or {}
+        destinations = destinations or {}
         host = GlobalFrontierPortalSelectionMixin()
         host.room_turn_soft_limit_deg = 60.0
         host.heading_semantic_override_min_score = 0.15
@@ -265,7 +283,10 @@ class ForwardAlternativesTest(unittest.TestCase):
             lambda _request, endpoint, _xy: (math.radians(deltas[endpoint[0]]), 0.0)
         )
         records = {
-            key: {"semantic_score": score}
+            key: {
+                "semantic_score": score,
+                "destination_place_id": destinations.get(key),
+            }
             for key, score in scores.items()
         }
         host.portal_hypothesis_ledger = SimpleNamespace(
@@ -305,6 +326,32 @@ class ForwardAlternativesTest(unittest.TestCase):
         self.assertFalse(straight)
         self.assertTrue(positive)
 
+    def test_positive_alternative_reports_portal_and_place(self):
+        host, request, sources = self._host(
+            {1: 90.0, 2: 90.0}, scores={1: 0.182, 2: -0.69},
+            destinations={1: 7})
+        self.assertEqual(
+            host._portal_forward_alternatives(
+                request, sources, with_provenance=True),
+            (False, True, 1, 7, 0.182),
+        )
+
+    def test_completed_positive_room_is_not_an_alternative(self):
+        from types import SimpleNamespace
+
+        host, request, sources = self._host(
+            {1: 90.0, 2: 90.0}, scores={1: 0.182, 2: -0.69},
+            destinations={1: 7})
+        host.region_memory = SimpleNamespace(
+            by_id=lambda place_id: {
+                7: {"id": 7, "state": "dormant"},
+            }.get(int(place_id)))
+        self.assertEqual(
+            host._portal_forward_alternatives(
+                request, sources, with_provenance=True),
+            (False, False, None, None, None),
+        )
+
     def test_negative_neighbours_are_not_an_alternative(self):
         host, request, sources = self._host(
             {1: 90.0, 2: 90.0}, scores={1: -0.538, 2: -0.69})
@@ -341,6 +388,180 @@ class ForwardAlternativesTest(unittest.TestCase):
         self.assertEqual(
             host._portal_forward_alternatives(request, sources),
             (False, False))
+
+
+class _PortalLedger:
+    def __init__(self, records):
+        self.records = {int(key): value for key, value in records.items()}
+
+    def snapshot(self):
+        return [dict(value) for value in self.records.values()]
+
+    def get(self, portal_id):
+        return self.records.get(int(portal_id))
+
+
+class _WorkItems:
+    def __init__(self, items=None):
+        self.items = list(items or [])
+        self.ensured = []
+        self.reopened = []
+
+    def snapshot(self):
+        return [dict(item) for item in self.items]
+
+    def ensure_portal_entry(
+        self, portal_id, place_id, goal_xy, priority, semantic_score, now,
+    ):
+        self.ensured.append(
+            (portal_id, place_id, goal_xy, priority, semantic_score, now))
+        return 77
+
+    def reopen_portal_entry(self, portal_id, now, reason="policy_restored"):
+        self.reopened.append((portal_id, now, reason))
+        return 77
+
+
+class RetiredPortalRestoreTest(unittest.TestCase):
+    """A retired side door returns once its preferred room is spent."""
+
+    def _host(self, records=None, work_items=None, evidence=None,
+              regions=None):
+        from types import SimpleNamespace
+
+        regions = regions or {
+            1: {"id": 1, "state": "open", "endpoint_observations": 1},
+            2: {"id": 2, "state": "dormant", "endpoint_observations": 1},
+            3: {"id": 3, "state": "open", "endpoint_observations": 0},
+        }
+        evidence = evidence or {
+            2: {"place_id": 2, "target_hits": 0, "observations": 20},
+        }
+        default_record = {
+            "id": 2,
+            "source_place_id": 1,
+            "destination_place_id": 3,
+            "state": "certified",
+            "exploration_suppressed": True,
+            "policy_skip_reason": "negative_room_turn",
+            "crossing_count": 0,
+            "policy_restore_count": 0,
+            "retired_by_portal_id": 1,
+            "retired_by_place_id": 2,
+            "retired_by_score": 1.0,
+            "semantic_score": -0.49,
+            "semantic_priority": 3,
+            "physical_gate": [19.6, -4.0],
+        }
+        if records is None:
+            records = {2: default_record}
+        host = GlobalFrontierPortalSelectionMixin()
+        host.current_physical_place_id = 1
+        host.portal_hypothesis_ledger = _PortalLedger(records)
+        host.place_work_items = _WorkItems(work_items)
+        host.region_memory = SimpleNamespace(
+            by_id=lambda place_id: regions.get(int(place_id)))
+        host.semantic_place_belief = SimpleNamespace(
+            evidence=lambda place_id: evidence.get(int(place_id)))
+        host.target_belief = None
+        host.target_region_claim_active = False
+        host.pose_odom = SimpleNamespace(x=20.7, y=-4.3)
+        host.events = []
+        host.publish_status = lambda name, **fields: host.events.append(
+            (name, fields))
+        return host, default_record
+
+    def test_retired_side_door_is_restored_after_decoy_completion(self):
+        host, record = self._host()
+        self.assertTrue(host._restore_portal_entries_if_exhausted(now=10.0))
+        live = host.portal_hypothesis_ledger.get(2)
+        self.assertFalse(live["exploration_suppressed"])
+        self.assertEqual(live["policy_restore_count"], 1)
+        self.assertEqual(live["semantic_entry_work_item_id"], 77)
+        self.assertEqual(host.place_work_items.ensured, [
+            (2, 1, (19.6, -4.0), 3, -0.49, 10.0),
+        ])
+        self.assertEqual(host.place_work_items.reopened, [
+            (2, 10.0, "policy_restored_after_decoy_completion"),
+        ])
+        self.assertIn(
+            "portal_entry_policy_restored",
+            [name for name, _fields in host.events],
+        )
+        self.assertFalse(
+            host._restore_portal_entries_if_exhausted(now=11.0),
+            "a restored doorway must not be restored twice",
+        )
+
+    def test_pending_work_blocks_restore(self):
+        host, _record = self._host(work_items=[
+            {"place_id": 1, "state": "unresolved", "kind": "frontier_observation"},
+        ])
+        self.assertFalse(host._restore_portal_entries_if_exhausted(now=10.0))
+
+    def test_target_evidence_in_the_preferred_room_blocks_restore(self):
+        host, _record = self._host(evidence={
+            2: {"place_id": 2, "target_hits": 2, "observations": 20},
+        })
+        self.assertFalse(host._restore_portal_entries_if_exhausted(now=10.0))
+
+    def test_crossed_portal_is_not_restored(self):
+        record = {
+            "id": 2, "source_place_id": 1, "destination_place_id": 3,
+            "state": "certified", "exploration_suppressed": True,
+            "policy_skip_reason": "negative_room_turn",
+            "crossing_count": 1, "policy_restore_count": 0,
+            "retired_by_place_id": 2, "semantic_score": -0.49,
+            "semantic_priority": 3, "physical_gate": [19.6, -4.0],
+        }
+        host, _record = self._host(records={2: record})
+        self.assertFalse(host._restore_portal_entries_if_exhausted(now=10.0))
+
+    def test_completed_destination_is_not_restored(self):
+        host, _record = self._host(regions={
+            1: {"id": 1, "state": "open", "endpoint_observations": 1},
+            2: {"id": 2, "state": "dormant", "endpoint_observations": 1},
+            3: {"id": 3, "state": "dormant", "endpoint_observations": 1},
+        })
+        self.assertFalse(host._restore_portal_entries_if_exhausted(now=10.0))
+
+    def test_another_actionable_doorway_blocks_restore(self):
+        record = {
+            "id": 2, "source_place_id": 1, "destination_place_id": 3,
+            "state": "certified", "exploration_suppressed": True,
+            "policy_skip_reason": "negative_room_turn",
+            "crossing_count": 0, "policy_restore_count": 0,
+            "retired_by_place_id": 2, "semantic_score": -0.49,
+            "semantic_priority": 3, "physical_gate": [19.6, -4.0],
+        }
+        live_other = {
+            "id": 4, "source_place_id": 1, "destination_place_id": 5,
+            "state": "certified", "exploration_suppressed": False,
+            "crossing_count": 0, "semantic_score": 0.2,
+            "physical_gate": [21.0, -3.0],
+        }
+        host, _record = self._host(
+            records={2: record, 4: live_other},
+            regions={
+                1: {"id": 1, "state": "open", "endpoint_observations": 1},
+                2: {"id": 2, "state": "dormant", "endpoint_observations": 1},
+                3: {"id": 3, "state": "open", "endpoint_observations": 0},
+                5: {"id": 5, "state": "open", "endpoint_observations": 0},
+            },
+        )
+        self.assertFalse(host._restore_portal_entries_if_exhausted(now=10.0))
+
+    def test_restore_budget_is_one_per_portal(self):
+        record = {
+            "id": 2, "source_place_id": 1, "destination_place_id": 3,
+            "state": "certified", "exploration_suppressed": True,
+            "policy_skip_reason": "negative_room_turn",
+            "crossing_count": 0, "policy_restore_count": 1,
+            "retired_by_place_id": 2, "semantic_score": -0.49,
+            "semantic_priority": 3, "physical_gate": [19.6, -4.0],
+        }
+        host, _record = self._host(records={2: record})
+        self.assertFalse(host._restore_portal_entries_if_exhausted(now=10.0))
 
 
 class DeferralCallContractTest(unittest.TestCase):
