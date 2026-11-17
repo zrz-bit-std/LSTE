@@ -49,11 +49,11 @@ SCENES = {
         cam=(13.0, -2.7),
         spawn=(25.1, -4.1, 180.0),
         rooms=[
-            ("B1 会议室（诱饵）", 4.00, 0.40, "S=0.97", (0.99, 0.80, 0.80)),
-            ("B2 茶水间", 15.50, 0.40, "S=0.73", (0.99, 0.90, 0.62)),
-            ("B3 内间办公室", 20.80, 2.30, "S=0.73", (0.99, 0.90, 0.62)),
-            ("B4 储物间（负分）", 22.00, -6.80, "S=-0.69", (0.99, 0.80, 0.80)),
-            ("B5 机房（负分）", 10.00, -6.80, "S=-0.69", (0.99, 0.80, 0.80)),
+            ("B1 储物间（负分）", 4.00, 0.40, "S=-0.68", (0.99, 0.80, 0.80)),
+            ("B2 茶水间", 15.50, 0.40, "S=1.00", (0.99, 0.90, 0.62)),
+            ("B3 内间办公室", 20.80, 2.30, "S=1.00", (0.99, 0.90, 0.62)),
+            ("B4 休息区（诱饵）", 19.90, -7.40, "S=1.00", (0.99, 0.90, 0.62)),
+            ("B5 机房（负分）", 10.00, -6.80, "S=-0.68", (0.99, 0.80, 0.80)),
         ],
         corridor=[("主走廊 3.0 m", 13.0, -4.10)],
         doors=[
@@ -63,17 +63,19 @@ SCENES = {
         ],
         target=(22.62, 0.60, "target plant (22.62, 0.60, z=0.75)"),
         negatives=[(11.90, -2.825), (22.60, -5.375), (6.40, -2.85),
-                   (8.20, -8.10), (9.90, -8.10), (11.90, -8.30),
-                   (20.20, -7.70), (22.60, -7.80), (23.10, -7.80)],
+                   (1.60, 2.72), (3.20, 2.72), (6.20, 3.05), (6.90, 2.35),
+                   (8.20, -8.10), (9.90, -8.10), (11.90, -8.30)],
         legend=[
             "黑 = 2.5 m 墙 / 实体",
             "绿 = 2.3 m 门洞（5 个）",
             "0.7 m 门套（房间内侧，走廊齐平）",
             "红 × = 负分物 / 负分货物",
             "★ = 目标 plant",
-            "B1 桌+椅整体靠西北墙，留出探索空间",
-            "B3 桌椅东移；plant 在桌面，桌面/东南角补正向 office 物品",
-            "B4 / B5 货物为负分（file cabinet / box）→ 跳过",
+            "B1 储物间：文件柜 + 纸箱（负分）→ 跳过",
+            "B4 休息区诱饵：桌 + 2 椅 + 显示器（S=1.00）",
+            "  → 进入搜索后退出，里面没有绿植",
+            "B3 桌椅东移；plant 在桌面靠西边缘",
+            "B5 机房：负分货物 → 跳过",
             "蓝三角 = spawn（P1）",
         ],
     ),
@@ -117,18 +119,36 @@ def pixel(scene, x, y):
     return IMG_W / 2 + (x - cx) * s, IMG_H / 2 - (y - cy) * s
 
 
+def _text_bbox(draw, text, font, spacing):
+    """Pillow 7 has multiline_textsize; Pillow 8+ has multiline_textbbox."""
+    if hasattr(draw, "multiline_textbbox"):
+        return draw.multiline_textbbox((0, 0), text, font=font,
+                                       spacing=spacing, anchor="la")
+    w, h = draw.multiline_textsize(text, font=font, spacing=spacing)
+    return 0, 0, w, h
+
+
+def _rrect(draw, xy, **kwargs):
+    """Pillow 7 on the lab server lacks rounded_rectangle."""
+    if hasattr(draw, "rounded_rectangle"):
+        draw.rounded_rectangle(xy, **kwargs)
+    else:
+        kwargs.pop("radius", None)
+        kwargs.pop("width", None)
+        draw.rectangle(xy, **kwargs)
+
+
 def box(draw, xy, text, font, fg=(20, 20, 20), bg=(255, 255, 255, 225),
         pad=8, anchor="mm"):
     x, y = xy
-    l, t, r, b = draw.multiline_textbbox((0, 0), text, font=font,
-                                        spacing=4, anchor="la")
+    l, t, r, b = _text_bbox(draw, text, font, 4)
     w, h = r - l, b - t
     if anchor == "mm":
         x0, y0 = x - w / 2 - pad, y - h / 2 - pad
     else:
         x0, y0 = x - pad, y - pad
-    draw.rounded_rectangle([x0, y0, x0 + w + 2 * pad, y0 + h + 2 * pad],
-                           radius=8, fill=bg)
+    _rrect(draw, [x0, y0, x0 + w + 2 * pad, y0 + h + 2 * pad],
+           radius=8, fill=bg)
     draw.multiline_text((x0 + pad - l, y0 + pad - t), text, font=font,
                         fill=fg, spacing=4)
 
@@ -208,10 +228,10 @@ def main():
     # legend in the grey margin (top-left)
     lx, ly = IMG_W + 20, 24
     lines = "\n".join(sc["legend"])
-    l, t, r, b = d.multiline_textbbox((0, 0), lines, font=f_leg, spacing=6)
-    d.rounded_rectangle([lx, ly, lx + (r - l) + 28, ly + (b - t) + 24],
-                        radius=10, fill=(255, 255, 255, 232),
-                        outline=(80, 80, 80, 255), width=2)
+    l, t, r, b = _text_bbox(d, lines, f_leg, 6)
+    _rrect(d, [lx, ly, lx + (r - l) + 28, ly + (b - t) + 24],
+           radius=10, fill=(255, 255, 255, 232),
+           outline=(80, 80, 80, 255), width=2)
     d.multiline_text((lx + 14, ly + 12), lines, font=f_leg,
                      fill=(20, 20, 20), spacing=6)
 

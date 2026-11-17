@@ -35,10 +35,10 @@ DOOR_LABELS = {
     "D_a2": ["desk", "chair", "monitor"],
     "D_a3": ["shelf"],
     "D_a4": [],
-    "D_b1": ["desk", "chair", "monitor"],
+    "D_b1": ["file cabinet", "cardboard box"],
     "D_b2": ["desk", "chair"],
     "D_b3": ["desk", "chair"],
-    "D_b4": ["file cabinet", "cardboard box"],
+    "D_b4": ["desk", "chair", "monitor"],
     "D_b5": ["file cabinet", "cardboard box"],
 }
 TARGET_ROOM = {"env05_gate_ring": "A3", "env06_gate_nested": "B3"}
@@ -138,7 +138,9 @@ def main(name, scene, out):
     out.append("| 参数 | 设计值 | 实测 | 结论 |")
     out.append("|---|---|---|---|")
     door_w = scene["doors"][0][5]
-    out.append(f"| 门宽 | 1.40 | {door_w:.2f} | {'OK（窗口 1.30–1.45）' if 1.30 <= door_w <= 1.45 else 'FAIL'} |")
+    door_ok = abs(door_w - float(bd.DOOR_W)) <= 0.05
+    out.append(f"| 门宽 | {float(bd.DOOR_W):.2f} | {door_w:.2f} | "
+               f"{'OK（v6）' if door_ok else 'FAIL'} |")
     m = StructuralPlaceMap(~occ, occ, RES, PLACE_CLEAR, 2.5, 1)
     start_label = int(m.labels[start])
     lab_rooms = {}

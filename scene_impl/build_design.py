@@ -145,7 +145,8 @@ SCENES["env06_gate_nested"] = dict(
     target_view=(20.80, 0.90),
     target_room="B3",
     peek_dist=1.5,
-    route=[("spawn", 25.1, -4.1), ("D_b2 观察位", 14.5, -4.1),
+    route=[("spawn", 25.1, -4.1), ("D_b4 观察位", 20.5, -4.1),
+           ("B4 室内", 21.0, -7.0), ("D_b2 观察位", 14.5, -4.1),
            ("B2 室内", 14.2, 1.2), ("绕过挡墙", 17.0, 0.4), ("D_b3 观察位", 17.0, 1.5),
            ("B3 室内", 20.0, 1.5), ("绕桌东侧", 23.6, -0.5), ("目标观察圈", 20.8, 0.9)],
     walls=[
@@ -169,27 +170,26 @@ SCENES["env06_gate_nested"] = dict(
         ("S_s_gap2", 13.0, 18.0, -8.8, -5.6),
     ],
     rooms=[
-        ("B1", "会议室（诱饵）", 0.0, 8.0, -2.6, 3.4, 0.88, "desk+chair+monitor", "进入→退出"),
+        ("B1", "储物间（负分）", 0.0, 8.0, -2.6, 3.4, -0.70, "file cabinet+cardboard box（负分货物）", "跳过（负分）"),
         ("B2", "茶水间（中转）", 12.5, 18.5, -2.6, 3.4, 0.50, "desk+chair", "进入→拿证据"),
         ("B3", "内间办公室（套间）", 18.5, 26.0, -2.6, 3.4, 0.50, "desk+chair", "进入→二次搜索"),
-        ("B4", "储物间", 18.0, 26.0, -8.8, -5.6, -0.70, "file cabinet+cardboard box（负分货物）", "跳过（负分）"),
+        ("B4", "休息区（诱饵）", 18.0, 26.0, -8.8, -5.6, 1.00, "desk+chair+monitor", "进入→搜索→退出（诱饵）"),
         ("B5", "机房", 7.0, 13.0, -8.8, -5.6, -0.70, "file cabinet+cardboard box（负分货物）", "跳过（负分）"),
     ],
     doors=[
-        ("D_b1", "B1", "H", -2.6, 4.0, DOOR_W, 0.88),
+        ("D_b1", "B1", "H", -2.6, 4.0, DOOR_W, -0.70),
         ("D_b2", "B2", "H", -2.6, 14.5, DOOR_W, 0.50),
         ("D_b5", "B5", "H", -5.6, 9.5, DOOR_W, -0.70),
-        ("D_b4", "B4", "H", -5.6, 20.5, DOOR_W, -0.70),
+        ("D_b4", "B4", "H", -5.6, 20.5, DOOR_W, 1.00),
         ("D_b3", "B3", "V", 18.5, 1.5, DOOR_W, 0.50),
     ],
     # +1 = thicken toward +axis (room side), -1 = toward -axis.
     door_side={"W_corr_n": 1, "W_corr_s": -1, "W_b2_e": 1},
     objects=[
-        ("b1_desk", "desk_brown", 2.10, 2.55, 0.0, 0.0, "env", "B1 西北角，整体贴墙"),
-        ("b1_ch1", "office_chair", 1.10, 1.35, 0.0, 0.0, "env", "随桌移到西北"),
-        ("b1_ch2", "office_chair", 2.10, 1.35, 0.0, 0.0, "env", "随桌移到西北"),
-        ("b1_ch3", "office_chair", 3.10, 1.35, 0.0, 0.0, "env", "随桌移到西北"),
-        ("b1_mon", "monitor_3", 2.70, 2.55, 0.0, 0.75, "env", "桌面"),
+        ("b1_cab1", "file_cabinet_large", 1.60, 2.72, 180.0, 0.0, "negative", "负分货物，北墙"),
+        ("b1_cab2", "file_cabinet_large", 3.20, 2.72, 180.0, 0.0, "negative", "负分货物，北墙"),
+        ("b1_box1", "cardboard_box", 6.20, 3.05, 0.0, 0.0, "negative", "负分货物，北墙东段"),
+        ("b1_box2", "cardboard_box", 6.90, 2.35, 20.0, 0.0, "negative", "负分货物，角落"),
         ("b5_cab1", "file_cabinet_large", 8.20, -8.10, 180.0, 0.0, "negative", "负分货物，靠南墙"),
         ("b5_cab2", "file_cabinet_large", 9.90, -8.10, 180.0, 0.0, "negative", "负分货物，靠南墙"),
         ("b5_box", "cardboard_box", 11.90, -8.30, 0.0, 0.0, "negative", "负分货物，角落"),
@@ -208,9 +208,10 @@ SCENES["env06_gate_nested"] = dict(
         ("b3_keyboard", "keyboard", 24.20, 0.60, 0.0, 0.75, "env", "桌面键盘，正向 office 物品"),
         ("b3_cup", "cup_yellow", 24.40, 0.80, 0.0, 0.75, "env", "桌面杯子，正向 office 物品"),
         ("b3_trash", "first_2015_trash_can", 23.60, 1.50, 0.0, 0.0, "env", "桌北侧垃圾桶，入口可见"),
-        ("b4_cab", "file_cabinet_large", 20.20, -7.70, 180.0, 0.0, "decoy", ""),
-        ("b4_box1", "cardboard_box", 22.60, -7.80, 0.0, 0.0, "decoy", ""),
-        ("b4_box2", "cardboard_box", 23.10, -7.80, 0.4, 0.0, "decoy", ""),
+        ("b4_desk", "desk_brown", 22.90, -7.00, 0.0, 0.0, "decoy", "诱饵：东半区桌，西侧进门通道完全留空"),
+        ("b4_ch1", "office_chair", 22.60, -7.95, 0.0, 0.0, "decoy", "桌南侧"),
+        ("b4_ch2", "office_chair", 23.40, -7.95, 0.0, 0.0, "decoy", "桌南侧"),
+        ("b4_mon", "monitor_3", 23.60, -6.95, 180.0, 0.75, "decoy", "桌面，面向门口"),
         ("n_hyd1", "fire_hydrant", 11.90, -2.825, 0.0, 0.0, "negative", "主走廊北墙，完全贴墙"),
         ("n_hyd2", "fire_hydrant", 22.60, -5.375, 0.0, 0.0, "negative", "主走廊南墙，完全贴墙"),
         ("n_cone1", "construction_cone", 6.40, -2.85, 0.0, 0.0, "negative", "主走廊北墙，完全贴墙"),
@@ -370,7 +371,7 @@ def draw_scene(scene, path):
     ax.grid(alpha=0.25)
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
-    ax.set_title(f"{scene['title']} — {scene['subtitle']}\n颜色=S_env(门口可见)；★=target；X=负分物；绿线=1.4 m 门洞", fontsize=11)
+    ax.set_title(f"{scene['title']} — {scene['subtitle']}\n颜色=S_env(门口可见)；★=target；X=负分物；绿线={DOOR_W:.2f} m 门洞", fontsize=11)
     plt.tight_layout()
     plt.savefig(path, dpi=130)
     plt.close(fig)
@@ -589,7 +590,7 @@ def main():
         draw_scene(scene, os.path.join(ROOT, "figures", f"{name}.png"))
         md += [f"## {name}", "", "**墙体（中心线坐标，厚 0.15、高 2.5）**", "",
                md_table(["id", "orient", "cx", "cy", "len", "note"], [[r[1], r[2], r[3], r[4], r[5], r[8]] for r in rw]), "",
-               "**门洞（宽 1.40 m）**", "",
+               f"**门洞（宽 {DOOR_W:.2f} m）**", "",
                md_table(["id", "room", "axis", "at", "center", "S_env"], [[r[1], r[2], r[3], r[4], r[5], r[7]] for r in rd]), "",
                "**房间**", "",
                md_table(["id", "name", "x0", "x1", "y0", "y1", "area", "S_env", "见", "期望"],

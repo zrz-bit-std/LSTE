@@ -1,6 +1,6 @@
 # 两个新场景的落地报告（bit1010 实机）
 
-日期：2026-11-06（v5 更新 2026-11-11）　目标：`env05_gate_ring`（A3 仓库梯子）、`env06_gate_nested`（绿植）
+日期：2026-11-06（v5 更新 2026-11-11；v6+ 更新 2026-11-17）　目标：`env05_gate_ring`（A3 仓库梯子）、`env06_gate_nested`（绿植）
 
 > **v5（2026-11-11）**：
 > 1. env05 A3 梯子东西向移到 `(5.40, −5.80)`，正对 `D_a3` 门心；纸箱分列梯子两侧，
@@ -19,16 +19,22 @@
 > 4. env06 B2 台面组西移 0.6 m；B2 椅子靠西墙；主走廊 3 个负分物完全贴墙；B2 垃圾桶北移避开房间侧墙；2026-11-16 已重渲染 `shots/` 的俯视图与 8/9 机位截图。
 > 5. env06 B3 桌 `(23.4, 0.6)`；椅子移到桌南侧 `(24.3, -0.3)` 以便观察；plant `(22.62, 0.60, z=0.75)` 放在桌面靠西边缘；桌面加 `b3_mon`/`b3_keyboard`/`b3_cup`，桌北侧加 `b3_trash` 补足 office 正向上下文；`plant.json` 改为 on the desk 且 key_objects 去掉 cardboard box、加入 keyboard/cup；观察点 `(20.8, 0.9)`。
 
+> **v6+（2026-11-17，B4/B1 角色互换）**：
+> 1. env06 **B4 改为休息区诱饵**：B1 的桌 + 2 椅 + 显示器搬到 B4 东半区，家具全部 `x≥21.65`，西侧进门通道完全留空；B4 门口 S_env=**1.00**；
+> 2. **B1 改为负分储物间**：B4 原 file cabinet + 2 个 cardboard box 搬到 B1，另加 1 个同款文件柜；B1 门口 S_env=**−0.68**；
+> 3. B5 保持负分，B2/B3/目标不变；`audit_scene.py` 的 `DOOR_LABELS` 已同步（D_b1 负分、D_b4 办公）。
+> 4. 2026-11-17 已重渲染 env06 的 10 个机位、俯视图/标注图和 `rooms_contact_sheet.png`（新增 `cam_b4`/`cam_b4in`）。
+
 ## 1. 交付物
 
 | 文件 | 位置 | 说明 |
 |---|---|---|
 | `env05_gate_ring.world` | `worlds/topo3.0_catch_mode/session_test/` | 14 段墙 + 27 个物体，无内嵌机器人 |
-| `env06_gate_nested.world` | 同上 | 21 段墙 + 25 个物体，含套间内门 |
+| `env06_gate_nested.world` | 同上 | 21 段墙 + 29 个物体，含套间内门 |
 | `ladder.json` | `model/Data_exchange/vlm_prompt/lab/` | 当前 env05 任务（A3 仓库梯子） |
 | `plant.json` | 同上 | 同上 |
 | 生成/校验脚本 | `/home/zrz/lste_scene_impl/` | `build_design.py`、`build_world.py`、`validate_world.py`、`audit_scene.py`、`sweep_doors.py` |
-| 机位截图 | `/home/zrz/lste_scene_impl/shots/env05_gate_ring/`、`shots/env06_gate_nested/` | env05 9 机位 + 俯视/标注/拼图；env06 8 机位 + 俯视/标注/拼图 |
+| 机位截图 | `/home/zrz/lste_scene_impl/shots/env05_gate_ring/`、`shots/env06_gate_nested/` | env05 9 机位 + 俯视/标注/拼图；env06 10 机位（含 B4 诱饵 / B1 负分）+ 俯视/标注/拼图 |
 | 审计报告 | `/home/zrz/lste_scene_impl/audit_report.md` | 可通行性 + 魔术值 + 观望 + 语义 |
 | 实验记录 | `/home/zrz/lste_scene_impl/logs/env05_summary.txt`、`env06_summary.txt` | 每次实验的最终快照 |
 
@@ -69,12 +75,13 @@
 | A2 | desk, chair, monitor | **−0.45** | 跳过 |
 | A3 | shelf | **0.18** | 进入（目标房） |
 | A4 | — | **0.00** | 跳过 |
-| B1 | desk, chair, monitor | **0.97** | 进入（诱饵） |
-| B2 | desk, chair | **0.73** | 进入（中转） |
-| B3 | desk, chair | **0.73** | 进入（目标房） |
-| B4 / B5 | file cabinet, cardboard box | **−0.69** | 跳过（负分货物） |
+| B1 | file cabinet, cardboard box | **−0.68** | 跳过（负分） |
+| B2 | desk, chair | **1.00** | 进入（中转） |
+| B3 | desk, chair | **1.00** | 进入（目标房） |
+| B4 | desk, chair, monitor | **1.00** | 进入（诱饵） |
+| B5 | file cabinet, cardboard box | **−0.68** | 跳过（负分货物） |
 
-- 阈值扫描（`audit_report.md`）：env06 在 θ≤0.73 都能进入目标房；
+- 阈值扫描（`audit_report.md`）：env06 在 θ≤0.90 都能进入目标房（B2/B3/B4）；
   env05 的 A3 只有 0.18，θ≥0.20 就漏目标房 → **硬阈值不可行，必须软降权 + 兜底**。
 - 走廊视图若含 `fire hydrant`：env05 −0.32、env06 −0.54（负分生效）。
 - 目标房首帧命中时状态机动作：`target_place` ✓。
